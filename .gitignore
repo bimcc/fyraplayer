@@ -1,0 +1,15 @@
+ref/
+tests/
+
+# Media samples
+examples/testvideo/
+
+# Build / deps / logs
+/dist/
+/node_modules/
+/coverage/
+*.log
+*.tmp
+*.tsbuildinfo
+.DS_Store
+.env*

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>FyraPlayer Demo</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 16px;
+      }
+      .player-shell {
+        position: relative;
+        width: 100%;
+        max-width: 960px;
+      }
+      video {
+        width: 100%;
+        background: #000;
+        aspect-ratio: 16 / 9;
+        min-height: 360px;
+      }
+      .overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.35);
+        color: #fff;
+        font-size: 14px;
+        gap: 8px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+      .overlay.visible {
+        opacity: 1;
+      }
+      .spinner {
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-top: 3px solid #fff;
+        border-radius: 50%;
+        width: 28px;
+        height: 28px;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+      .controls {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .stats {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #333;
+      }
+      .log {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #333;
+        background: #f5f5f5;
+        border: 1px solid #ddd;
+        padding: 8px;
+        white-space: pre-wrap;
+        min-height: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>FyraPlayer Demo</h1>
+    <div class="player-shell">
+      <video id="player" controls></video>
+      <div id="overlay" class="overlay">
+        <div class="spinner"></div>
+        <div id="overlay-text"></div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="btn-play">Play</button>
+      <button id="btn-pause">Pause</button>
+      <select id="source-select"></select>
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+        <input id="toggle-skin" type="checkbox" checked /> 启用皮肤
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+        <input id="toggle-native" type="checkbox" /> 隐藏浏览器控件
+      </label>
+    </div>
+    <div class="controls" style="margin-top:8px;">
+      <input id="input-url" type="text" placeholder="输入自定义 URL" style="width:400px;" />
+      <select id="type-select">
+        <option value="auto">Auto Detect</option>
+        <option value="hls">HLS</option>
+        <option value="dash">DASH</option>
+        <option value="ws-raw">FLV/WS</option>
+        <option value="gb28181">GB28181</option>
+        <option value="file">MP4/TS</option>
+        <option value="webrtc">WebRTC (WHEP/WHIP)</option>
+      </select>
+      <button id="btn-load">Load URL</button>
+    </div>
+    <div class="controls" style="margin-top:8px;flex-wrap:wrap;gap:12px;">
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
+        <label>GB Invite URL <input id="gb-invite" type="text" placeholder="https://example.com/api/gb/invite" style="width:260px;"></label>
+        <label>Device ID <input id="gb-device" type="text" placeholder="34020000001320000001"></label>
+        <label>Channel ID <input id="gb-channel" type="text" placeholder="34020000001320000001"></label>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
+        <label>Format
+          <select id="gb-format">
+            <option value="annexb">AnnexB</option>
+            <option value="ts">TS</option>
+            <option value="ps">PS</option>
+          </select>
+        </label>
+        <label>Video <select id="gb-video"><option value="h264">H.264</option><option value="h265">H.265</option></select></label>
+        <label>Audio
+          <select id="gb-audio">
+            <option value="">自动</option>
+            <option value="aac">AAC</option>
+            <option value="pcma">PCMA</option>
+            <option value="pcmu">PCMU</option>
+            <option value="opus">Opus</option>
+          </select>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;">WebTransport <input id="gb-wt" type="checkbox" /></label>
+      </div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="stats" id="ts-note"></div>
+    <div class="stats" id="wc-support"></div>
+    <div class="log" id="log"></div>
+    <script type="module" src="/app.ts"></script>
+  </body>
+</html>

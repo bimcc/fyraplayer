@@ -1,0 +1,39 @@
+{
+  "name": "fyraplayer",
+  "version": "0.1.0",
+  "description": "Modern, extensible low-latency web player (WebRTC, LL-HLS, WS+WASM) with plugin/middleware architecture.",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "bundle:examples": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm",
+    "bundle:examples:watch": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm --watch",
+    "dev:vite": "vite --config vite.config.ts",
+    "dev:vite:host": "vite --config vite.config.ts --host --port 3000",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "dependencies": {
+    "dashjs": "^4.7.4",
+    "flv.js": "^1.6.2",
+    "hls.js": "^1.4.12",
+    "mp4box": "^0.5.4",
+    "mpegts.js": "^1.7.3"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.10.5",
+    "esbuild": "^0.19.12",
+    "fast-check": "^4.5.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.12"
+  }
+}

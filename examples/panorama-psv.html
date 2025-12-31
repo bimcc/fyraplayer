@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fyra + PSV Panorama Demo</title>
+  <style>
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #111; color: #eee; }
+    #app { width: 100%; height: 100%; display: grid; grid-template-rows: auto 1fr; }
+    #controls { padding: 8px 12px; background: #1c1c1c; display: flex; gap: 8px; align-items: center; }
+    #psv { width: 100%; height: 100%; min-height: 360px; }
+    #fyra-video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    button { background: #333; color: #eee; border: 1px solid #444; padding: 6px 10px; cursor: pointer; }
+    button:hover { background: #444; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="controls">
+      <button id="play">Play</button>
+      <button id="pause">Pause</button>
+      <span id="status">idle</span>
+    </div>
+    <div id="psv"></div>
+  </div>
+  <video id="fyra-video" muted playsinline></video>
+
+  <script type="module">
+    import PhotoSphereViewer from 'https://unpkg.com/@photo-sphere-viewer/core@5.7.4/dist/photo-sphere-viewer.esm.js';
+    import { FyraPsvAdapter } from '../dist/index.js';
+
+    // Demo sources (public test assets). Replace with your own as needed.
+    const sources = [
+      { type: 'hls', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8', preferTech: 'hlsdash' },
+      { type: 'dash', url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd', preferTech: 'hlsdash' },
+      { type: 'ws-raw', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv', codec: 'h264', transport: 'flv', preferTech: 'ws-raw' }
+    ];
+
+    const videoEl = document.getElementById('fyra-video');
+    let psv = null;
+
+    async function init() {
+      PhotoSphereViewer.registerPlugin(FyraPsvAdapter);
+      psv = new PhotoSphereViewer({
+        container: document.getElementById('psv'),
+        panorama: 'https://photo-sphere-viewer-data.netlify.app/assets/sphere.jpg', // placeholder
+        navbar: false,
+        plugins: [
+          [FyraPsvAdapter, {
+            video: videoEl,
+            sources,
+            techOrder: ['webrtc', 'ws-raw', 'hlsdash']
+          }]
+        ]
+      });
+
+      psv.on('ready', () => setStatus('ready'));
+      psv.on('error', (e) => setStatus('error: ' + e?.message));
+    }
+
+    function setStatus(text) {
+      document.getElementById('status').textContent = text;
+    }
+
+    document.getElementById('play').addEventListener('click', async () => {
+      try {
+        await psv?.plugin(FyraPsvAdapter)?.init();
+        await psv?.startAutoRotate?.(0.05);
+        setStatus('playing');
+      } catch (e) {
+        setStatus('error: ' + e?.message);
+      }
+    });
+
+    document.getElementById('pause').addEventListener('click', () => {
+      psv?.stopAutoRotate?.();
+      psv?.plugin(FyraPsvAdapter)?.getPlayer()?.pause();
+      setStatus('paused');
+    });
+
+    init().catch((e) => setStatus('init error: ' + e?.message));
+  </script>
+</body>
+</html>

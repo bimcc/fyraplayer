@@ -1,0 +1,57 @@
+
+###############################################
+# General
+
+# Log level
+logLevel: info
+
+###############################################
+# RTSP Server
+
+rtsp: yes
+rtspAddress: :8554
+
+###############################################
+# RTMP Server
+
+rtmp: yes
+rtmpAddress: :1935
+
+###############################################
+# HLS Server
+
+hls: yes
+hlsAddress: :8888
+
+###############################################
+# WebRTC Server
+
+webrtc: yes
+webrtcAddress: :8889
+# Critical for Docker on Windows/Mac: Advertise localhost IP for ICE candidates
+webrtcAdditionalHosts: [ "127.0.0.1" ]
+# Fix ICE UDP ports to match Docker exposed ports
+# If we don't fix this, it picks random ports that are blocked by Docker
+webrtcICEUDPPorts: [ 8189 ]
+
+###############################################
+# API
+
+api: yes
+apiAddress: :9997
+
+###############################################
+# Paths
+
+paths:
+  # 推流路径（OBS/rtmp://localhost:1935/test）
+  test:
+    # 当有流发布时，将音频转码为 Opus，视频 copy，转推到 test-webrtc
+    runOnReady: >
+      ffmpeg -nostdin -i rtsp://localhost:8554/test
+      -c:v copy -c:a libopus -ar 48000 -ac 2
+      -f rtsp rtsp://localhost:8554/test-webrtc
+    runOnReadyRestart: yes
+
+  # WebRTC 播放路径（浏览器 WHEP/WHIP 拉流）
+  test-webrtc:

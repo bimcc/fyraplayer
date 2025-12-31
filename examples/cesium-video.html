@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fyra + Cesium + KLV Demo</title>
+  <style>
+    html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
+    #hud { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.6); color: #fff; padding: 8px 12px; z-index: 10; }
+    #fyra-video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  </style>
+  <link rel="stylesheet" href="https://unpkg.com/cesium@1.114.0/Build/Cesium/Widgets/widgets.css">
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div id="hud">status: <span id="status">idle</span></div>
+  <video id="fyra-video" muted playsinline></video>
+
+  <script type="module">
+    import { Viewer, UrlTemplateImageryProvider } from 'https://unpkg.com/cesium@1.114.0/Build/Cesium/Cesium.js';
+    import { FyraCesiumAdapter, KlvBridge } from '../dist/index.js';
+    // NOTE: @beeviz/cesium and @beeviz/klv should be provided by your bundler/app.
+    // import { VideoSource, UAVVisualizer } from '@beeviz/cesium';
+    // import { KLVStreamManager } from '@beeviz/klv';
+
+    const statusEl = document.getElementById('status');
+    const videoEl = document.getElementById('fyra-video');
+
+    // Demo sources (public test assets). Replace with your own.
+    const sources = [
+      { type: 'hls', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8', preferTech: 'hlsdash' },
+      { type: 'dash', url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd', preferTech: 'hlsdash' },
+      { type: 'ws-raw', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv', codec: 'h264', transport: 'flv', preferTech: 'ws-raw' }
+    ];
+
+    function setStatus(t) { statusEl.textContent = t; }
+
+    async function initCesium() {
+      const viewer = new Viewer('cesiumContainer', {
+        imageryProvider: new UrlTemplateImageryProvider({ url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' }),
+        baseLayerPicker: false,
+        timeline: false,
+        animation: false
+      });
+      return viewer;
+    }
+
+    async function initFyraCesium(viewer) {
+      // Placeholder KLV parser; replace with @beeviz/klv usage.
+      const bridge = new KlvBridge({
+        parse: (evt) => ({ pts: evt.pts, rawLen: evt.raw?.length ?? 0 }),
+        onData: (parsed) => setStatus(`metadata pts=${parsed.pts} len=${parsed.rawLen}`),
+        onError: (err) => console.warn('KLV parse error', err)
+      });
+
+      const adapter = new FyraCesiumAdapter({
+        video: videoEl,
+        sources,
+        techOrder: ['ws-raw', 'hlsdash'],
+        onMetadata: (evt) => bridge.handle(evt),
+        onReady: () => setStatus('ready')
+      });
+      await adapter.init();
+
+      // TODO: Use @beeviz/cesium VideoSource in your app to wrap videoEl and apply to materials/imagery layers.
+
+      setStatus('playing');
+      return adapter;
+    }
+
+    (async () => {
+      try {
+        const viewer = await initCesium();
+        await initFyraCesium(viewer);
+      } catch (e) {
+        setStatus('error: ' + e?.message);
+        console.error(e);
+      }
+    })();
+  </script>
+</body>
+</html>
