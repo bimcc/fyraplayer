@@ -1,9 +1,9 @@
 ﻿import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig } from '../types.js';
+import { BufferPolicy, FileSource, MetadataEvent, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig } from '../types.js';
 import mpegts from 'mpegts.js';
 import { WebCodecsDecoder } from './wsRaw/webcodecsDecoder.js';
 import { Renderer } from './wsRaw/renderer.js';
-import { Demuxer, splitAnnexBNalus } from './wsRaw/demuxer.js';
+import { Demuxer, splitAnnexBNalus, type DemuxerCallbacks } from './wsRaw/demuxer.js';
 import { probeWebCodecs } from '../utils/webcodecs.js';
 
 // MP4Box type declaration - should be installed via npm: npm install mp4box
@@ -25,6 +25,22 @@ export class FileTech extends AbstractTech {
   private wcMp4Decoder: VideoDecoder | null = null;
   private wcMp4Renderer: Renderer | null = null;
   private mp4BoxReady = false;
+  
+  // Metadata extraction state
+  private metadataEnabled = false;
+  private detectedPrivateDataPids = new Set<number>();
+  private readonly mpegtsConfig = {
+    enableStashBuffer: true,
+    stashInitialSize: 1024 * 1024,
+    accurateSeek: true,
+    autoCleanupSourceBuffer: true,
+    autoCleanupMaxBackwardDuration: 30,
+    autoCleanupMinBackwardDuration: 15,
+    fixAudioTimestampGap: true,
+    lazyLoad: false,
+    seekType: 'range' as const,
+    reuseRedirectedURL: true
+  };
 
   canPlay(source: Source): boolean {
     return source.type === 'file';
@@ -45,13 +61,26 @@ export class FileTech extends AbstractTech {
     this.reconnect = opts.reconnect;
     this.metrics = opts.metrics;
     this.video = opts.video;
+    const fileSource = source as FileSource;
     const lower = source.url.toLowerCase();
-    const isTs = lower.endsWith('.ts');
-    const isMp4 = lower.endsWith('.mp4');
+    const isBlobUrl = source.url.startsWith('blob:');
+    
+    // Use container hint for blob URLs, otherwise detect from extension
+    const container = fileSource.container;
+    const isTs = container === 'ts' || (!isBlobUrl && (lower.endsWith('.ts') || lower.includes('.ts?')));
+    const isMp4 = container === 'mp4' || (!isBlobUrl && (lower.endsWith('.mp4') || lower.includes('.mp4?')));
+    
     this.cleanup();
+    
+    // Check metadata config from source
+    this.metadataEnabled = !!(fileSource.metadata?.privateData?.enable);
 
-    // TS + WebCodecs
-    if (isTs && opts.webCodecs?.enable && WebCodecsDecoder.isSupported()) {
+    // For blob URLs (local files), prefer mpegts.js for TS as it handles playback better
+    // WebCodecs path is better for streaming scenarios
+    const useWebCodecsForTs = isTs && opts.webCodecs?.enable && WebCodecsDecoder.isSupported() && !isBlobUrl;
+
+    // TS + WebCodecs (only for non-blob URLs)
+    if (useWebCodecsForTs) {
       try {
         await this.loadTsWithWebCodecs(source.url, opts.video);
         this.bus.emit('ready');
@@ -80,13 +109,16 @@ export class FileTech extends AbstractTech {
 
     // TS fallback via mpegts.js
     if (isTs && mpegts.isSupported()) {
+      console.log('[file] Using mpegts.js for TS playback, url:', source.url);
       this.tsPlayer = mpegts.createPlayer({
         type: 'mpegts',
         url: source.url,
         isLive: false
-      });
+      }, this.mpegtsConfig);
       this.tsPlayer.attachMediaElement(this.video);
+      console.log('[file] mpegts.js attached to video element:', this.video);
       this.tsPlayer.load();
+      console.log('[file] mpegts.js load() called');
       this.bus.emit('ready');
     } else {
       // Native video/MSE
@@ -94,6 +126,28 @@ export class FileTech extends AbstractTech {
       await this.video.load();
       this.bus.emit('ready');
     }
+  }
+
+  override async play(): Promise<void> {
+    if (this.tsPlayer) {
+      try {
+        this.tsPlayer.play();
+      } catch {
+        /* ignore */
+      }
+    }
+    await super.play();
+  }
+
+  override async pause(): Promise<void> {
+    if (this.tsPlayer) {
+      try {
+        this.tsPlayer.pause();
+      } catch {
+        /* ignore */
+      }
+    }
+    await super.pause();
   }
 
   override async destroy(): Promise<void> {
@@ -135,6 +189,7 @@ export class FileTech extends AbstractTech {
     this.wcRenderer?.destroy();
     this.wcRenderer = null;
     this.wcDemuxer = null;
+    this.detectedPrivateDataPids.clear();
   }
 
   private cleanupMp4WebCodecs(): void {
@@ -152,7 +207,30 @@ export class FileTech extends AbstractTech {
     this.cleanupWebCodecs();
     this.wcAbort = new AbortController();
     this.wcRenderer = new Renderer(video);
-    this.wcDemuxer = new Demuxer('ts');
+    
+    // Create demuxer callbacks for metadata extraction
+    const callbacks: DemuxerCallbacks | undefined = this.metadataEnabled ? {
+      onPrivateData: (pid: number, data: Uint8Array, pts: number) => {
+        const event: MetadataEvent = {
+          type: 'private-data',
+          raw: data,
+          pts,
+          pid
+        };
+        this.bus.emit('metadata', event);
+      },
+      onPrivateDataDetected: (pid: number, streamType: number) => {
+        this.detectedPrivateDataPids.add(pid);
+        console.log(`[file] Detected private data PID: 0x${pid.toString(16).toUpperCase()}, stream_type: 0x${streamType.toString(16)}`);
+      }
+    } : undefined;
+    
+    // Use full Demuxer with TS format and metadata callbacks
+    this.wcDemuxer = new Demuxer({
+      format: 'ts',
+      callbacks
+    });
+    
     let decoded = 0;
     let decodeErrors = 0;
     this.wcDecoder = new WebCodecsDecoder((frame) => {
@@ -168,6 +246,8 @@ export class FileTech extends AbstractTech {
       if (done || !value) break;
       const frames = this.wcDemuxer.demux(value.buffer);
       for (const f of frames) {
+        // Only process video frames
+        if (f.track !== 'video') continue;
         // Ensure first frame is keyframe; otherwise fallback
         if (decoded === 0 && !f.isKey) continue;
         try {
@@ -290,5 +370,45 @@ export class FileTech extends AbstractTech {
       return;
     }
     throw new Error('MP4Box not available. Please install via: npm install mp4box');
+  }
+
+  override async seek(time: number): Promise<void> {
+    if (this.tsPlayer) {
+      // mpegts.js seek handling
+      // mpegts.js internally handles seeking by:
+      // 1. Flushing current buffer
+      // 2. Seeking to nearest keyframe
+      // 3. Re-buffering from that point
+      // We just need to set currentTime and mpegts.js will handle the rest
+      if (this.video) {
+        // Pause briefly to allow buffer flush
+        const wasPlaying = !this.video.paused;
+        
+        // Set the time - mpegts.js hooks into video element's seeking events
+        this.video.currentTime = time;
+        
+        // For live streams or when seeking fails, mpegts.js may need a reload
+        // But for VOD files, direct currentTime setting should work
+        
+        // Resume if was playing
+        if (wasPlaying) {
+          try {
+            await this.video.play();
+          } catch (e) {
+            // Autoplay may be blocked, ignore
+          }
+        }
+      }
+      return;
+    }
+    
+    // For WebCodecs paths, seeking is not supported (would need to re-fetch and re-demux)
+    if (this.wcDecoder || this.wcMp4Decoder) {
+      console.warn('[file] Seeking not supported in WebCodecs mode');
+      return;
+    }
+    
+    // For native video/MSE, use default implementation
+    await super.seek(time);
   }
 }

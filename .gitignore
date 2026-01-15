@@ -3,6 +3,7 @@ tests/
 
 # Media samples
 examples/testvideo/
+testvideo/
 
 # Build / deps / logs
 /dist/

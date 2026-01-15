@@ -1,60 +1,83 @@
-# Fyra + Cesium Integration Guide (with KLV)
+# FyraPlayer + Cesium 集成指南
 
-Goal: use FyraPlayer for low-latency playback, feed video to Cesium (via @beeviz/cesium VideoSource), and bridge metadata to @beeviz/klv for attitude/position/time sync.
+使用 FyraPlayer 进行低延迟播放，将视频输出到 Cesium（通过 @beeviz/cesium），并桥接元数据到 @aspect/openklv 进行姿态/位置/时间同步。
 
-## What you need
-- FyraPlayer (this repo build).
-- `@beeviz/cesium` (VideoSource, UAVVisualizer, projection tools).
-- `@beeviz/klv` for MISB/KLV parsing and time sync.
+## 依赖项
 
-## Adapter
-- `src/integrations/cesium/FyraCesiumAdapter.ts`: runs FyraPlayer, exposes `videoEl`, forwards metadata hook.
-- `src/integrations/metadata/KlvBridge.ts`: bridge Fyra `metadata` events (raw private-data/SEI payload + pts) into `@beeviz/klv` parser; you provide parse/onData logic.
+- `fyraplayer` - 播放器核心
+- `@beeviz/cesium` - Cesium 集成（包含 FyraPlayerCesiumAdapter、VideoSource、UAVVisualizer）
+- `@aspect/openklv` - KLV/MISB 元数据解析
 
-## Quick start (sketch)
-```ts
-import { FyraCesiumAdapter } from 'fyraplayer';
-import { KlvBridge } from 'fyraplayer';
-import { KLVStreamManager } from '@beeviz/klv';
-import { VideoSource, UAVVisualizer } from '@beeviz/cesium';
+## 适配器位置
 
-const videoEl = document.querySelector('#fyra-video') as HTMLVideoElement;
+> **重要**：Cesium 适配器**不在 fyraplayer 包内**，而是在 `@beeviz/cesium` 中。
+
+| 组件                      | 所在包                        | 说明                              |
+| ------------------------- | ----------------------------- | --------------------------------- |
+| `FyraPlayerCesiumAdapter` | `@beeviz/cesium`              | 将 FyraPlayer 视频输出接入 Cesium |
+| `KlvBridge`               | `fyraplayer/plugins/metadata` | 元数据事件桥接                    |
+
+## 快速开始
+
+```typescript
+// 适配器从 @beeviz/cesium 导入（不是 fyraplayer）
+import {
+  FyraPlayerCesiumAdapter,
+  VideoSource,
+  UAVVisualizer,
+} from "@beeviz/cesium";
+import { KlvBridge } from "fyraplayer/plugins/metadata";
+import { KLVStreamManager } from "@aspect/openklv";
+
+const videoEl = document.querySelector("#video") as HTMLVideoElement;
 const sources = [
-  { type: 'ws-raw', url: 'wss://example.com/live.ts', codec: 'h264', transport: 'ts', metadata: { privateData: { enable: true } } }
+  {
+    type: "ws-raw",
+    url: "wss://example.com/live.ts",
+    codec: "h264",
+    transport: "ts",
+    metadata: { privateData: { enable: true } },
+  },
 ];
 
+// KLV 解析
 const klvManager = new KLVStreamManager();
 const bridge = new KlvBridge({
   parse: (evt) => klvManager.pushPacket(evt.raw, evt.pts),
   onData: (result) => {
-    // result may contain attitude/position; feed to Cesium visualizers
+    // 姿态/位置数据，传给 Cesium 可视化组件
     uav.updatePose(result);
   },
-  onError: (err) => console.warn('KLV parse error', err)
+  onError: (err) => console.warn("KLV parse error", err),
 });
 
-const adapter = new FyraCesiumAdapter({
+// 创建适配器
+const adapter = new FyraPlayerCesiumAdapter({
   video: videoEl,
   sources,
-  techOrder: ['ws-raw', 'hlsdash'],
+  techOrder: ["ws-raw", "hlsdash"],
   onMetadata: (evt) => bridge.handle(evt),
-  // frameHook: (frame) => { /* VideoFrame -> custom texture upload (WebCodecs path) */ }
 });
 
 await adapter.init();
 
-// Cesium side
+// Cesium 侧
 const videoSource = new VideoSource(videoEl);
-const uav = new UAVVisualizer(viewer, {/* options */});
-// Use videoSource.createTexture(viewer.scene.context) for materials/imagery layers
+const uav = new UAVVisualizer(viewer, {
+  /* options */
+});
 ```
 
-## Responsibilities
-- Fyra: pull/dec/handle fallback; emit `metadata` events with raw payload+pts; manage reconnect.
-- KlvBridge + @beeviz/klv: parse/sync metadata, produce pose/geo/time outputs.
-- @beeviz/cesium: consume `videoEl` as texture; render UAV/trajectory/FOV using parsed metadata.
+## 职责划分
 
-## Tips
-- Enable metadata extraction on the ws-raw Source: `metadata.privateData.enable` or `metadata.sei.enable`.
-- If only detection is desired first, use `detectOnly` and later call `enableMetadataExtraction()` on ws-raw tech (via player API).
-- Keep Fyra core free of KLV logic; all semantic parsing stays in @beeviz/klv via KlvBridge.
+| 层              | 职责                                                           |
+| --------------- | -------------------------------------------------------------- |
+| FyraPlayer      | 拉流/解码/协议降级，发出 `metadata` 事件（原始 payload + pts） |
+| KlvBridge       | 事件转发，错误处理                                             |
+| @aspect/openklv | KLV 语义解析、时间同步，输出姿态/位置数据                      |
+| @beeviz/cesium  | 消费 videoEl 作为纹理，渲染 UAV/轨迹/视锥体                    |
+
+## 提示
+
+- 在 ws-raw Source 上启用元数据提取：`metadata.privateData.enable` 或 `metadata.sei.enable`
+- FyraPlayer 核心不包含 KLV 解析逻辑，所有语义解析在 @aspect/openklv 中通过 KlvBridge 完成

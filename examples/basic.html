@@ -107,6 +107,8 @@
         <option value="webrtc">WebRTC (WHEP/WHIP)</option>
       </select>
       <button id="btn-load">Load URL</button>
+      <input type="file" id="file-input" accept="video/*,.ts,.mp4,.mkv,.webm,.flv" style="display:none;" />
+      <button id="btn-open-file">📁 打开本地文件</button>
     </div>
     <div class="controls" style="margin-top:8px;flex-wrap:wrap;gap:12px;">
       <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
@@ -139,6 +141,6 @@
     <div class="stats" id="ts-note"></div>
     <div class="stats" id="wc-support"></div>
     <div class="log" id="log"></div>
-    <script type="module" src="/app.ts"></script>
+    <script type="module" src="./bundle.js"></script>
   </body>
 </html>

@@ -18,7 +18,11 @@
 
   <script type="module">
     import { Viewer, UrlTemplateImageryProvider } from 'https://unpkg.com/cesium@1.114.0/Build/Cesium/Cesium.js';
-    import { FyraCesiumAdapter, KlvBridge } from '../dist/index.js';
+    // NOTE: FyraCesiumAdapter should be imported from @beeviz/cesium (external project)
+    // import { FyraCesiumAdapter } from '@beeviz/cesium';
+    import { KlvBridge } from '../dist/plugins/metadata/index.js';
+    // For demo purposes, we'll create a placeholder
+    const FyraCesiumAdapter = class { constructor(opts) { this.opts = opts; } async init() {} };
     // NOTE: @beeviz/cesium and @beeviz/klv should be provided by your bundler/app.
     // import { VideoSource, UAVVisualizer } from '@beeviz/cesium';
     // import { KLVStreamManager } from '@beeviz/klv';

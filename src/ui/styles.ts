@@ -1,6 +1,7 @@
 /**
  * FyraPlayer UI Shell Styles
  * Modern, responsive player UI with smooth animations
+ * Layout: Progress bar on top (full width), controls below
  */
 export const UI_SHELL_STYLES = `
   :host { 
@@ -12,7 +13,7 @@ export const UI_SHELL_STYLES = `
     -webkit-user-select: none;
   }
   
-  /* Fullscreen video centering - applied to host container */
+  /* Fullscreen video centering */
   :host(:fullscreen),
   :host(:-webkit-full-screen),
   :host(:-moz-full-screen),
@@ -41,7 +42,7 @@ export const UI_SHELL_STYLES = `
     cursor: pointer;
   }
   
-  /* Overlay for spinner and big play button - centered absolutely */
+  /* Overlay for spinner and big play button */
   .overlay { 
     position: absolute; 
     inset: 0; 
@@ -52,7 +53,7 @@ export const UI_SHELL_STYLES = `
     z-index: 10;
   }
   
-  /* Loading spinner - absolutely centered */
+  /* Loading spinner */
   .spinner { 
     position: absolute;
     top: 50%;
@@ -73,7 +74,7 @@ export const UI_SHELL_STYLES = `
   
   .spinner.show { display: block; }
   
-  /* Big play button - absolutely centered */
+  /* Big play button */
   .big-play { 
     position: absolute;
     top: 50%;
@@ -129,16 +130,17 @@ export const UI_SHELL_STYLES = `
   
   .cover.show { opacity: 1; }
   
-  /* Bottom control bar */
+  /* Bottom control area */
   .bottom { 
     width: 100%; 
-    padding: 0 16px 12px;
     box-sizing: border-box; 
     pointer-events: none;
     background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.7) 100%);
     opacity: 1;
     transition: opacity 0.3s ease, transform 0.3s ease;
     z-index: 20;
+    display: flex;
+    flex-direction: column;
   }
   
   .shell.hide-controls .bottom {
@@ -146,43 +148,27 @@ export const UI_SHELL_STYLES = `
     transform: translateY(10px);
   }
   
-  /* Progress bar row */
+  /* Progress bar row - FULL WIDTH on top */
   .progress-row { 
     display: flex; 
     align-items: center; 
-    gap: 12px; 
-    color: #fff; 
-    font-size: 12px;
-    font-weight: 500;
-    margin-bottom: 8px; 
-    pointer-events: auto;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-  }
-  
-  .time {
-    min-width: 90px;
-    font-variant-numeric: tabular-nums;
-  }
-  
-  /* Control buttons bar */
-  .bar { 
-    display: flex; 
-    align-items: center; 
-    gap: 8px; 
+    width: 100%;
+    padding: 8px 0 0 0;
     pointer-events: auto;
   }
   
-  /* Progress slider */
+  /* Progress slider - full width */
   .progress { 
     flex: 1; 
     appearance: none;
     -webkit-appearance: none;
     height: 4px; 
-    border-radius: 2px; 
+    border-radius: 0; 
     background: rgba(255,255,255,0.3); 
     outline: none; 
     cursor: pointer;
     transition: height 0.15s ease;
+    margin: 0;
   }
   
   .progress:hover {
@@ -215,6 +201,26 @@ export const UI_SHELL_STYLES = `
     box-shadow: 0 1px 4px rgba(0,0,0,0.4);
   }
   
+  /* Control buttons bar */
+  .bar { 
+    display: flex; 
+    align-items: center; 
+    gap: 4px; 
+    padding: 6px 12px 10px;
+    pointer-events: auto;
+  }
+  
+  /* Time label in toolbar */
+  .time {
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    white-space: nowrap;
+    margin-left: 4px;
+  }
+  
   /* Buttons */
   button {
     pointer-events: auto;
@@ -222,7 +228,7 @@ export const UI_SHELL_STYLES = `
     color: #fff;
     border: none;
     border-radius: 4px;
-    padding: 8px;
+    padding: 6px;
     font-size: 13px;
     font-weight: 500;
     line-height: 1;
@@ -231,8 +237,8 @@ export const UI_SHELL_STYLES = `
     justify-content: center;
     cursor: pointer;
     transition: background 0.15s ease, transform 0.1s ease;
-    min-width: 36px;
-    height: 36px;
+    min-width: 32px;
+    height: 32px;
   }
   
   button:hover { 
@@ -250,8 +256,8 @@ export const UI_SHELL_STYLES = `
     color: #fff;
     border: 1px solid rgba(255,255,255,0.2);
     border-radius: 4px;
-    padding: 6px 8px;
-    font-size: 12px;
+    padding: 4px 6px;
+    font-size: 11px;
     cursor: pointer;
     outline: none;
   }
@@ -278,7 +284,7 @@ export const UI_SHELL_STYLES = `
   
   .vol-pop { 
     position: absolute; 
-    bottom: 44px; 
+    bottom: 40px; 
     left: 50%; 
     transform: translateX(-50%) scale(0.9);
     padding: 12px 8px;
@@ -300,7 +306,7 @@ export const UI_SHELL_STYLES = `
   
   .vol {
     width: 6px;
-    height: 100px;
+    height: 80px;
     writing-mode: vertical-lr;
     direction: rtl;
     appearance: none;
@@ -314,8 +320,8 @@ export const UI_SHELL_STYLES = `
   .vol::-webkit-slider-thumb {
     appearance: none;
     -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: #fff;
     cursor: pointer;
@@ -323,8 +329,8 @@ export const UI_SHELL_STYLES = `
   }
   
   .vol::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: #fff;
     cursor: pointer;
@@ -336,17 +342,17 @@ export const UI_SHELL_STYLES = `
     position: absolute; 
     right: 12px; 
     top: 12px; 
-    max-height: 240px; 
-    width: 320px; 
+    max-height: 200px; 
+    width: 280px; 
     overflow: auto; 
     background: rgba(0,0,0,0.9);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     color: #e0e0e0; 
-    font-size: 11px;
+    font-size: 10px;
     font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-    padding: 12px; 
-    border-radius: 8px; 
+    padding: 10px; 
+    border-radius: 6px; 
     pointer-events: auto; 
     opacity: 0;
     visibility: hidden;
@@ -371,34 +377,10 @@ export const UI_SHELL_STYLES = `
     border-bottom: none;
   }
   
-  /* Tooltip for buttons */
-  button[data-tip]::after {
-    content: attr(data-tip);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 4px 8px;
-    background: rgba(0,0,0,0.9);
-    color: #fff;
-    font-size: 11px;
-    border-radius: 4px;
-    white-space: nowrap;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.15s, visibility 0.15s;
-    pointer-events: none;
-  }
-  
-  button[data-tip]:hover::after {
-    opacity: 1;
-    visibility: visible;
-  }
-  
   /* Speed menu */
   .speed-menu {
     position: absolute;
-    bottom: 44px;
+    bottom: 40px;
     left: 50%;
     transform: translateX(-50%) scale(0.9);
     background: rgba(28,28,28,0.95);
@@ -422,14 +404,81 @@ export const UI_SHELL_STYLES = `
   .speed-menu button {
     display: block;
     width: 100%;
-    padding: 8px 16px;
+    padding: 6px 14px;
     text-align: center;
-    font-size: 13px;
+    font-size: 12px;
   }
   
   .speed-menu button.active {
     background: rgba(255,255,255,0.15);
   }
+  
+  /* ========== MORE MENU (三个点折叠菜单) ========== */
+  .more-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  
+  .more-menu {
+    position: absolute;
+    bottom: 40px;
+    right: 0;
+    background: rgba(28,28,28,0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 8px;
+    padding: 4px;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.9);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    z-index: 30;
+    min-width: 120px;
+  }
+  
+  .more-wrap:hover .more-menu,
+  .more-wrap.open .more-menu {
+    opacity: 1;
+    visibility: visible;
+    transform: scale(1);
+  }
+  
+  .more-menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 12px;
+    justify-content: flex-start;
+  }
+  
+  .more-menu button .icon {
+    width: 16px;
+    height: 16px;
+  }
+  
+  /* ========== COLLAPSIBLE BUTTONS ========== */
+  .collapsible {
+    display: flex;
+  }
+  
+  /* ========== RESPONSIVE: Small player ========== */
+  /* 小窗口：宽度 < 400px */
+  @container (max-width: 400px) {
+    .collapsible { display: none !important; }
+    .more-wrap { display: flex !important; }
+  }
+  
+  /* 使用媒体查询作为后备 */
+  :host-context(.fyra-small) .collapsible { display: none !important; }
+  :host-context(.fyra-small) .more-wrap { display: flex !important; }
+  
+  /* 默认隐藏 more 按钮 */
+  .more-wrap { display: none; }
   
   /* Animations */
   @keyframes spin { 
@@ -442,16 +491,15 @@ export const UI_SHELL_STYLES = `
     to { opacity: 1; }
   }
   
-  /* Responsive adjustments */
-  @media (max-width: 480px) {
-    .bottom { padding: 0 8px 8px; }
-    .bar { gap: 4px; }
-    button { min-width: 32px; height: 32px; padding: 6px; }
-    .icon { width: 18px; height: 18px; }
-    .big-play { width: 56px; height: 56px; }
-    .big-play svg { width: 24px; height: 24px; }
-    .time { min-width: 70px; font-size: 11px; }
-    .log { width: 260px; font-size: 10px; }
+  /* ========== RESPONSIVE: Very small (< 300px) ========== */
+  @media (max-width: 300px) {
+    .bar { padding: 4px 8px 6px; gap: 2px; }
+    button { min-width: 28px; height: 28px; padding: 4px; }
+    .icon { width: 16px; height: 16px; }
+    .time { font-size: 10px; }
+    .big-play { width: 48px; height: 48px; margin-left: -24px; margin-top: -24px; }
+    .big-play svg { width: 20px; height: 20px; }
+    .spinner { width: 36px; height: 36px; margin-left: -18px; margin-top: -18px; }
   }
 `;
 
@@ -466,18 +514,20 @@ export const UI_SHELL_HTML = `
       </div>
     </div>
     <div class="bottom">
+      <!-- Progress bar on top, full width -->
       <div class="progress-row">
-        <span class="time" data-role="time">00:00 / --:--</span>
         <input type="range" class="progress" min="0" max="100" value="0" step="0.1" />
       </div>
+      <!-- Control bar below -->
       <div class="bar">
-        <button class="btn-play" data-act="toggle-play" data-tip="播放/暂停">
+        <button class="btn-play" data-act="toggle-play" title="播放/暂停">
           <svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         </button>
+        <span class="time" data-role="time">00:00 / --:--</span>
         <div class="spacer"></div>
-        <select class="quality" data-act="quality" style="display:none;"></select>
-        <div class="speed-wrap" style="position:relative;">
-          <button data-act="speed" data-tip="播放速度">1x</button>
+        <select class="quality collapsible" data-act="quality" style="display:none;"></select>
+        <div class="speed-wrap collapsible" style="position:relative;">
+          <button data-act="speed" title="播放速度">1x</button>
           <div class="speed-menu">
             <button data-speed="0.5">0.5x</button>
             <button data-speed="0.75">0.75x</button>
@@ -487,23 +537,43 @@ export const UI_SHELL_HTML = `
             <button data-speed="2">2x</button>
           </div>
         </div>
-        <button data-act="shot" data-tip="截图">
+        <button class="collapsible" data-act="shot" title="截图">
           <svg class="icon" viewBox="0 0 24 24"><path d="M4 4h4l2-2h4l2 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>
         </button>
-        <button data-act="pip" data-tip="画中画">
+        <button class="collapsible" data-act="pip" title="画中画">
           <svg class="icon" viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/></svg>
         </button>
         <div class="vol-wrap">
-          <button data-act="mute" data-tip="静音">
+          <button data-act="mute" title="静音">
             <svg class="icon vol-icon" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
           </button>
           <div class="vol-pop">
             <input type="range" class="vol" min="0" max="1" step="0.01" value="1" />
           </div>
         </div>
-        <button data-act="fs" data-tip="全屏">
+        <button data-act="fs" title="全屏">
           <svg class="icon fs-icon" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
         </button>
+        <!-- More menu for collapsed items -->
+        <div class="more-wrap">
+          <button data-act="more" title="更多">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+          </button>
+          <div class="more-menu">
+            <button data-act="speed-more" title="播放速度">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M10 8v8l6-4-6-4z"/></svg>
+              <span>倍速</span>
+            </button>
+            <button data-act="shot" title="截图">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M4 4h4l2-2h4l2 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>
+              <span>截图</span>
+            </button>
+            <button data-act="pip" title="画中画">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/></svg>
+              <span>画中画</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="log" data-role="log"></div>

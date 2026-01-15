@@ -63,6 +63,11 @@ export class FyraUiShell extends HTMLElement {
   private fullscreenHandler: ReturnType<typeof createFullscreenHandler> | null = null;
   private eventCleanup: EventCleanup = createEventCleanup();
 
+  // Responsive size observer
+  private resizeObserver: ResizeObserver | null = null;
+  private isSmallMode = false;
+  private readonly SMALL_THRESHOLD = 400;
+
   constructor() {
     super();
     const shadow = this.attachShadow({ mode: 'open' });
@@ -90,6 +95,12 @@ export class FyraUiShell extends HTMLElement {
     if (this.hideControlsTimer) {
       clearTimeout(this.hideControlsTimer);
       this.hideControlsTimer = null;
+    }
+
+    // Cleanup resize observer
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
     }
 
     cleanupEvents(this.video, this.bus, this.eventCleanup);
@@ -136,8 +147,10 @@ export class FyraUiShell extends HTMLElement {
     this.bindKeyboard();
     this.bindClickArea();
     this.bindSpeedMenu();
+    this.bindMoreMenu();
     this.bindAutoHide();
     this.bindFullscreen();
+    this.bindResponsive();
     this.updateDuration();
     this.populateQuality();
     this.updatePlayUi(isAlreadyPlaying);
@@ -317,6 +330,75 @@ export class FyraUiShell extends HTMLElement {
     this.eventCleanup.domCleanups.push(() => {
       speedMenu.removeEventListener('click', handler);
     });
+  }
+
+  private bindMoreMenu(): void {
+    const moreWrap = this.shadowRoot?.querySelector('.more-wrap');
+    const moreMenu = this.shadowRoot?.querySelector('.more-menu');
+    if (!moreWrap || !moreMenu) return;
+
+    // Handle more menu button clicks
+    const handler = (e: Event) => {
+      const btn = (e.target as HTMLElement).closest('button[data-act]');
+      if (!btn) return;
+      const act = btn.getAttribute('data-act');
+      
+      if (act === 'speed-more') {
+        // Toggle speed submenu or cycle speed
+        const speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
+        const current = this.video?.playbackRate || 1;
+        const idx = speeds.indexOf(current);
+        const next = speeds[(idx + 1) % speeds.length];
+        this.setPlaybackSpeed(next);
+      }
+      // shot and pip are handled by main bindUi
+    };
+
+    moreMenu.addEventListener('click', handler);
+    this.eventCleanup.domCleanups.push(() => {
+      moreMenu.removeEventListener('click', handler);
+    });
+  }
+
+  private bindResponsive(): void {
+    if (!this.host) return;
+
+    const updateSize = () => {
+      if (!this.host) return;
+      const width = this.host.offsetWidth;
+      const wasSmall = this.isSmallMode;
+      this.isSmallMode = width < this.SMALL_THRESHOLD;
+
+      if (wasSmall !== this.isSmallMode) {
+        this.updateResponsiveUI();
+      }
+    };
+
+    // Use ResizeObserver for efficient size detection
+    this.resizeObserver = new ResizeObserver(updateSize);
+    this.resizeObserver.observe(this.host);
+
+    // Initial check
+    updateSize();
+  }
+
+  private updateResponsiveUI(): void {
+    const collapsibles = this.shadowRoot?.querySelectorAll('.collapsible');
+    const moreWrap = this.shadowRoot?.querySelector('.more-wrap') as HTMLElement;
+
+    if (this.isSmallMode) {
+      // Small mode: hide collapsible buttons, show more menu
+      collapsibles?.forEach((el) => {
+        (el as HTMLElement).style.display = 'none';
+      });
+      if (moreWrap) moreWrap.style.display = 'flex';
+    } else {
+      // Normal mode: show collapsible buttons, hide more menu
+      collapsibles?.forEach((el) => {
+        (el as HTMLElement).style.display = '';
+      });
+      if (moreWrap) moreWrap.style.display = 'none';
+    }
   }
 
   private bindAutoHide(): void {

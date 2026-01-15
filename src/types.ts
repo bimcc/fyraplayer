@@ -138,6 +138,12 @@ export type FileSource = BaseSourceFields & {
   type: 'file';
   url: string;
   preferTech?: 'file';
+  /** Container format hint for blob URLs (since extension is not available) */
+  container?: 'ts' | 'mp4' | 'mkv' | 'webm' | 'flv';
+  /** Metadata extraction configuration (only for TS files with WebCodecs) */
+  metadata?: MetadataConfig;
+  /** WebCodecs configuration for file playback */
+  webCodecs?: WebCodecsConfig;
 };
 
 /** Auto source that requires resolution via EngineAdapter middleware */

@@ -42,10 +42,12 @@ const gbFormatSelect = document.getElementById("gb-format") as HTMLSelectElement
 const gbVideoSelect = document.getElementById("gb-video") as HTMLSelectElement | null;
 const gbAudioSelect = document.getElementById("gb-audio") as HTMLSelectElement | null;
 const gbWtCheckbox = document.getElementById("gb-wt") as HTMLInputElement | null;
+const fileInput = document.getElementById("file-input") as HTMLInputElement;
+const openFileBtn = document.getElementById("btn-open-file") as HTMLButtonElement;
 
 let player: FyraPlayer | null = null;
 let busy: string | false = false;
-let uiStatus: "idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "error" = "idle";
+let uiStatus: "idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "error" | "buffering" = "idle";
 let currentSrc: SimpleSource | null = null;
 let useSkin = true;
 let hideNativeControls = false;
@@ -140,9 +142,9 @@ function setBusy(flag: string | false, message?: string) {
 
 function setStatus(status: typeof uiStatus, message?: string) {
   uiStatus = status;
-  if (status === "loading") {
+  if (status === "loading" || status === "buffering") {
     setBusy("loading", message || "Loading...");
-  } else if (busy && status !== "loading") {
+  } else if (busy) {
     setBusy(false);
   }
   if (message) appendLog(message);
@@ -160,11 +162,11 @@ function appendLog(msg: string) {
   }
 }
 
-function toPlayerSource(src: SimpleSource) {
+function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
-  if (pick === "hls") return { type: "hls", url: src.url, lowLatency: src.lowLatency, preferTech: "hlsdash" as const };
-  if (pick === "dash") return { type: "dash", url: src.url, preferTech: "hlsdash" as const };
-  if (pick === "ws-raw") return { type: "ws-raw", url: src.url, codec: "h264", transport: "flv", preferTech: "ws-raw" as const };
+  if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, preferTech: "hlsdash" as const };
+  if (pick === "dash") return { type: "dash" as const, url: src.url, preferTech: "hlsdash" as const };
+  if (pick === "ws-raw") return { type: "ws-raw" as const, url: src.url, codec: "h264" as const, transport: "flv" as const, preferTech: "ws-raw" as const };
   if (pick === "gb28181") {
     const gb = src.gb || {};
     return {
@@ -180,9 +182,16 @@ function toPlayerSource(src: SimpleSource) {
   if (pick === "webrtc-oven" || pick === "webrtc") {
     // WebRTC source - tech-webrtc 会自动检测 wss:// URL 并使用 oven-ws 信令
     // 对于 http(s):// URL，会自动使用 WHEP 信令
-    return { type: "webrtc", url: src.url, preferTech: "webrtc" as const };
+    return { type: "webrtc" as const, url: src.url, preferTech: "webrtc" as const };
   }
-  return { type: "file", url: src.url, preferTech: "file" as const, webCodecs: src.webCodecs };
+  // File source - include container hint for blob URLs
+  return { 
+    type: "file" as const, 
+    url: src.url, 
+    preferTech: "file" as const, 
+    webCodecs: src.webCodecs,
+    container: (src as any).container as 'ts' | 'mp4' | undefined
+  };
 }
 
 function detectType(url: string): Exclude<SourceType, "auto"> {
@@ -316,6 +325,37 @@ loadBtn.onclick = () => {
 
 playBtn.onclick = () => safeRun("play", () => player?.play());
 pauseBtn.onclick = () => safeRun("pause", () => player?.pause());
+
+// 本地文件选择
+openFileBtn.onclick = () => fileInput.click();
+fileInput.onchange = () => {
+  const file = fileInput.files?.[0];
+  if (!file) return;
+  safeRun("load-file", () => {
+    const blobUrl = URL.createObjectURL(file);
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const isTs = ext === 'ts' || ext === 'mts' || ext === 'm2ts';
+    const isMp4 = ext === 'mp4' || ext === 'm4v';
+    // Determine container type for blob URL hint
+    const container = isTs ? 'ts' : (isMp4 ? 'mp4' : undefined);
+    // MP4 使用原生播放，TS 使用 mpegts.js
+    const src: SimpleSource & { container?: string } = {
+      label: `本地: ${file.name}`,
+      type: "file",
+      url: blobUrl,
+      container,
+      webCodecs: undefined // TS blob files use mpegts.js, not WebCodecs
+    };
+    currentSrc = src;
+    select.value = CUSTOM_VALUE;
+    urlInput.value = `[本地文件] ${file.name}`;
+    typeSelect.value = "file";
+    appendLog(`已选择本地文件: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB), 格式: ${ext.toUpperCase()}`);
+    return createPlayer(src);
+  });
+  // 重置 input 以便再次选择同一文件
+  fileInput.value = '';
+};
 if (skinToggle) {
   skinToggle.checked = useSkin;
   skinToggle.onchange = () => {

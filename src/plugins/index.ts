@@ -4,16 +4,13 @@
  * All plugins are optional and can be imported separately for tree-shaking.
  * 
  * Usage:
- *   import { FyraPsvAdapter } from 'fyra/plugins';
- *   import { EngineFactory, registerDefaultEngines } from 'fyra/plugins';
+ *   import { EngineFactory, registerDefaultEngines } from 'fyraplayer/plugins/engines';
+ *   import { KlvBridge } from 'fyraplayer/plugins/metadata';
+ * 
+ * Note: PSV and Cesium adapters have been moved to their respective projects:
+ *   - PSV adapter: @beeviz/fyrapano
+ *   - Cesium adapter: @beeviz/cesium
  */
-
-// PSV (Photo Sphere Viewer) integration
-export { FyraPsvAdapter, type FyraPsvAdapterOptions } from './psv/FyraPsvAdapter.js';
-export { createFyraPsvPlugin, registerFyraPsvPlugin } from './psv/plugin.js';
-
-// Cesium 3D integration
-export { FyraCesiumAdapter, type FyraCesiumAdapterOptions } from './cesium/FyraCesiumAdapter.js';
 
 // Metadata bridge (KLV/MISB)
 export { KlvBridge, type KlvBridgeOptions } from './metadata/KlvBridge.js';

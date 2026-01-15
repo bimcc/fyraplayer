@@ -27,7 +27,10 @@
 
   <script type="module">
     import PhotoSphereViewer from 'https://unpkg.com/@photo-sphere-viewer/core@5.7.4/dist/photo-sphere-viewer.esm.js';
-    import { FyraPsvAdapter } from '../dist/index.js';
+    // NOTE: FyraPsvAdapter should be imported from @beeviz/fyrapano (external project)
+    // import { FyraPsvAdapter } from '@beeviz/fyrapano';
+    // For demo purposes, we'll create a placeholder
+    const FyraPsvAdapter = class { static id = 'fyra-psv-adapter'; };
 
     // Demo sources (public test assets). Replace with your own as needed.
     const sources = [

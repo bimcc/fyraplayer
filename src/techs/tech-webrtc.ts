@@ -427,11 +427,11 @@ export class WebRTCTech extends AbstractTech {
         return bBitrate - aBitrate;
       });
       this.omeAutoQuality = evt.auto !== false;
-      if (!this.currentRendition && this.omePlaylist.length > 0) {
+      if (!this.currentRendition && this.omePlaylist && this.omePlaylist.length > 0) {
         const top = this.omePlaylist[0];
         this.currentRendition = top?.name ?? top?.rendition_name ?? null;
       }
-      this.bus.emit("network", { type: "webrtc-playlist", renditionCount: this.omePlaylist.length, auto: this.omeAutoQuality });
+      this.bus.emit("network", { type: "webrtc-playlist", renditionCount: this.omePlaylist?.length ?? 0, auto: this.omeAutoQuality });
     }
     if (evt.type === "rendition-changed") {
       const prev = this.currentRendition;
@@ -607,9 +607,9 @@ export class WebRTCTech extends AbstractTech {
       const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
       this.audioCtx = new AudioCtx();
-      const source = this.audioCtx.createMediaStreamSource(stream);
+      const source = this.audioCtx!.createMediaStreamSource(stream);
       // Connect to destination to keep context running; volume unaffected
-      source.connect(this.audioCtx.destination);
+      source.connect(this.audioCtx!.destination);
     } catch (e) {
       console.warn('[webrtc] audio context init failed', e);
     }
