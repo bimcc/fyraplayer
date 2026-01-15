@@ -4,7 +4,7 @@
 
 ## 特性
 
-- **多播放技术**: WebRTC (OME/WHIP/WHEP)、WS-raw (WebCodecs, FLV/TS)、HLS/DASH、GB28181、本地文件
+- **多播放技术**: WebRTC (OME/WHIP/WHEP)、WS-raw (WebCodecs, FLV/TS)、HLS/DASH、fMP4、GB28181、本地文件
 - **本地文件播放**: 支持 MP4（原生）、TS/MTS（mpegts.js）、FLV 等格式的本地文件播放
 - **高可靠性**: 自动重连、ICE 重启、playoutDelayHint、基于丢包的 ABR 回退、DataChannel 心跳
 - **可扩展**: 中间件管线、插件管理器、信令适配器、流媒体服务器 URL 工厂、元数据桥接 (KLV/SEI)
@@ -29,31 +29,40 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 核心模块
+## 播放技术 (Tech)
 
-| 模块 | 说明 |
-|------|------|
-| `core/eventBus` | 事件发布/订阅，组件间通信 |
-| `core/techManager` | Tech 生命周期管理，根据 Source 类型自动选择 Tech |
-| `core/pluginManager` | 插件注册、初始化、销毁 |
-| `core/middleware` | 请求/响应中间件链 |
-| `techs/tech-webrtc` | WebRTC (WHIP/WHEP/Oven-WS) 低延迟播放 |
-| `techs/tech-ws-raw` | WebSocket + WebCodecs 低延迟播放 |
-| `techs/tech-hlsdash` | HLS/DASH 自适应码率播放（基于 hls.js/dash.js） |
-| `techs/tech-gb28181` | 国标 GB28181 流播放 |
-| `techs/tech-file` | 本地/远程文件播放（MP4/TS/FLV） |
-| `techs/wsRaw/demuxer` | 自研 TS/FLV/AnnexB 解复用器 |
-| `render/` | 通用帧渲染抽象 |
-| `ui/` | 默认播放器 UI 控件 |
+| Tech | 文件 | 用途 | 底层库 |
+|------|------|------|--------|
+| `webrtc` | tech-webrtc.ts | WebRTC 低延迟播放 (WHIP/WHEP/Oven-WS) | 原生 WebRTC |
+| `hls` | tech-hls.ts | HLS/LL-HLS 自适应码率播放 (.m3u8) | hls.js |
+| `dash` | tech-dash.ts | DASH 自适应码率播放 (.mpd) | dash.js |
+| `fmp4` | tech-fmp4.ts | fMP4 直播流 (无清单，HTTP/WS + MSE) | 原生 MSE |
+| `ws-raw` | tech-ws-raw.ts | WebSocket + WebCodecs (FLV/TS) | 自研 + mpegts.js |
+| `gb28181` | tech-gb28181.ts | 国标 GB28181 流播放 | 自研 |
+| `file` | tech-file.ts | 本地/远程文件播放 (MP4/TS/FLV) | 原生 + mpegts.js |
+
+## 格式与 Tech 对应关系
+
+| 格式 | 后缀/协议 | 推荐 Tech | 说明 |
+|------|-----------|-----------|------|
+| HLS | .m3u8 | `hls` | 支持 LL-HLS |
+| DASH | .mpd | `dash` | 支持 ABR |
+| fMP4 直播 | .m4s, HTTP/WS | `fmp4` | 无清单的 fMP4 流 |
+| FLV 直播 | ws://...flv | `ws-raw` | WebSocket FLV |
+| HTTP-FLV | http://...flv | `ws-raw` | mpegts.js 播放 |
+| TS 直播 | ws://...ts | `ws-raw` | WebSocket TS |
+| MP4 文件 | .mp4 | `file` | 浏览器原生 |
+| TS 文件 | .ts, .mts | `file` | mpegts.js 播放 |
+| WebRTC | wss://, http:// | `webrtc` | WHEP/WHIP/Oven |
 
 ## 外部依赖
 
-| 库 | 用途 |
-|----|------|
-| `hls.js` | HLS 流播放 |
-| `dashjs` | DASH 流播放 |
-| `mpegts.js` | TS/FLV 容器解析 + MSE 播放 |
-| `mp4box` | MP4 容器解析（WebCodecs 路径） |
+| 库 | 版本 | 用途 |
+|----|------|------|
+| `hls.js` | ^1.4.12 | HLS/LL-HLS 流播放 |
+| `dashjs` | ^4.7.4 | DASH 流播放 |
+| `mpegts.js` | ^1.7.3 | TS/FLV 容器解析 + MSE 播放 |
+| `mp4box` | ^0.5.4 | MP4 容器解析（WebCodecs 路径） |
 
 ## 安装
 
@@ -62,17 +71,15 @@ pnpm install
 pnpm build
 ```
 
-## 使用
+## 快速开始
 
 ```typescript
 import { FyraPlayer } from 'fyraplayer';
 
 const player = new FyraPlayer({
   video: '#video',
-  sources: [{ type: 'webrtc', url: 'wss://example.com/webrtc' }],
-  techOrder: ['webrtc', 'ws-raw', 'hlsdash', 'file'],
-  buffer: { targetLatencyMs: 2000 },
-  reconnect: { enabled: true },
+  sources: [{ type: 'hls', url: 'https://example.com/stream.m3u8' }],
+  techOrder: ['webrtc', 'ws-raw', 'hls', 'dash', 'fmp4', 'file'],
   autoplay: true,
   muted: true
 });
@@ -81,6 +88,66 @@ player.on('ready', () => console.log('Player ready'));
 player.on('error', (err) => console.error('Error:', err));
 
 await player.init();
+```
+
+## 使用示例
+
+### HLS 播放
+
+```typescript
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{
+    type: 'hls',
+    url: 'https://example.com/stream.m3u8',
+    lowLatency: true,  // 启用 LL-HLS
+    preferTech: 'hls'
+  }]
+});
+```
+
+### DASH 播放
+
+```typescript
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{
+    type: 'dash',
+    url: 'https://example.com/stream.mpd',
+    preferTech: 'dash'
+  }]
+});
+```
+
+### fMP4 直播流（无清单）
+
+```typescript
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{
+    type: 'fmp4',
+    url: 'https://example.com/live/stream',
+    transport: 'http',  // 或 'ws'
+    codec: 'h264',
+    isLive: true,
+    preferTech: 'fmp4'
+  }]
+});
+```
+
+### WebSocket FLV/TS 流
+
+```typescript
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{
+    type: 'ws-raw',
+    url: 'wss://server/stream.flv',
+    codec: 'h264',
+    transport: 'flv',  // 或 'ts'
+    preferTech: 'ws-raw'
+  }]
+});
 ```
 
 ### 本地文件播放
@@ -172,14 +239,6 @@ FyraPlayer 可以与 @aspect/openklv 配合使用，实现无人机视频的 KLV
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 使用场景
-
-| 场景 | 使用组件 | 说明 |
-|------|----------|------|
-| 播放无人机视频 + KLV | fyraplayer + openklv.KLVParser | 推荐方式 |
-| 播放常规视频 | fyraplayer only | 无需 openklv |
-| 后台 KLV 提取 | openklv.TSDemuxer | 无需 fyraplayer |
-
 ### 集成示例
 
 ```typescript
@@ -221,16 +280,6 @@ function render() {
   requestAnimationFrame(render);
 }
 ```
-
-### 职责分离
-
-- **FyraPlayer**: 视频播放 + TS 解复用 + 私有数据提取
-- **@aspect/openklv**: KLV 语义解析 + 时间同步 + 状态插值
-
-这种分离确保：
-1. FyraPlayer 保持通用播放器定位，不绑定 KLV 特定逻辑
-2. openklv 可独立使用（后台服务、Node.js 环境）
-3. 业务层灵活组合两者
 
 ## 相关项目
 

@@ -3,7 +3,9 @@ import { MiddlewareManager } from './core/middleware.js';
 import { TechManager } from './core/techManager.js';
 import { PluginManager } from './core/pluginManager.js';
 import { WebRTCTech } from './techs/tech-webrtc.js';
-import { HLSDASHTech } from './techs/tech-hlsdash.js';
+import { HLSTech } from './techs/tech-hls.js';
+import { DASHTech } from './techs/tech-dash.js';
+import { FMP4Tech } from './techs/tech-fmp4.js';
 import { WSRawTech } from './techs/tech-ws-raw.js';
 import { FileTech } from './techs/tech-file.js';
 import { Gb28181Tech } from './techs/tech-gb28181.js';
@@ -62,7 +64,9 @@ export class FyraPlayer implements PlayerAPI {
     opts.middleware?.forEach((m) => this.middleware.use(m));
     // register built-in techs
     this.techManager.register('webrtc', new WebRTCTech());
-    this.techManager.register('hlsdash', new HLSDASHTech());
+    this.techManager.register('hls', new HLSTech());
+    this.techManager.register('dash', new DASHTech());
+    this.techManager.register('fmp4', new FMP4Tech());
     this.techManager.register('ws-raw', new WSRawTech());
     this.techManager.register('gb28181', new Gb28181Tech());
     this.techManager.register('file', new FileTech());

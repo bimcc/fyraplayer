@@ -25,8 +25,10 @@ fyraplayer/
 │   │
 │   ├── techs/                      # 播放技术（必须）
 │   │   ├── tech-webrtc.ts          # WebRTC (WHIP/WHEP)
-│   │   ├── tech-ws-raw.ts          # WebSocket + WebCodecs
-│   │   ├── tech-hlsdash.ts         # HLS/DASH
+│   │   ├── tech-hls.ts             # HLS/LL-HLS (.m3u8)
+│   │   ├── tech-dash.ts            # DASH (.mpd)
+│   │   ├── tech-fmp4.ts            # fMP4 直播流 (HTTP/WS + MSE)
+│   │   ├── tech-ws-raw.ts          # WebSocket + WebCodecs (FLV/TS)
 │   │   ├── tech-gb28181.ts         # GB28181 国标流
 │   │   ├── tech-file.ts            # 本地文件
 │   │   ├── webrtc/                 # WebRTC 信令
@@ -67,11 +69,13 @@ fyraplayer/
 
 每个 Tech 负责一种播放协议的完整实现：
 
-- `tech-webrtc.ts`: WebRTC 低延迟播放
-- `tech-ws-raw.ts`: WebSocket 接收原始流 + WebCodecs 解码
-- `tech-hlsdash.ts`: HLS/DASH 自适应码率播放
+- `tech-webrtc.ts`: WebRTC 低延迟播放 (WHIP/WHEP)
+- `tech-hls.ts`: HLS/LL-HLS 自适应码率播放 (.m3u8)
+- `tech-dash.ts`: DASH 自适应码率播放 (.mpd)
+- `tech-fmp4.ts`: fMP4 直播流 (无清单，HTTP/WS + MSE)
+- `tech-ws-raw.ts`: WebSocket 接收原始流 + WebCodecs 解码 (FLV/TS)
 - `tech-gb28181.ts`: 国标 GB28181 流播放
-- `tech-file.ts`: 本地文件播放
+- `tech-file.ts`: 本地文件播放 (MP4/TS/WebM)
 
 ### render/ - 渲染层
 

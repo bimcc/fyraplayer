@@ -1,6 +1,6 @@
 import { BufferPolicy, ReconnectPolicy, TechName, MetricsOptions } from '../types.js';
 
-export const DEFAULT_TECH_ORDER: TechName[] = ['gb28181', 'webrtc', 'ws-raw', 'hlsdash', 'file'];
+export const DEFAULT_TECH_ORDER: TechName[] = ['gb28181', 'webrtc', 'ws-raw', 'hls', 'dash', 'fmp4', 'file'];
 
 export const DEFAULT_BUFFER_POLICY: BufferPolicy = {
   targetLatencyMs: 2000,

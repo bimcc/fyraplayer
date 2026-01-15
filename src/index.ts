@@ -19,13 +19,19 @@ export * from './core/defaults.js';
 
 // Techs
 export * from './techs/tech-webrtc.js';
-export * from './techs/tech-hlsdash.js';
+export * from './techs/tech-hls.js';
+export * from './techs/tech-dash.js';
+export * from './techs/tech-fmp4.js';
 export * from './techs/tech-ws-raw.js';
 export * from './techs/tech-gb28181.js';
 export * from './techs/tech-file.js';
 
+// Legacy export for backwards compatibility
+export { HLSTech as HLSDASHTech } from './techs/tech-hls.js';
+
 // Utils
 export * from './utils/webcodecs.js';
+export * from './utils/formatDetector.js';
 
 // Render
 export * from './render/canvasFrameBuffer.js';

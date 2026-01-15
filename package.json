@@ -41,7 +41,6 @@
   },
   "dependencies": {
     "dashjs": "^4.7.4",
-    "flv.js": "^1.6.2",
     "hls.js": "^1.4.12",
     "mp4box": "^0.5.4",
     "mpegts.js": "^1.7.3"

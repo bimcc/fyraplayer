@@ -1,4 +1,7 @@
-export type TechName = 'webrtc' | 'hlsdash' | 'ws-raw' | 'file' | 'gb28181';
+export type TechName = 'webrtc' | 'hls' | 'dash' | 'fmp4' | 'ws-raw' | 'file' | 'gb28181';
+
+/** @deprecated Use 'hls' or 'dash' instead */
+export type LegacyTechName = 'hlsdash';
 
 // ============================================================================
 // Metadata Configuration (for KLV/SEI extraction)
@@ -69,14 +72,28 @@ export type HLSSource = BaseSourceFields & {
   url: string;
   lowLatency?: boolean;
   drm?: DRMConfig;
-  preferTech?: 'hlsdash';
+  preferTech?: 'hls';
 };
 
 export type DASHSource = BaseSourceFields & {
   type: 'dash';
   url: string;
   drm?: DRMConfig;
-  preferTech?: 'hlsdash';
+  preferTech?: 'dash';
+};
+
+export type FMP4Source = BaseSourceFields & {
+  type: 'fmp4';
+  url: string;
+  /** Transport method: http (fetch) or ws (WebSocket) */
+  transport: 'http' | 'ws';
+  /** Video codec hint for MSE initialization */
+  codec?: 'h264' | 'h265' | 'av1';
+  /** Audio codec hint */
+  audioCodec?: 'aac' | 'opus' | 'mp3';
+  /** Whether this is a live stream */
+  isLive?: boolean;
+  preferTech?: 'fmp4';
 };
 
 export type WSRawSource = BaseSourceFields & {
@@ -160,6 +177,7 @@ export type Source =
   | WebRTCSource
   | HLSSource
   | DASHSource
+  | FMP4Source
   | WSRawSource
   | Gb28181Source
   | FileSource
@@ -184,6 +202,10 @@ export function isWSRawSource(s: Source): s is WSRawSource {
 
 export function isFileSource(s: Source): s is FileSource {
   return s.type === 'file';
+}
+
+export function isFMP4Source(s: Source): s is FMP4Source {
+  return s.type === 'fmp4';
 }
 
 export function isAutoSource(s: Source): s is AutoSource {

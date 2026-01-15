@@ -164,8 +164,8 @@ function appendLog(msg: string) {
 
 function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
-  if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, preferTech: "hlsdash" as const };
-  if (pick === "dash") return { type: "dash" as const, url: src.url, preferTech: "hlsdash" as const };
+  if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, preferTech: "hls" as const };
+  if (pick === "dash") return { type: "dash" as const, url: src.url, preferTech: "dash" as const };
   if (pick === "ws-raw") return { type: "ws-raw" as const, url: src.url, codec: "h264" as const, transport: "flv" as const, preferTech: "ws-raw" as const };
   if (pick === "gb28181") {
     const gb = src.gb || {};
@@ -249,7 +249,7 @@ function createPlayer(source: SimpleSource) {
   player = new FyraPlayer({
     video,
     sources: [toPlayerSource(source)],
-    techOrder: ["gb28181", "webrtc", "ws-raw", "hlsdash", "file"],
+    techOrder: ["gb28181", "webrtc", "ws-raw", "hls", "dash", "fmp4", "file"],
     webCodecs: wcEnable ? { enable: true } : undefined,
     plugins: useSkin
       ? [

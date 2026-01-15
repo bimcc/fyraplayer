@@ -1,24 +1,25 @@
-import flvjs from 'flv.js';
+import mpegts from 'mpegts.js';
 
 /**
- * MSE fallback using flv.js to ensure WS播放可用，直到自研管线完成。
+ * MSE fallback using mpegts.js to ensure WS播放可用，直到自研管线完成。
+ * mpegts.js 同时支持 FLV 和 TS 格式。
  */
 export class MseFallback {
-  private player: any | null = null;
+  private player: mpegts.Player | null = null;
   private onReady?: () => void;
   private onError?: (err: any) => void;
 
-  start(url: string, video: HTMLVideoElement, handlers?: { onReady?: () => void; onError?: (err: any) => void }): void {
+  start(url: string, video: HTMLVideoElement, handlers?: { onReady?: () => void; onError?: (err: any) => void }, format: 'flv' | 'mpegts' = 'flv'): void {
     this.onReady = handlers?.onReady;
     this.onError = handlers?.onError;
-    if (!flvjs.isSupported()) {
-      this.onError?.(new Error('FLV/WS not supported in this browser'));
+    if (!mpegts.isSupported()) {
+      this.onError?.(new Error('FLV/TS MSE not supported in this browser'));
       return;
     }
     this.stop();
-    this.player = (flvjs as any).createPlayer(
+    this.player = mpegts.createPlayer(
       {
-        type: 'flv',
+        type: format,
         isLive: true,
         url
       },
@@ -33,8 +34,8 @@ export class MseFallback {
     this.player.attachMediaElement(video);
     this.player.load();
     this.player.play();
-    this.player.on(flvjs.Events.ERROR, (err: any) => this.onError?.(err));
-    this.player.on(flvjs.Events.LOADING_COMPLETE, () => this.onReady?.());
+    this.player.on(mpegts.Events.ERROR, (err: any) => this.onError?.(err));
+    this.player.on(mpegts.Events.LOADING_COMPLETE, () => this.onReady?.());
   }
 
   stop(): void {
