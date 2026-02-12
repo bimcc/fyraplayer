@@ -68,6 +68,27 @@ export class FyraUiShell extends HTMLElement {
   private isSmallMode = false;
   private readonly SMALL_THRESHOLD = 400;
 
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    return typeof value === 'object' && value !== null
+      ? (value as Record<string, unknown>)
+      : null;
+  }
+
+  private getPlayerSources(): Source[] {
+    type PlayerWithOptions = PlayerAPI & {
+      options?: {
+        sources?: Source[];
+      };
+    };
+    const playerWithOptions = this.player as PlayerWithOptions | null;
+    return playerWithOptions?.options?.sources ?? [];
+  }
+
+  private getSourceLabel(source: Source, index: number): string {
+    const sourceWithName = source as Source & { label?: string; name?: string };
+    return sourceWithName.label || sourceWithName.name || `${source.type} ${index + 1}`;
+  }
+
   constructor() {
     super();
     const shadow = this.attachShadow({ mode: 'open' });
@@ -244,12 +265,30 @@ export class FyraUiShell extends HTMLElement {
       },
       onPause: () => this.updatePlayUi(false),
       onBuffer: () => this.setBuffering(true),
-      onError: (e: any) => this.log(`[error] ${JSON.stringify(e)}`),
-      onNetwork: (e: any) => this.log(`[net] ${JSON.stringify(e)}`),
-      onStats: (e: any) => {
-        const stats = e?.stats || e;
-        if (stats?.bitrateKbps || stats?.fps) {
-          this.log(`[stats] ${stats.bitrateKbps || '?'}kbps ${stats.fps || '?'}fps`);
+      onError: (eventPayload: unknown) => {
+        this.setBuffering(false);
+        this.updatePlayUi(false);
+        this.log(`[error] ${JSON.stringify(eventPayload)}`);
+      },
+      onNetwork: (eventPayload: unknown) => {
+        const payloadRecord = this.asRecord(eventPayload);
+        const severity = typeof payloadRecord?.severity === 'string' ? payloadRecord.severity : undefined;
+        const type = typeof payloadRecord?.type === 'string' ? payloadRecord.type : undefined;
+        if (severity === 'fatal' || type === 'reconnect-exhausted') {
+          this.setBuffering(false);
+          this.updatePlayUi(false);
+        }
+        this.log(`[net] ${JSON.stringify(eventPayload)}`);
+      },
+      onStats: (eventPayload: unknown) => {
+        const payloadRecord = this.asRecord(eventPayload);
+        const rawStats = payloadRecord?.stats ?? eventPayload;
+        const statsRecord = this.asRecord(rawStats);
+        const bitrateKbps =
+          typeof statsRecord?.bitrateKbps === 'number' ? statsRecord.bitrateKbps : undefined;
+        const fps = typeof statsRecord?.fps === 'number' ? statsRecord.fps : undefined;
+        if (bitrateKbps !== undefined || fps !== undefined) {
+          this.log(`[stats] ${bitrateKbps ?? '?'}kbps ${fps ?? '?'}fps`);
         }
       },
     });
@@ -602,17 +641,18 @@ export class FyraUiShell extends HTMLElement {
 
   private populateQuality(): void {
     if (!this.elements.qualitySel) return;
-    const sources = ((this.player as any)?.options?.sources as Source[] | undefined) ?? [];
+    const sources = this.getPlayerSources();
     if (!sources.length || sources.length === 1) {
       this.elements.qualitySel.style.display = 'none';
       return;
     }
     this.elements.qualitySel.style.display = 'block';
     this.elements.qualitySel.innerHTML = '';
-    const current = sources.indexOf(this.player?.getCurrentSource?.() as any);
+    const currentSource = this.player?.getCurrentSource?.();
+    const current = currentSource ? sources.indexOf(currentSource) : -1;
     sources.forEach((s, idx) => {
       const opt = document.createElement('option');
-      const label = (s as any).label || (s as any).name || `${s.type} ${idx + 1}`;
+      const label = this.getSourceLabel(s, idx);
       opt.value = String(idx);
       opt.textContent = label;
       this.elements.qualitySel?.appendChild(opt);

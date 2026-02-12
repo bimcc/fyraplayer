@@ -1,9 +1,37 @@
 ﻿import { WebRTCSignalConfig } from "../../types.js";
 
+import type { SignalAdapterEvent } from "./signalAdapter.js";
+
+type SignalCandidate = { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
+
+type OvenNotificationPayload = Record<string, unknown> & {
+  event?: string;
+  type?: string;
+  auto?: boolean;
+  rendition_name?: string;
+  rendition?: string;
+  rendition_id?: string;
+  renditionId?: string;
+  variant?: string;
+  id?: string;
+  reason?: string;
+  message?: unknown;
+  renditions?: unknown[];
+};
+
+interface NestedNotificationMessage {
+  renditions?: unknown[];
+}
+
+interface OvenOutboundMessage {
+  command: string;
+  [key: string]: unknown;
+}
+
 interface OvenMessage {
   command: "offer" | "answer" | "candidate" | "ping" | "pong" | "request_offer" | "stop" | "error" | "notification";
   sdp?: string | { sdp: string; type: string };
-  candidates?: Array<{ candidate: string; sdpMid?: string; sdpMLineIndex?: number }>;
+  candidates?: SignalCandidate[];
   candidate?: string;
   id?: string;
   peer_id?: string;
@@ -13,10 +41,10 @@ interface OvenMessage {
   code?: number;
   error?: string;
   reason?: string;
-  notification?: any;
+  notification?: OvenNotificationPayload;
   event?: string;
   type?: string;
-  message?: any;
+  message?: OvenNotificationPayload;
   auto?: boolean;
 }
 
@@ -29,17 +57,16 @@ export class OvenSignaling {
   private ws: WebSocket | null = null;
   private config: Extract<WebRTCSignalConfig, { type: "oven-ws" }>;
   private onOffer?: (sdp: string, iceServers?: RTCIceServer[]) => void;
-  private onCandidate?: (cand: { candidate: string; sdpMid?: string; sdpMLineIndex?: number }) => void;
+  private onCandidate?: (cand: SignalCandidate) => void;
   private resolveReady?: () => void;
-  private eventCb?: (evt: any) => void;
+  private eventCb?: (evt: SignalAdapterEvent) => void;
   private answerAcknowledged = false;
-  private connectionConfigPolicy: RTCIceTransportPolicy | undefined;
   
   // OME connection identifiers (from offer message)
   private connectionId: string | null = null;
   private peerId: string | null = null;
 
-  constructor(config: Extract<WebRTCSignalConfig, { type: "oven-ws" }>, onEvent?: (evt: any) => void) {
+  constructor(config: Extract<WebRTCSignalConfig, { type: "oven-ws" }>, onEvent?: (evt: SignalAdapterEvent) => void) {
     this.config = config;
     this.eventCb = onEvent;
   }
@@ -64,12 +91,15 @@ export class OvenSignaling {
       ws.onmessage = (evt) => this.handleMessage(evt);
       ws.onclose = (evt) => {
         const wasClean = evt.wasClean;
+        const hasSession = !!this.connectionId;
         console.log(`[oven] WebSocket closed: code=${evt.code}, reason=${evt.reason}, wasClean=${wasClean}`);
         this.eventCb?.({ 
           type: "ws-close", 
-          fatal: !wasClean,
+          // Once we have a session, rely on ICE/PC state instead of WS close.
+          fatal: !wasClean && !hasSession,
           code: evt.code,
-          reason: evt.reason 
+          reason: evt.reason,
+          hasSession
         });
         this.ws = null;
       };
@@ -134,13 +164,14 @@ export class OvenSignaling {
   }
 
   private handleNotification(msg: OvenMessage): void {
-    const payload = msg.notification ?? msg.message ?? msg;
+    const payload = msg.notification ?? msg.message ?? (msg as unknown as OvenNotificationPayload);
     const eventType = msg.type ?? payload?.event ?? payload?.type;
+    const nestedMessage = payload?.message as NestedNotificationMessage | undefined;
     
     if (eventType === "playlist") {
       this.eventCb?.({
         type: "playlist",
-        playlist: payload?.renditions ?? payload?.message?.renditions ?? [],
+        playlist: payload?.renditions ?? nestedMessage?.renditions ?? [],
         auto: payload?.auto ?? msg.auto
       });
       return;
@@ -183,7 +214,7 @@ export class OvenSignaling {
   changeRendition(renditionName?: string, auto?: boolean): void {
     if (!this.ws || this.ws.readyState !== 1) return;
     if (!this.connectionId) return;
-    const message: any = {
+    const message: OvenOutboundMessage = {
       command: "change_rendition",
       id: this.connectionId
     };
@@ -208,7 +239,6 @@ export class OvenSignaling {
         credential: server.credential
       })).filter(server => server.urls);
       console.log('[oven] Received ICE servers:', iceServers.length);
-      this.connectionConfigPolicy = 'relay';
     }
     
     // Parse SDP - OME can send as string or object { sdp, type }
@@ -255,10 +285,10 @@ export class OvenSignaling {
     } else if (msg.candidate) {
       // Single candidate format - OME may not provide sdpMid/sdpMLineIndex
       // Let RTCIceCandidate parse from the candidate string
-      const candObj = { candidate: msg.candidate };
+      const candObj: SignalCandidate = { candidate: msg.candidate };
       console.log('[oven] Received single ICE candidate');
       this.eventCb?.({ type: "remote-candidate", candidate: candObj });
-      this.onCandidate?.(candObj as any);
+      this.onCandidate?.(candObj);
     }
   }
 
@@ -280,7 +310,7 @@ export class OvenSignaling {
     this.onOffer = cb;
   }
 
-  onRemoteCandidate(cb: (cand: { candidate: string; sdpMid?: string; sdpMLineIndex?: number }) => void): void {
+  onRemoteCandidate(cb: (cand: SignalCandidate) => void): void {
     this.onCandidate = cb;
   }
 
@@ -330,7 +360,7 @@ export class OvenSignaling {
     return this.peerId;
   }
 
-  private send(msg: any): void {
+  private send(msg: OvenOutboundMessage): void {
     // Use numeric value 1 for OPEN state (more reliable across environments)
     if (!this.ws || this.ws.readyState !== 1) {
       console.warn('[oven] Cannot send, WebSocket not open');

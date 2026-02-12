@@ -20,12 +20,37 @@ import {
   PlayerOptions,
   PlayerState,
   Source,
-  TechName,
-  MetadataDetectedEvent
+  TechName
 } from './types.js';
 import { DEFAULT_BUFFER_POLICY, DEFAULT_METRICS_OPTIONS, DEFAULT_RECONNECT_POLICY, DEFAULT_TECH_ORDER } from './core/defaults.js';
 import { resolveVideoElement } from './utils/video.js';
 import { probeWebCodecs, WebCodecsSupport } from './utils/webcodecs.js';
+
+type EventHandler = (...args: unknown[]) => void;
+
+type NetworkEventPayload = {
+  type?: string;
+  fatal?: boolean;
+  message?: string;
+  severity?: 'fatal' | 'warning' | 'info';
+  state?: string;
+  timeoutMs?: number;
+  attempt?: number;
+  maxRetries?: number;
+  from?: string;
+  to?: string;
+  reason?: string;
+  errors?: number;
+  dropped?: number;
+  kept?: number;
+  mode?: string;
+  [key: string]: unknown;
+};
+
+type EnhancedNetworkEvent = NetworkEventPayload & {
+  severity: 'fatal' | 'warning' | 'info';
+  message: string;
+};
 
 export class FyraPlayer implements PlayerAPI {
   private readonly options: PlayerOptions;
@@ -39,12 +64,11 @@ export class FyraPlayer implements PlayerAPI {
   private techOrder: TechName[];
   private bufferPolicy: BufferPolicy | undefined;
   private videoEl: HTMLVideoElement;
-  private statsTimer: any = null;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
-  private reconnectTimer: any = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private dataChannelOpts: DataChannelOptions | undefined;
-  private failedTechs = new Set<TechName>();
-  private techEventHandlers: Map<string, (...args: any[]) => void> = new Map();
+  private techEventHandlers: Map<EngineEvent, EventHandler> = new Map();
 
   constructor(opts: PlayerOptions) {
     this.options = opts;
@@ -91,19 +115,23 @@ export class FyraPlayer implements PlayerAPI {
     return this.state;
   }
 
+  getSources(): Source[] {
+    return this.options.sources;
+  }
+
   getCurrentSource(): Source | undefined {
     return this.options.sources[this.currentSourceIndex];
   }
 
-  on(event: string, handler: (...args: any[]) => void): void {
+  on(event: string, handler: EventHandler): void {
     this.bus.on(event, handler);
   }
 
-  once(event: string, handler: (...args: any[]) => void): void {
+  once(event: string, handler: EventHandler): void {
     this.bus.once(event, handler);
   }
 
-  off(event: string, handler: (...args: any[]) => void): void {
+  off(event: string, handler: EventHandler): void {
     this.bus.off(event, handler);
   }
 
@@ -117,7 +145,7 @@ export class FyraPlayer implements PlayerAPI {
     }
     this.currentSourceIndex = index;
     this.reconnectAttempts = 0;
-    this.failedTechs.clear();
+    this.techManager.resetFailedTechs();
     await this.techManager.destroyCurrent();
     await this.loadCurrent();
   }
@@ -178,6 +206,11 @@ export class FyraPlayer implements PlayerAPI {
     }
     this.detachTechEvents();
     await this.techManager.destroyCurrent();
+    try {
+      await this.pluginManager.unregisterAll();
+    } catch (err) {
+      console.warn('[player] plugin cleanup error', err);
+    }
     this.bus.removeAllListeners();
     try {
       this.videoEl.src = '';
@@ -194,7 +227,7 @@ export class FyraPlayer implements PlayerAPI {
    * Invoke a tech-specific control action, passing through control middleware.
    * Useful for GB28181 (invite/bye/ptz/query) and future techs.
    */
-  async control(action: string, payload?: any): Promise<any> {
+  async control(action: string, payload?: unknown): Promise<unknown> {
     const source = this.getCurrentSource();
     if (!source) throw new Error('no source available');
     const techName = this.techManager.getCurrentTechName() ?? this.techOrder[0];
@@ -219,14 +252,11 @@ export class FyraPlayer implements PlayerAPI {
     
     // Create a new promise and store reference before async operations
     const loadPromise = (async () => {
-      const effectiveOrder = this.techOrder.filter((t) => !this.failedTechs.has(t));
-      const techOrderToUse = effectiveOrder.length ? effectiveOrder : this.techOrder;
-      
       // Requirements 6.1, 6.2: Handle Auto Source resolution
       if (source.type === 'auto') {
         const resolveCtx: MiddlewareContext = {
           source,
-          tech: source.preferTech ?? techOrderToUse[0],
+          tech: source.preferTech ?? this.techOrder[0],
           url: source.url
         };
         
@@ -235,7 +265,7 @@ export class FyraPlayer implements PlayerAPI {
         
         // Requirements 6.4: Emit error if no adapter resolved the source
         if (!resolvedCtx.resolvedSources) {
-          const engine = (source as any).engine ?? 'unknown';
+          const engine = source.engine ?? 'unknown';
           const err = new Error(`No adapter registered for engine: ${engine}`);
           this.bus.emit('error', err);
           this.state = 'error';
@@ -252,17 +282,29 @@ export class FyraPlayer implements PlayerAPI {
       
       const middlewareCtx: MiddlewareContext = {
         source,
-        tech: source.preferTech ?? techOrderToUse[0],
-        url: (source as any).url
+        tech: source.preferTech ?? this.techOrder[0],
+        url: source.url
       };
       // run request middleware once before load
-      await this.middleware.run('request', middlewareCtx);
+      const requestCtx = await this.middleware.run('request', middlewareCtx);
       // apply middleware modifications
-      const patchedSource = { ...middlewareCtx.source, url: middlewareCtx.url ?? (source as any).url };
+      const patchedSource = {
+        ...(requestCtx.source as Source),
+        url: requestCtx.url ?? requestCtx.source.url ?? source.url
+      } as Source;
       // run signal middleware (best-effort) before load
-      await this.middleware.run('signal', { ...middlewareCtx, source: patchedSource, tech: patchedSource.preferTech ?? this.techOrder[0] });
+      const signalCtx = await this.middleware.run('signal', {
+        ...requestCtx,
+        source: patchedSource,
+        tech: patchedSource.preferTech ?? this.techOrder[0],
+        url: patchedSource.url
+      });
+      const finalSource = {
+        ...(signalCtx.source as Source),
+        url: signalCtx.url ?? signalCtx.source.url ?? patchedSource.url
+      } as Source;
       try {
-        const loaded = await this.techManager.selectAndLoad([patchedSource], techOrderToUse, {
+        const loaded = await this.techManager.selectAndLoad([finalSource], this.techOrder, {
           buffer: this.bufferPolicy,
           reconnect: this.options.reconnect ?? DEFAULT_RECONNECT_POLICY,
           metrics: this.options.metrics ?? DEFAULT_METRICS_OPTIONS,
@@ -274,7 +316,6 @@ export class FyraPlayer implements PlayerAPI {
           throw new Error('No compatible tech/source');
         }
         this.attachTechEvents(loaded.tech);
-        this.failedTechs.delete(loaded.tech);
         this.startStatsTimer();
       } catch (e) {
         this.state = 'error';
@@ -303,14 +344,15 @@ export class FyraPlayer implements PlayerAPI {
     // Clean up previous handlers to prevent memory leaks
     this.detachTechEvents();
     
-    const forward = (event: EngineEvent, transform?: (args: any[]) => any[]) => {
-      const handler = (...args: any[]) => {
+    const forward = (event: EngineEvent, transform?: (args: unknown[]) => unknown[]) => {
+      const handler = (...args: unknown[]) => {
         const payload = transform ? transform(args) : args;
-        this.bus.emit(event, ...(payload ?? []));
+        const payloadArray = Array.isArray(payload) ? payload : [payload];
+        this.bus.emit(event, ...payloadArray);
         if (event === 'ready') {
           this.state = 'ready';
           this.reconnectAttempts = 0;
-          this.failedTechs.clear();
+          this.techManager.resetFailedTechs();
           if (this.options.autoplay) {
             this.play().catch(() => {
               /* ignore autoplay rejection */
@@ -344,8 +386,9 @@ export class FyraPlayer implements PlayerAPI {
     forward('qos');
     forward('sei');
     forward('data');
+    forward('metadata');
     forward('network', (args) => {
-      const evt = args?.[0];
+      const evt = args?.[0] as NetworkEventPayload | undefined;
       // Enhance network event with human-readable message
       const enhancedEvt = this.enhanceNetworkEvent(evt);
       
@@ -359,7 +402,7 @@ export class FyraPlayer implements PlayerAPI {
         evt?.type === 'fatal';
       if (fatal) {
         const currentTech = this.techManager.getCurrentTechName();
-        if (currentTech) this.failedTechs.add(currentTech);
+        if (currentTech) this.techManager.markTechFailed(currentTech);
         this.handleReconnect();
       }
       return [enhancedEvt];
@@ -369,18 +412,18 @@ export class FyraPlayer implements PlayerAPI {
   /**
    * Enhance network event with human-readable message and severity
    */
-  private enhanceNetworkEvent(evt: any): any {
+  private enhanceNetworkEvent(evt: NetworkEventPayload | undefined): EnhancedNetworkEvent | undefined {
     if (!evt) return evt;
     
     const enhanced = { ...evt };
     
     // Add severity level
-    const fatalTypes = ['ice-failed', 'connect-timeout', 'ws-fallback-error', 'fatal', 'signal-error', 'offer-timeout'];
+    const fatalTypes = ['ice-failed', 'connect-timeout', 'ws-fallback-error', 'fatal', 'signal-error', 'offer-timeout', 'reconnect-exhausted'];
     const warningTypes = ['metadata-timeout', 'autoplay-blocked', 'audio-disabled', 'audio-fallback', 'catchup', 'jitter'];
     
-    if (evt.fatal || fatalTypes.includes(evt.type)) {
+    if (evt.fatal || (typeof evt.type === 'string' && fatalTypes.includes(evt.type))) {
       enhanced.severity = 'fatal';
-    } else if (warningTypes.includes(evt.type)) {
+    } else if (typeof evt.type === 'string' && warningTypes.includes(evt.type)) {
       enhanced.severity = 'warning';
     } else {
       enhanced.severity = 'info';
@@ -405,6 +448,9 @@ export class FyraPlayer implements PlayerAPI {
         break;
       case 'ws-fallback-error':
         enhanced.message = 'WebSocket 回退失败';
+        break;
+      case 'reconnect-exhausted':
+        enhanced.message = `Reconnect attempts exhausted (${evt.attempt || 0}/${evt.maxRetries || 0})`;
         break;
       case 'fallback':
         enhanced.message = `已从 ${evt.from || 'primary'} 切换到 ${evt.to || 'fallback'} 源`;
@@ -443,12 +489,24 @@ export class FyraPlayer implements PlayerAPI {
         enhanced.message = evt.message || `网络事件: ${evt.type}`;
     }
     
-    return enhanced;
+    return {
+      ...enhanced,
+      severity: enhanced.severity,
+      message: enhanced.message
+    };
   }
 
   private detachTechEvents(): void {
-    // Note: AbstractTech uses EventBus which doesn't expose off() on Tech interface
-    // Clear our handler references to allow GC
+    const tech = this.techManager.getCurrentTech();
+    if (tech?.off) {
+      for (const [event, handler] of this.techEventHandlers.entries()) {
+        try {
+          tech.off(event, handler);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
     this.techEventHandlers.clear();
   }
 
@@ -474,14 +532,29 @@ export class FyraPlayer implements PlayerAPI {
     const reconnect = this.options.reconnect ?? DEFAULT_RECONNECT_POLICY;
     if (!reconnect.enabled) return;
     if (this.reconnectTimer) return;
-    if (this.reconnectAttempts >= (reconnect.maxRetries ?? 3)) return;
+    const maxRetries = reconnect.maxRetries ?? 3;
+    if (this.reconnectAttempts >= maxRetries) {
+      this.bus.emit('network', {
+        type: 'reconnect-exhausted',
+        attempt: this.reconnectAttempts,
+        maxRetries,
+        fatal: true
+      });
+      this.state = 'error';
+      try {
+        await this.techManager.destroyCurrent();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     this.reconnectAttempts += 1;
     
     // Requirements 7.5: Emit reconnect event with attempt count
     this.bus.emit('network', { 
       type: 'reconnect', 
       attempt: this.reconnectAttempts,
-      maxRetries: reconnect.maxRetries ?? 3
+      maxRetries
     });
     
     const delay =
@@ -491,7 +564,6 @@ export class FyraPlayer implements PlayerAPI {
       this.reconnectTimer = null;
       try {
         await this.loadCurrent();
-        this.reconnectAttempts = 0;
       } catch (e) {
         this.bus.emit('error', e);
       }

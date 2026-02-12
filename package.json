@@ -11,6 +11,10 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./core": {
+      "import": "./dist/core.js",
+      "types": "./dist/core.d.ts"
+    },
     "./plugins": {
       "import": "./dist/plugins/index.js",
       "types": "./dist/plugins/index.d.ts"
@@ -22,6 +26,22 @@
     "./plugins/metadata": {
       "import": "./dist/plugins/metadata/index.js",
       "types": "./dist/plugins/metadata/index.d.ts"
+    },
+    "./plugins/ui-components": {
+      "import": "./dist/plugins/ui-components.js",
+      "types": "./dist/plugins/ui-components.d.ts"
+    },
+    "./plugins/metrics": {
+      "import": "./dist/plugins/metrics.js",
+      "types": "./dist/plugins/metrics.d.ts"
+    },
+    "./plugins/reconnect": {
+      "import": "./dist/plugins/reconnect.js",
+      "types": "./dist/plugins/reconnect.d.ts"
+    },
+    "./plugins/storage": {
+      "import": "./dist/plugins/storage.js",
+      "types": "./dist/plugins/storage.d.ts"
     }
   },
   "files": [
@@ -40,10 +60,10 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
-    "dashjs": "^4.7.4",
-    "hls.js": "^1.4.12",
+    "dashjs": "^5.1.0",
+    "hls.js": "^1.6.15",
     "mp4box": "^0.5.4",
-    "mpegts.js": "^1.7.3"
+    "mpegts.js": "^1.8.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.11",

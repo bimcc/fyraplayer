@@ -7,9 +7,14 @@ import mpegts from 'mpegts.js';
 export class MseFallback {
   private player: mpegts.Player | null = null;
   private onReady?: () => void;
-  private onError?: (err: any) => void;
+  private onError?: (err: unknown) => void;
 
-  start(url: string, video: HTMLVideoElement, handlers?: { onReady?: () => void; onError?: (err: any) => void }, format: 'flv' | 'mpegts' = 'flv'): void {
+  start(
+    url: string,
+    video: HTMLVideoElement,
+    handlers?: { onReady?: () => void; onError?: (err: unknown) => void },
+    format: 'flv' | 'mpegts' = 'flv'
+  ): void {
     this.onReady = handlers?.onReady;
     this.onError = handlers?.onError;
     if (!mpegts.isSupported()) {
@@ -34,7 +39,7 @@ export class MseFallback {
     this.player.attachMediaElement(video);
     this.player.load();
     this.player.play();
-    this.player.on(mpegts.Events.ERROR, (err: any) => this.onError?.(err));
+    this.player.on(mpegts.Events.ERROR, (err: unknown) => this.onError?.(err));
     this.player.on(mpegts.Events.LOADING_COMPLETE, () => this.onReady?.());
   }
 

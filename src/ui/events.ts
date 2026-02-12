@@ -5,9 +5,11 @@
 
 import type { PluginContext } from '../types.js';
 
+type BusHandler = Parameters<PluginContext['coreBus']['on']>[1];
+
 export interface EventCleanup {
   videoHandlers: Map<string, EventListener>;
-  busHandlers: Map<string, (...args: any[]) => void>;
+  busHandlers: Map<string, BusHandler>;
   domCleanups: Array<() => void>;
 }
 
@@ -41,7 +43,7 @@ export function addVideoListener(
 export function addBusListener(
   bus: PluginContext['coreBus'],
   event: string,
-  handler: (...args: any[]) => void,
+  handler: BusHandler,
   cleanup: EventCleanup
 ): void {
   bus.on(event, handler);
@@ -78,9 +80,9 @@ export function cleanupEvents(
   cleanup.videoHandlers.clear();
 
   // Remove bus event listeners
-  if (bus && 'off' in bus) {
+  if (bus) {
     cleanup.busHandlers.forEach((handler, event) => {
-      (bus as any).off(event, handler);
+      bus.off(event, handler);
     });
   }
   cleanup.busHandlers.clear();
@@ -126,9 +128,9 @@ export function bindBusEvents(
     onPlay: () => void;
     onPause: () => void;
     onBuffer: () => void;
-    onError: (e: any) => void;
-    onNetwork: (e: any) => void;
-    onStats: (e: any) => void;
+    onError: (e: unknown) => void;
+    onNetwork: (e: unknown) => void;
+    onStats: (e: unknown) => void;
   }
 ): void {
   addBusListener(bus, 'ready', callbacks.onReady, cleanup);

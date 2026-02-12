@@ -32,8 +32,8 @@
 
     // Demo sources (public test assets). Replace with your own.
     const sources = [
-      { type: 'hls', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8', preferTech: 'hlsdash' },
-      { type: 'dash', url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd', preferTech: 'hlsdash' },
+      { type: 'hls', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8', preferTech: 'hls' },
+      { type: 'dash', url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd', preferTech: 'dash' },
       { type: 'ws-raw', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv', codec: 'h264', transport: 'flv', preferTech: 'ws-raw' }
     ];
 
@@ -60,7 +60,7 @@
       const adapter = new FyraCesiumAdapter({
         video: videoEl,
         sources,
-        techOrder: ['ws-raw', 'hlsdash'],
+        techOrder: ['ws-raw', 'hls', 'dash'],
         onMetadata: (evt) => bridge.handle(evt),
         onReady: () => setStatus('ready')
       });

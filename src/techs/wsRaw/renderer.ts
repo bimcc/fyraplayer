@@ -16,8 +16,6 @@ export class Renderer {
   private stream: MediaStream | null = null;
   private usingCapture = false;
   private dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1)); // 限制 DPR，4K 时减压
-  private targetCssWidth = 0;
-  private targetCssHeight = 0;
   private smooth = false; // linear filtering if true, default NEAREST for sharpness/perf
   private maxTextureDim = 4096;
   private align = 64; // 纹理尺寸向上对齐，减少频繁重分配
@@ -41,7 +39,10 @@ export class Renderer {
       document.body.appendChild(canvas);
     }
 
-    this.stream = (canvas as any).captureStream ? (canvas as any).captureStream(30) : null;
+    const canvasWithCapture = canvas as HTMLCanvasElement & {
+      captureStream?: (frameRate?: number) => MediaStream;
+    };
+    this.stream = canvasWithCapture.captureStream ? canvasWithCapture.captureStream(30) : null;
     if (this.stream) {
       this.usingCapture = true;
       videoEl.srcObject = this.stream;
@@ -145,8 +146,6 @@ export class Renderer {
     this.dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
     const cssW = this.videoEl.clientWidth || width;
     const cssH = this.videoEl.clientHeight || height;
-    this.targetCssWidth = cssW;
-    this.targetCssHeight = cssH;
     const w = Math.max(1, Math.round(cssW * this.dpr));
     const h = Math.max(1, Math.round(cssH * this.dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {

@@ -4,11 +4,11 @@
 Convert engine-specific publish URLs/config into Fyra `Source` lists (with fallbacks), so the player can auto-select techs and apply its reconnect/fallback logic.
 
 ## Where to put
-- `src/adapters/engineFactory.ts` for the factory entry (already added).
-- `src/adapters/engines/` for individual engine implementations.
+- `src/plugins/engines/engineFactory.ts` for the factory entry.
+- `src/plugins/engines/` for individual engine implementations.
 
 ## Reuse from livepano
-- Built-in helpers migrated from `ref/livepano` are available under `src/adapters/engines/` (zlm/srs/mediamtx/monibuca/oven/tencent).
+- Built-in helpers migrated from `ref/livepano` are available under `src/plugins/engines/` (zlm/srs/mediamtx/monibuca/oven/tencent).
 - Call `registerDefaultEngines()` if you want them registered (core does not auto-register).
 - Adjust outputs to match Fyra `Source` shape, e.g.:
   - webrtc: `{ type: 'webrtc', url, signal: {...} }`
@@ -18,7 +18,7 @@ Convert engine-specific publish URLs/config into Fyra `Source` lists (with fallb
 
 ## Usage sketch
 ```ts
-import { EngineFactory, registerDefaultEngines } from 'fyraplayer'; // re-exported from src/index.ts
+import { EngineFactory, registerDefaultEngines } from 'fyraplayer/plugins/engines';
 registerDefaultEngines();
 
 const urls = EngineFactory.convertUrl('mediamtx', 'rtsp://host/app/stream');
@@ -27,7 +27,7 @@ const sources = [
   { type: 'ws-raw', url: urls.wsFlvUrl, codec: 'h264', transport: 'flv' },
   { type: 'hls', url: urls.hlsUrl }
 ];
-const techOrder = urls.fallbackChain || ['webrtc','ws-raw','hlsdash'];
+const techOrder = urls.fallbackChain || ['webrtc','ws-raw','hls'];
 ```
 
 ## Notes

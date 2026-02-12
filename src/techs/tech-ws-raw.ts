@@ -32,10 +32,12 @@ export class WSRawTech extends AbstractTech {
     }
   ): Promise<void> {
     const wsSource = { ...(source as WSRawSource) };
-    // set default decoderUrl when codec is h264 and not provided
-    if (!wsSource.decoderUrl && wsSource.codec === 'h264') {
-      // 预留多版本选择：优先候选列表，否则使用默认
-      wsSource.decoderUrl = DEFAULT_H264_DECODER_CANDIDATES[0] || DEFAULT_H264_DECODER_URL;
+    // set default decoderUrl when codec hint is missing
+    if (!wsSource.decoderUrl) {
+      if (wsSource.codec === 'h264') {
+        // Prefer local candidate first, then fallback to CDN default.
+        wsSource.decoderUrl = DEFAULT_H264_DECODER_CANDIDATES[0] || DEFAULT_H264_DECODER_URL;
+      }
     }
     this.source = wsSource;
     this.buffer = opts.buffer;
@@ -52,7 +54,7 @@ export class WSRawTech extends AbstractTech {
       this.fallbackStarted = true;
       this.pipeline?.stop();
       this.fallback = new MseFallback();
-      this.fallback.start((source as any).url, opts.video, {
+      this.fallback.start(wsSource.url, opts.video, {
         onReady: () => this.bus.emit('ready'),
         onError: (e) => {
           this.bus.emit('error', e);
@@ -75,7 +77,8 @@ export class WSRawTech extends AbstractTech {
           },
           onNetwork: (evt) => {
             // 自动回退：视频解码连续错误
-            if (evt?.type === 'video-decode-error' && evt.errors >= 3) {
+            const decodeErrors = typeof evt?.errors === 'number' ? evt.errors : 0;
+            if (evt?.type === 'video-decode-error' && decodeErrors >= 3) {
               startFallback('video-decode-error');
               return;
             }
@@ -129,14 +132,6 @@ export class WSRawTech extends AbstractTech {
     const detectOnly = !!(metadata.privateData?.detectOnly || metadata.sei?.detectOnly);
     
     return { enabled, detectOnly };
-  }
-
-  /**
-   * Check if metadata extraction is enabled and valid for the source.
-   * Metadata extraction is only supported for TS transport.
-   */
-  private isMetadataEnabled(source: WSRawSource): boolean {
-    return this.getMetadataConfig(source).enabled;
   }
 
   /**

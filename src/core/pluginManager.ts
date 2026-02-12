@@ -1,4 +1,4 @@
-import { PluginCtor, PluginContext } from '../types.js';
+import { PluginCtor, PluginContext, PluginLifecycle } from '../types.js';
 
 /** Plugin instance with optional destroy method */
 interface PluginInstance {
@@ -9,7 +9,10 @@ interface PluginInstance {
 
 export class PluginManager {
   private plugins: PluginInstance[] = [];
-  private applied = false;
+
+  private isPluginLifecycle(value: unknown): value is PluginLifecycle {
+    return typeof value === 'object' && value !== null && 'destroy' in value;
+  }
 
   register(plugin: PluginCtor): void {
     this.plugins.push({ plugin });
@@ -49,7 +52,6 @@ export class PluginManager {
       }
     }
     this.plugins = [];
-    this.applied = false;
   }
 
   /**
@@ -60,16 +62,15 @@ export class PluginManager {
   }
 
   applyAll(ctx: PluginContext): void {
-    this.applied = true;
     for (const instance of this.plugins) {
       try {
         // Store context for potential cleanup
         instance.context = ctx;
         
         // Call plugin - plugins may return an object with destroy method
-        const result = instance.plugin(ctx) as unknown;
-        if (result && typeof result === 'object' && typeof (result as any).destroy === 'function') {
-          instance.destroy = (result as any).destroy;
+        const result = instance.plugin(ctx);
+        if (this.isPluginLifecycle(result) && typeof result.destroy === 'function') {
+          instance.destroy = result.destroy;
         }
       } catch (err) {
         console.warn('[plugin] apply error', err);

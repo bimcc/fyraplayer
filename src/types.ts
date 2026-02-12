@@ -105,6 +105,7 @@ export type WSRawSource = BaseSourceFields & {
   preferTech?: 'ws-raw';
   experimental?: boolean;
   decoderUrl?: string;
+  wasm?: WasmDecoderConfig;
   disableAudio?: boolean;
   audioOptional?: boolean;
   /** Use WebTransport (datagrams) instead of WebSocket if true */
@@ -131,6 +132,22 @@ export type Gb28181Source = BaseSourceFields & {
     ssrc?: string;
     transport?: 'udp' | 'tcp';
     expires?: number;
+  };
+  /**
+   * Optional mapping to extract fields from non-standard invite responses.
+   * Supports dot-path syntax, e.g. "play_urls.ws_flv".
+   */
+  responseMapping?: {
+    /** Data channel URL path. Fallbacks: url -> wsUrl -> source.url */
+    url?: string;
+    /** Session/call id path. Fallbacks: callId -> dialogId */
+    callId?: string;
+    /** SSRC path. Fallback: ssrc */
+    ssrc?: string;
+    /** Stream info object path. Fallback: streamInfo */
+    streamInfo?: string;
+    /** Stream id path. Fallbacks: stream_id -> streamId */
+    streamId?: string;
   };
   /** Container format delivered over data channel */
   format?: 'annexb' | 'ts' | 'ps';
@@ -302,6 +319,19 @@ export interface MetricsOptions {
 export interface WebCodecsConfig {
   enable?: boolean;
   allowH265?: boolean;
+  /** Prefer MP4 WebCodecs path for file sources when available */
+  preferMp4?: boolean;
+}
+
+export interface WasmDecoderConfig {
+  /** Prefer SharedArrayBuffer/COOP+COEP path when available */
+  enableSharedArrayBuffer?: boolean;
+  /** Transfer input buffers to worker to reduce copies */
+  transferFrames?: boolean;
+  /** Pthread pool size hint for Emscripten-based decoders */
+  workerThreads?: number;
+  /** Require crossOriginIsolated to proceed when using SAB/pthreads */
+  requireCrossOriginIsolated?: boolean;
 }
 
 export interface DataChannelOptions {
@@ -413,7 +443,11 @@ export interface PluginContext {
   techs: TechRegistry;
 }
 
-export type PluginCtor = (ctx: PluginContext) => void;
+export interface PluginLifecycle {
+  destroy?: () => void | Promise<void>;
+}
+
+export type PluginCtor = (ctx: PluginContext) => void | PluginLifecycle;
 
 export interface PlayerAPI {
   play(): Promise<void>;
@@ -421,9 +455,13 @@ export interface PlayerAPI {
   seek(time: number): Promise<void>;
   switchSource(index: number): Promise<void>;
   getState(): PlayerState;
+  getSources(): Source[];
   getCurrentSource(): Source | undefined;
+  on(event: string, handler: (...args: unknown[]) => void): void;
+  once(event: string, handler: (...args: unknown[]) => void): void;
+  off(event: string, handler: (...args: unknown[]) => void): void;
   /** Invoke a tech-specific control action (e.g., gb28181 invite/ptz). */
-  control(action: string, payload?: any): Promise<any>;
+  control(action: string, payload?: unknown): Promise<unknown>;
 }
 
 // UI and storage interfaces are placeholders for future extension
@@ -437,11 +475,11 @@ export interface KeyValueStore {
 }
 
 export interface EventBusLike {
-  on(event: string, listener: (...args: any[]) => void): void;
-  once(event: string, listener: (...args: any[]) => void): void;
-  off(event: string, listener: (...args: any[]) => void): void;
+  on(event: string, listener: (...args: unknown[]) => void): void;
+  once(event: string, listener: (...args: unknown[]) => void): void;
+  off(event: string, listener: (...args: unknown[]) => void): void;
   removeAllListeners(event?: string): void;
-  emit(event: string, ...args: any[]): void;
+  emit(event: string, ...args: unknown[]): void;
 }
 
 export interface TechRegistry {
@@ -482,8 +520,8 @@ export interface Tech {
   seek(time: number): Promise<void>;
   destroy(): Promise<void>;
   getStats(): EngineStats;
-  on<E extends EngineEvent>(event: E, handler: (...args: any[]) => void): void;
-  off?<E extends EngineEvent>(event: E, handler: (...args: any[]) => void): void;
+  on<E extends EngineEvent>(event: E, handler: (...args: unknown[]) => void): void;
+  off?<E extends EngineEvent>(event: E, handler: (...args: unknown[]) => void): void;
   /** Optional control/invoke hook for tech-specific actions */
-  invoke?(action: string, payload?: any): Promise<any>;
+  invoke?(action: string, payload?: unknown): Promise<unknown>;
 }

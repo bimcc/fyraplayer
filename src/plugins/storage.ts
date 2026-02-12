@@ -21,7 +21,7 @@ export const storagePlugin: PluginCtor = ({ player, storage }) => {
   const handler = () => {
     const current = player.getCurrentSource();
     if (!current) return;
-    const sources = (player as any).options?.sources ?? [];
+    const sources = player.getSources();
     const index = sources.indexOf(current);
     if (index >= 0) {
       try {
@@ -32,5 +32,5 @@ export const storagePlugin: PluginCtor = ({ player, storage }) => {
     }
   };
   // naive hook: when play triggers, save
-  (player as any).on?.('play', handler);
+  player.on('play', handler);
 };

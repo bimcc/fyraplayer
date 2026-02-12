@@ -2,6 +2,8 @@ import { Engine, EngineUrls } from './engineFactory.js';
 import { DEFAULT_ENGINE_CONFIGS } from './constants.js';
 import { parseUrl, extractVars } from './urlConverter.js';
 
+type PathVarKey = keyof ReturnType<typeof extractVars>;
+
 /**
  * OvenEngine - URL converter for OvenMediaEngine.
  * 
@@ -30,22 +32,22 @@ export class OvenEngine implements Engine {
     
     // Build WebRTC WebSocket URL
     let webrtcPath = this.config.webrtcPath || '/{fullPath}';
-    Object.keys(vars).forEach((key) => {
-      webrtcPath = webrtcPath.replace(new RegExp(`\\{${key}\\}`, 'g'), (vars as any)[key]);
+    (Object.keys(vars) as PathVarKey[]).forEach((key) => {
+      webrtcPath = webrtcPath.replace(new RegExp(`\\{${key}\\}`, 'g'), vars[key]);
     });
     const webrtcUrl = `${wsProtocol}://${parsed.hostname}:${wsPort}${webrtcPath}`;
     
     // Build LL-HLS URL
     let llHlsPath = this.config.llHlsPath || '/{fullPath}/llhls.m3u8';
-    Object.keys(vars).forEach((key) => {
-      llHlsPath = llHlsPath.replace(new RegExp(`\\{${key}\\}`, 'g'), (vars as any)[key]);
+    (Object.keys(vars) as PathVarKey[]).forEach((key) => {
+      llHlsPath = llHlsPath.replace(new RegExp(`\\{${key}\\}`, 'g'), vars[key]);
     });
     const llHlsUrl = `${httpProtocol}://${parsed.hostname}:${httpPort}${llHlsPath}`;
     
     // Build DASH URL
     let dashPath = this.config.dashPath || '/{fullPath}/manifest.mpd';
-    Object.keys(vars).forEach((key) => {
-      dashPath = dashPath.replace(new RegExp(`\\{${key}\\}`, 'g'), (vars as any)[key]);
+    (Object.keys(vars) as PathVarKey[]).forEach((key) => {
+      dashPath = dashPath.replace(new RegExp(`\\{${key}\\}`, 'g'), vars[key]);
     });
     const dashUrl = `${httpProtocol}://${parsed.hostname}:${httpPort}${dashPath}`;
     

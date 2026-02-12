@@ -4,13 +4,13 @@ Goal: replace livepano’s self-managed playback engines with FyraPlayer while k
 
 ## What to swap
 - Playback: remove/customize livepano PlaybackEngines; use FyraPsvAdapter (or FyraPsvPlugin via createFyraPsvPlugin).
-- URL resolution: reuse/migrate EngineFactory & engines (zlm/srs/mediamtx/monibuca/oven/tencent) now in `src/adapters/engines/`. Call `registerDefaultEngines()` and `EngineFactory.convertUrl(...)` to produce Fyra Sources + fallbackChain.
+- URL resolution: reuse/migrate EngineFactory & engines (zlm/srs/mediamtx/monibuca/oven/tencent) now in `src/plugins/engines/`. Call `registerDefaultEngines()` and `EngineFactory.convertUrl(...)` to produce Fyra Sources + fallbackChain.
 - Rendering/UI: keep PSV plugin lifecycle, viewport tracker, quality heuristics; just feed it with Fyra’s video/canvas.
 
 ## Steps
 1) Register engines (optional):
    ```ts
-   import { EngineFactory, registerDefaultEngines } from 'fyraplayer';
+   import { EngineFactory, registerDefaultEngines } from 'fyraplayer/plugins/engines';
    registerDefaultEngines();
    EngineFactory.setConfig({ mediamtx: { host: '...', useHttps: false } });
    const urls = EngineFactory.convertUrl('mediamtx', 'rtsp://host/app/stream');

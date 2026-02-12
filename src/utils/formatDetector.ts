@@ -199,13 +199,13 @@ export function getRecommendedTechOrder(source: Source): TechName[] {
       return ['gb28181', 'ws-raw'];
     case 'file':
       return ['file', 'hls'];
-    case 'fmp4' as any:
-      return ['fmp4' as TechName, 'dash', 'hls'];
+    case 'fmp4':
+      return ['fmp4', 'dash', 'hls'];
     case 'auto':
       // For auto, try to detect from URL
       const format = detectFormatFromUrl(source.url);
       if (format.recommendedTech === 'fmp4') {
-        return ['fmp4' as TechName, 'dash', 'hls', 'ws-raw', 'file'];
+        return ['fmp4', 'dash', 'hls', 'ws-raw', 'file'];
       }
       return [format.recommendedTech, 'hls', 'dash', 'ws-raw', 'file'];
     default:

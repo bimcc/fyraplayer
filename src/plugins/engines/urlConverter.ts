@@ -13,6 +13,8 @@ export interface PathVars {
   fullPath: string;
 }
 
+type PathVarKey = keyof PathVars;
+
 export function parseUrl(inputUrl: string): ParsedUrl {
   const normalized = inputUrl
     .replace(/^rtmp:\/\//, 'http://')
@@ -49,8 +51,8 @@ export function buildUrl(
 ): string | undefined {
   if (!pathTemplate) return undefined;
   let path = pathTemplate;
-  Object.keys(vars).forEach((key) => {
-    path = path.replace(new RegExp(`\\{${key}\\}`, 'g'), (vars as any)[key]);
+  (Object.keys(vars) as PathVarKey[]).forEach((key) => {
+    path = path.replace(new RegExp(`\\{${key}\\}`, 'g'), vars[key]);
   });
   if (useOrigin && typeof window !== 'undefined') {
     return `${window.location.origin}${path}`;

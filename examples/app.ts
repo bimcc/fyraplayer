@@ -1,6 +1,6 @@
 ﻿import { FyraPlayer } from "../src/index.js";
 import defaultSources from "./sources.js";
-import { createUiComponentsPlugin } from "../src/plugins/ui-components.js";
+import { createUiComponentsPlugin } from "../src/ui/index.js";
 
 type SourceType = "auto" | "hls" | "dash" | "ws-raw" | "file" | "webrtc" | "webrtc-oven" | "gb28181";
 type SimpleSource = {
@@ -13,6 +13,13 @@ type SimpleSource = {
     invite?: string;
     deviceId?: string;
     channelId?: string;
+    responseMapping?: {
+      url?: string;
+      callId?: string;
+      ssrc?: string;
+      streamInfo?: string;
+      streamId?: string;
+    };
     format?: "annexb" | "ts" | "ps";
     video?: "h264" | "h265";
     audio?: "aac" | "pcma" | "pcmu" | "opus";
@@ -33,6 +40,7 @@ const wcSupport = document.getElementById("wc-support") as HTMLDivElement;
 const logEl = document.getElementById("log") as HTMLDivElement;
 const skinToggle = document.getElementById("toggle-skin") as HTMLInputElement;
 const nativeToggle = document.getElementById("toggle-native") as HTMLInputElement;
+const lowLatencyToggle = document.getElementById("toggle-low-latency") as HTMLInputElement;
 const overlay = document.getElementById("overlay") as HTMLDivElement | null;
 const overlayText = document.getElementById("overlay-text") as HTMLDivElement | null;
 const gbInviteInput = document.getElementById("gb-invite") as HTMLInputElement | null;
@@ -117,6 +125,9 @@ function syncUiWithSource(src: SimpleSource) {
     if (gbAudioSelect) gbAudioSelect.value = src.gb.audio || "";
     if (gbWtCheckbox) gbWtCheckbox.checked = !!src.gb.webTransport;
   }
+  if (lowLatencyToggle && typeof src.lowLatency === "boolean") {
+    lowLatencyToggle.checked = src.lowLatency;
+  }
 }
 
 function setBusy(flag: string | false, message?: string) {
@@ -133,7 +144,7 @@ function setBusy(flag: string | false, message?: string) {
   }
   const disabled = !!flag;
   playBtn.disabled = disabled;
-  pauseBtn.disabled = disabled;
+  pauseBtn.disabled = false;
   loadBtn.disabled = disabled;
   select.disabled = disabled;
   typeSelect.disabled = disabled;
@@ -162,6 +173,14 @@ function appendLog(msg: string) {
   }
 }
 
+function applyLowLatencyToggle(src: SimpleSource): SimpleSource {
+  if (!lowLatencyToggle) return src;
+  const pick = src.type === "auto" ? detectType(src.url) : src.type;
+  if (pick !== "hls") return src;
+  if (src.lowLatency === lowLatencyToggle.checked) return src;
+  return { ...src, lowLatency: lowLatencyToggle.checked };
+}
+
 function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
   if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, preferTech: "hls" as const };
@@ -169,11 +188,19 @@ function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   if (pick === "ws-raw") return { type: "ws-raw" as const, url: src.url, codec: "h264" as const, transport: "flv" as const, preferTech: "ws-raw" as const };
   if (pick === "gb28181") {
     const gb = src.gb || {};
+    const responseMapping = {
+      url: gb.responseMapping?.url || "play_urls.ws_flv",
+      callId: gb.responseMapping?.callId || "stream_id",
+      streamId: gb.responseMapping?.streamId || "stream_id",
+      ssrc: gb.responseMapping?.ssrc,
+      streamInfo: gb.responseMapping?.streamInfo
+    };
     return {
       type: "gb28181" as const,
       url: src.url,
       control: { invite: gb.invite || "", bye: gb.invite ? gb.invite.replace("invite", "bye") : "" },
       gb: { deviceId: gb.deviceId || "", channelId: gb.channelId || "" },
+      responseMapping,
       format: gb.format || "annexb",
       codecHints: { video: gb.video, audio: gb.audio },
       webTransport: gb.webTransport
@@ -213,18 +240,17 @@ function bindPlayerEvents(p: FyraPlayer) {
   p.on("network", (evt: any) => {
     const msg = `network: ${JSON.stringify(evt)}`;
     appendLog(msg);
-    const fatal =
-      evt?.fatal ||
-      evt?.type === "disconnect" ||
-      evt?.type === "ice-failed" ||
-      evt?.type === "connect-timeout" ||
-      evt?.type === "signal-error" ||
-      evt?.type === "offer-timeout" ||
-      evt?.type === "ws-fallback-error" ||
-      evt?.type === "fatal";
-    if (fatal) {
-      appendLog("检测到致命网络/信令问题，尝试切换 techOrder 下一候选或重连中...");
-      setStatus("loading", "reconnecting...");
+    if (evt?.type === "reconnect") {
+      setStatus("loading", `reconnecting (${evt.attempt || 0}/${evt.maxRetries || 0})...`);
+      return;
+    }
+    if (evt?.type === "reconnect-exhausted") {
+      setStatus("error", `reconnect exhausted (${evt.attempt || 0}/${evt.maxRetries || 0})`);
+      return;
+    }
+    if (evt?.severity === "fatal" || evt?.fatal) {
+      const reason = evt?.message || evt?.type || "fatal network error";
+      setStatus("error", `fatal: ${reason}`);
     }
   });
   p.on("buffer", () => setStatus("loading", "buffering..."));
@@ -239,16 +265,17 @@ function createPlayer(source: SimpleSource) {
     player.destroy().catch(() => {});
     player = null;
   }
+  const effectiveSource = applyLowLatencyToggle(source);
   const host = document.querySelector(".player-shell") as HTMLElement | null;
   if (!useSkin && host) {
     host.querySelectorAll("fyra-ui-shell").forEach((el) => el.remove());
   }
   video.controls = !hideNativeControls && !useSkin;
-  const lowerUrl = source.url.toLowerCase();
-  const wcEnable = !!source.webCodecs?.enable || (source.type === "file" && lowerUrl.endsWith(".ts"));
+  const lowerUrl = effectiveSource.url.toLowerCase();
+  const wcEnable = !!effectiveSource.webCodecs?.enable || (effectiveSource.type === "file" && lowerUrl.endsWith(".ts"));
   player = new FyraPlayer({
     video,
-    sources: [toPlayerSource(source)],
+    sources: [toPlayerSource(effectiveSource)],
     techOrder: ["gb28181", "webrtc", "ws-raw", "hls", "dash", "fmp4", "file"],
     webCodecs: wcEnable ? { enable: true } : undefined,
     plugins: useSkin
@@ -282,6 +309,19 @@ async function safeRun(label: string, fn: () => Promise<void> | void) {
   } finally {
     setBusy(false);
   }
+}
+
+async function stopPlayback(reason?: string) {
+  if (player) {
+    try {
+      await player.destroy();
+    } catch {
+      /* ignore */
+    }
+    player = null;
+    (window as any).fyraPlayer = null;
+  }
+  setStatus("idle", reason ? `stopped: ${reason}` : "stopped");
 }
 
 populateSelect();
@@ -324,7 +364,14 @@ loadBtn.onclick = () => {
 };
 
 playBtn.onclick = () => safeRun("play", () => player?.play());
-pauseBtn.onclick = () => safeRun("pause", () => player?.pause());
+pauseBtn.onclick = () => {
+  const isWebrtc = currentSrc?.type === "webrtc" || currentSrc?.type === "webrtc-oven";
+  if (busy || uiStatus === "loading" || uiStatus === "buffering" || isWebrtc) {
+    void stopPlayback("manual stop");
+    return;
+  }
+  safeRun("pause", () => player?.pause());
+};
 
 // 本地文件选择
 openFileBtn.onclick = () => fileInput.click();
@@ -379,6 +426,15 @@ if (nativeToggle) {
   nativeToggle.onchange = () => {
     hideNativeControls = nativeToggle.checked;
     video.controls = !hideNativeControls && !useSkin;
+  };
+}
+if (lowLatencyToggle) {
+  lowLatencyToggle.checked = false;
+  lowLatencyToggle.onchange = () => {
+    if (!currentSrc) return;
+    const pick = currentSrc.type === "auto" ? detectType(currentSrc.url) : currentSrc.type;
+    if (pick !== "hls") return;
+    safeRun("load", () => createPlayer(currentSrc as SimpleSource));
   };
 }
 

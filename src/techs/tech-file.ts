@@ -3,12 +3,53 @@ import { BufferPolicy, FileSource, MetadataEvent, MetricsOptions, ReconnectPolic
 import mpegts from 'mpegts.js';
 import { WebCodecsDecoder } from './wsRaw/webcodecsDecoder.js';
 import { Renderer } from './wsRaw/renderer.js';
-import { Demuxer, splitAnnexBNalus, type DemuxerCallbacks } from './wsRaw/demuxer.js';
+import { Demuxer, type DemuxerCallbacks } from './wsRaw/demuxer.js';
 import { probeWebCodecs } from '../utils/webcodecs.js';
+import { decideWebCodecsCodec } from '../utils/decodeDecision.js';
+
+interface Mp4BoxTrackInfo {
+  id: number;
+  video?: boolean;
+  timescale?: number;
+  codec?: string;
+  avcC?: {
+    nalUnitLength?: number;
+    nalUintLength?: number;
+  };
+}
+
+interface Mp4BoxInfo {
+  tracks: Mp4BoxTrackInfo[];
+}
+
+interface Mp4BoxSample {
+  data: ArrayBuffer | Uint8Array;
+  dts: number;
+  cts: number;
+  is_sync: boolean;
+}
+
+type Mp4BoxArrayBuffer = ArrayBuffer & { fileStart?: number };
+
+interface Mp4BoxFileLike {
+  onReady?: (info: Mp4BoxInfo) => void;
+  onSamples?: (id: number, user: unknown, samples: Mp4BoxSample[]) => void;
+  setExtractionOptions(trackId: number, user: unknown, options: { nbSamples: number }): void;
+  start(): void;
+  appendBuffer(buffer: Mp4BoxArrayBuffer): void;
+  flush(): void;
+}
+
+interface Mp4BoxModuleLike {
+  createFile?: () => Mp4BoxFileLike;
+  default?: {
+    createFile?: () => Mp4BoxFileLike;
+  };
+}
 
 // MP4Box type declaration - should be installed via npm: npm install mp4box
-declare const MP4Box: any;
-let mp4boxModule: any = null;
+declare const MP4Box: { createFile?: () => Mp4BoxFileLike } | undefined;
+let mp4boxModule: unknown = null;
 
 /**
  * File/VOD Tech
@@ -82,7 +123,7 @@ export class FileTech extends AbstractTech {
     // TS + WebCodecs (only for non-blob URLs)
     if (useWebCodecsForTs) {
       try {
-        await this.loadTsWithWebCodecs(source.url, opts.video);
+        await this.loadTsWithWebCodecs(source.url, opts.video, opts.webCodecs);
         this.bus.emit('ready');
         return;
       } catch (err) {
@@ -92,12 +133,12 @@ export class FileTech extends AbstractTech {
     }
 
     // MP4 + WebCodecs (opt-in via preferMp4)
-    const preferMp4Wc = !!opts.webCodecs?.enable && (opts.webCodecs as any)?.preferMp4 === true;
+    const preferMp4Wc = !!opts.webCodecs?.enable && opts.webCodecs?.preferMp4 === true;
     if (isMp4 && preferMp4Wc) {
       const support = await probeWebCodecs();
       if (support.h264 || (opts.webCodecs?.allowH265 && support.h265)) {
         try {
-          await this.loadMp4WithWebCodecs(source.url, opts.video, support.h264 ? 'avc1.42E01E' : 'hvc1.1.6.L93.B0');
+          await this.loadMp4WithWebCodecs(source.url, opts.video, support.h264 ? 'avc1.42E01E' : 'hvc1.1.6.L93.B0', opts.webCodecs);
           this.bus.emit('ready');
           return;
         } catch (err) {
@@ -203,7 +244,7 @@ export class FileTech extends AbstractTech {
     this.wcMp4Renderer = null;
   }
 
-  private async loadTsWithWebCodecs(url: string, video: HTMLVideoElement): Promise<void> {
+  private async loadTsWithWebCodecs(url: string, video: HTMLVideoElement, wcConfig?: WebCodecsConfig): Promise<void> {
     this.cleanupWebCodecs();
     this.wcAbort = new AbortController();
     this.wcRenderer = new Renderer(video);
@@ -233,11 +274,13 @@ export class FileTech extends AbstractTech {
     
     let decoded = 0;
     let decodeErrors = 0;
+    let configured = false;
+    let configuredCodec: string | null = null;
     this.wcDecoder = new WebCodecsDecoder((frame) => {
       decoded++;
       this.wcRenderer?.renderFrame(frame);
     });
-    await this.wcDecoder.init();
+    await this.wcDecoder.init(false);
     const res = await fetch(url, { signal: this.wcAbort.signal });
     if (!res.body) throw new Error('ReadableStream not supported');
     const reader = res.body.getReader();
@@ -248,6 +291,22 @@ export class FileTech extends AbstractTech {
       for (const f of frames) {
         // Only process video frames
         if (f.track !== 'video') continue;
+        if (!configured) {
+          const decision = await decideWebCodecsCodec({
+            annexb: f.data,
+            codecHint: 'h264',
+            allowH265: wcConfig?.allowH265
+          });
+          if (!decision.supported || !decision.codec) {
+            throw new Error(`WebCodecs configure failed: ${decision.reason ?? 'unsupported'}`);
+          }
+          const ok = await this.wcDecoder.configure(decision.codec);
+          if (!ok) {
+            throw new Error(`WebCodecs configure failed for codec ${decision.codec}`);
+          }
+          configured = true;
+          configuredCodec = decision.codec;
+        }
         // Ensure first frame is keyframe; otherwise fallback
         if (decoded === 0 && !f.isKey) continue;
         try {
@@ -257,9 +316,9 @@ export class FileTech extends AbstractTech {
         }
       }
     }
-    const decoderErrors = (this.wcDecoder as any)?.getErrorCount?.() ?? 0;
+    const decoderErrors = this.wcDecoder?.getErrorCount() ?? 0;
     const totalErrors = decodeErrors + decoderErrors;
-    if (!decoded) {
+    if (!configured || !decoded) {
       throw new Error('WebCodecs TS decode failed (no frames), fallback');
     }
     if (totalErrors >= 3) {
@@ -269,48 +328,101 @@ export class FileTech extends AbstractTech {
       this.bus.emit('qos', {
         type: 'webcodecs-ts-warning',
         decodedFrames: decoded,
-        decodeErrors: totalErrors
+        decodeErrors: totalErrors,
+        codec: configuredCodec ?? undefined
       });
+    } else {
+      this.bus.emit('qos', { type: 'webcodecs-config', codec: configuredCodec });
     }
   }
 
   // MP4 WebCodecs path via MP4Box streaming demux (video only)
-  private async loadMp4WithWebCodecs(url: string, video: HTMLVideoElement, codec: string): Promise<void> {
+  private async loadMp4WithWebCodecs(url: string, video: HTMLVideoElement, codec: string, wcConfig?: WebCodecsConfig): Promise<void> {
     await this.ensureMp4Box();
     if (!mp4boxModule) throw new Error('MP4Box not available');
+    const moduleLike = mp4boxModule as Mp4BoxModuleLike;
     this.cleanupMp4WebCodecs();
     this.wcMp4Abort = new AbortController();
     this.wcMp4Renderer = new Renderer(video);
 
-    const file = mp4boxModule.createFile ? mp4boxModule.createFile() : mp4boxModule.default.createFile();
+    const createFile = moduleLike.createFile ?? moduleLike.default?.createFile;
+    if (!createFile) {
+      throw new Error('MP4Box createFile() not available');
+    }
+    const file = createFile();
     let videoTrackId: number | null = null;
     let timescale = 1000;
     let nalLengthSize = 4;
+    let configured = false;
+    let configureError: Error | null = null;
+    const pendingSamples: Mp4BoxSample[] = [];
+    let configureResolve: (() => void) | null = null;
+    let configureReject: ((err: unknown) => void) | null = null;
+    const configuredPromise = new Promise<void>((resolve, reject) => {
+      configureResolve = resolve;
+      configureReject = reject;
+    });
 
-    file.onReady = (info: any) => {
-      const v = info.tracks.find((t: any) => t.video);
+    const decodeSample = (s: Mp4BoxSample) => {
+      if (!this.wcMp4Decoder) return;
+      const sampleData = s.data instanceof Uint8Array ? s.data : new Uint8Array(s.data);
+      const annexb = this.avccToAnnexB(sampleData, nalLengthSize);
+      const ptsMs = ((s.dts + s.cts) / (timescale || 1)) * 1000;
+      const chunk = new EncodedVideoChunk({
+        type: s.is_sync ? 'key' : 'delta',
+        timestamp: Math.max(0, Math.round(ptsMs * 1000)), // microseconds
+        data: annexb
+      });
+      try {
+        this.wcMp4Decoder.decode(chunk);
+      } catch (e) {
+        console.warn('[file] mp4 decode error', e);
+      }
+    };
+
+    file.onReady = (info: Mp4BoxInfo) => {
+      const v = info.tracks.find((t) => t.video);
       if (!v) throw new Error('no video track in mp4');
       videoTrackId = v.id;
       timescale = v.timescale || 1000;
-      nalLengthSize = (v.avcC && v.avcC.nalUintLength) || 4;
+      nalLengthSize = v.avcC?.nalUnitLength ?? v.avcC?.nalUintLength ?? 4;
+      const hintedCodec = v.codec || codec;
+      const hint = hintedCodec && (hintedCodec.startsWith('hvc1') || hintedCodec.startsWith('hev1')) ? 'h265' : 'h264';
+      const preferredCodecs = [v.codec, codec].filter((value): value is string => !!value);
+      void decideWebCodecsCodec({
+        preferredCodecs,
+        codecHint: hint,
+        allowH265: wcConfig?.allowH265
+      })
+        .then(async (decision) => {
+          if (!decision.supported || !decision.codec) {
+            throw new Error(`WebCodecs configure failed: ${decision.reason ?? 'unsupported'}`);
+          }
+          if (!this.wcMp4Decoder) return;
+          await this.wcMp4Decoder.configure({ codec: decision.codec });
+          configured = true;
+          if (pendingSamples.length) {
+            for (const sample of pendingSamples) decodeSample(sample);
+            pendingSamples.length = 0;
+          }
+          this.bus.emit('qos', { type: 'webcodecs-config', codec: decision.codec });
+          configureResolve?.();
+        })
+        .catch((err) => {
+          configureError = err instanceof Error ? err : new Error(String(err));
+          configureReject?.(configureError);
+        });
       file.setExtractionOptions(videoTrackId, null, { nbSamples: 8 });
       file.start();
     };
 
-    file.onSamples = (id: number, _user: any, samples: any[]) => {
+    file.onSamples = (id: number, _user: unknown, samples: Mp4BoxSample[]) => {
       if (id !== videoTrackId || !this.wcMp4Decoder) return;
       for (const s of samples) {
-        const annexb = this.avccToAnnexB(new Uint8Array(s.data), nalLengthSize);
-        const ptsMs = ((s.dts + s.cts) / (timescale || 1)) * 1000;
-        const chunk = new EncodedVideoChunk({
-          type: s.is_sync ? 'key' : 'delta',
-          timestamp: Math.max(0, Math.round(ptsMs * 1000)), // microseconds
-          data: annexb
-        });
-        try {
-          this.wcMp4Decoder.decode(chunk);
-        } catch (e) {
-          console.warn('[file] mp4 decode error', e);
+        if (!configured) {
+          pendingSamples.push(s);
+        } else {
+          decodeSample(s);
         }
       }
     };
@@ -322,7 +434,6 @@ export class FileTech extends AbstractTech {
       },
       error: (e) => console.error('[file] mp4 decode error', e)
     });
-    await this.wcMp4Decoder.configure({ codec });
 
     const res = await fetch(url, { signal: this.wcMp4Abort.signal });
     if (!res.body) throw new Error('ReadableStream not supported');
@@ -331,12 +442,19 @@ export class FileTech extends AbstractTech {
     while (true) {
       const { value, done } = await reader.read();
       if (done || !value) break;
-      const buf = value.buffer;
-      (buf as any).fileStart = offset;
+      const buf = value.buffer as Mp4BoxArrayBuffer;
+      buf.fileStart = offset;
       offset += value.byteLength;
       file.appendBuffer(buf);
     }
     file.flush();
+    const timeoutMs = 5000;
+    await Promise.race([
+      configuredPromise,
+      new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('MP4 WebCodecs configure timeout')), timeoutMs))
+    ]);
+    if (configureError) throw configureError;
+    if (!configured) throw new Error('MP4 WebCodecs not configured');
   }
 
   private avccToAnnexB(avcc: Uint8Array, nalSize = 4): Uint8Array {

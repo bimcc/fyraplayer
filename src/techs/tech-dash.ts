@@ -3,14 +3,27 @@ import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig,
 import dashjs from 'dashjs';
 import { probeWebCodecs } from '../utils/webcodecs.js';
 
+type DashEventHandler = (event: unknown) => void;
+
+interface DashErrorEventPayload {
+  event?: {
+    severity?: string;
+  };
+  error?: string;
+}
+
+interface DashMetricBandwidth {
+  bandwidth?: number;
+}
+
 /**
  * DASH Tech - handles .mpd streams
  * Uses dash.js for MSE-based playback
  */
 export class DASHTech extends AbstractTech {
   private dash?: dashjs.MediaPlayerClass;
-  private dashErrorHandler?: any;
-  private dashLevelHandler?: any;
+  private dashErrorHandler?: DashEventHandler;
+  private dashLevelHandler?: DashEventHandler;
 
   canPlay(source: Source): boolean {
     return source.type === 'dash';
@@ -36,7 +49,7 @@ export class DASHTech extends AbstractTech {
       throw new Error('DASHTech only supports dash source type');
     }
     
-    await this.setupDash(source as DASHSource, opts.video, opts.webCodecs);
+    await this.setupDash(source, opts.video, opts.webCodecs);
     this.bus.emit('ready');
   }
 
@@ -51,15 +64,15 @@ export class DASHTech extends AbstractTech {
         abr: {
           limitBitrateByPortal: true
         },
-        // Low latency settings if needed
-        lowLatencyEnabled: false,
-        liveDelay: 3,
+        delay: {
+          liveDelay: 3
+        },
         liveCatchup: {
           enabled: true,
           mode: 'liveCatchupModeDefault'
         }
       }
-    } as any);
+    });
     
     this.setupDashEventHandlers();
     this.dash.initialize(video, source.url, false);
@@ -78,8 +91,14 @@ export class DASHTech extends AbstractTech {
 
   private setupDashEventHandlers(): void {
     if (!this.dash) return;
+
+    const asDashErrorEvent = (value: unknown): DashErrorEventPayload => {
+      if (typeof value !== 'object' || value === null) return {};
+      return value as DashErrorEventPayload;
+    };
     
-    this.dashErrorHandler = (e: any) => {
+    this.dashErrorHandler = (eventPayload: unknown) => {
+      const e = asDashErrorEvent(eventPayload);
       const fatal = e?.event?.severity === 'fatal' || e?.error === 'capability';
       if (fatal) {
         this.bus.emit('error', e);
@@ -88,7 +107,7 @@ export class DASHTech extends AbstractTech {
       }
     };
     
-    this.dashLevelHandler = (e: any) => this.bus.emit('levelSwitch', e);
+    this.dashLevelHandler = (eventPayload: unknown) => this.bus.emit('levelSwitch', eventPayload);
     
     this.dash.on('error', this.dashErrorHandler);
     this.dash.on('qualityChangeRendered', this.dashLevelHandler);
@@ -96,10 +115,20 @@ export class DASHTech extends AbstractTech {
 
   override getStats() {
     if (this.video && this.dash) {
-      const quality = (this.video as any).getVideoPlaybackQuality?.();
+      const videoWithPlaybackQuality = this.video as HTMLVideoElement & {
+        getVideoPlaybackQuality?: () => { totalVideoFrames?: number };
+      };
+      const quality = videoWithPlaybackQuality.getVideoPlaybackQuality?.();
+      const metrics = this.dash.getDashMetrics();
+      const currentSwitch = metrics?.getCurrentRepresentationSwitch('video') as
+        | DashMetricBandwidth
+        | undefined;
+      const currentRequest = metrics?.getCurrentHttpRequest('video') as
+        | DashMetricBandwidth
+        | undefined;
       const dashBitrate =
-        (this.dash.getDashMetrics()?.getCurrentRepresentationSwitch('video') as any)?.bandwidth ||
-        (this.dash.getDashMetrics()?.getCurrentHttpRequest('video') as any)?.bandwidth;
+        currentSwitch?.bandwidth ||
+        currentRequest?.bandwidth;
       return {
         ts: Date.now(),
         fps: quality?.totalVideoFrames,

@@ -32,7 +32,7 @@ const psv = new PhotoSphereViewer({
     [FyraPsvPlugin, {
       video: videoEl,
       sources,
-      techOrder: ['webrtc', 'ws-raw', 'hlsdash']
+      techOrder: ['webrtc', 'ws-raw', 'hls', 'dash']
       // useFrameHook: true, // optional: VideoFrame hook + panoramaRenderer captureStream
     }]
   ]

@@ -1,5 +1,9 @@
 import type { DemuxedFrame } from './demuxer.js';
 
+interface VideoDecoderSupportResult {
+  supported?: boolean;
+}
+
 /**
  * WebCodecs-based H.264 decoder. Only works when browser supports VideoDecoder and H.264.
  */
@@ -9,6 +13,7 @@ export class WebCodecsDecoder {
   private decodedCount = 0;
   private errorCount = 0;
   private codec: string;
+  private configured = false;
 
   constructor(onFrame: (frame: VideoFrame) => void, codec = 'avc1.42E01E') {
     this.onFrame = onFrame;
@@ -19,7 +24,17 @@ export class WebCodecsDecoder {
     return typeof VideoDecoder !== 'undefined' && VideoDecoder.isConfigSupported !== undefined;
   }
 
-  async init(): Promise<void> {
+  static async isCodecSupported(codec: string): Promise<boolean> {
+    if (!WebCodecsDecoder.isSupported()) return false;
+    try {
+      const supported = (await VideoDecoder.isConfigSupported({ codec })) as VideoDecoderSupportResult;
+      return !!supported?.supported;
+    } catch {
+      return false;
+    }
+  }
+
+  async init(autoConfigure = true): Promise<void> {
     if (!WebCodecsDecoder.isSupported()) return;
     this.decoder = new VideoDecoder({
       output: (frame) => {
@@ -32,11 +47,32 @@ export class WebCodecsDecoder {
         console.error('[webcodecs] decode error', e);
       }
     });
-    await this.decoder.configure({ codec: this.codec });
+    if (autoConfigure) {
+      await this.configure(this.codec);
+    }
+  }
+
+  async configure(codec: string): Promise<boolean> {
+    if (!this.decoder) return false;
+    try {
+      const supported = (await VideoDecoder.isConfigSupported({ codec })) as VideoDecoderSupportResult;
+      if (!supported?.supported) return false;
+      this.decoder.reset();
+      this.decoder.configure({ codec });
+      this.codec = codec;
+      this.configured = true;
+      this.decodedCount = 0;
+      this.errorCount = 0;
+      return true;
+    } catch (e) {
+      this.errorCount++;
+      console.warn('[webcodecs] configure failed', e);
+      return false;
+    }
   }
 
   decode(frame: DemuxedFrame): void {
-    if (!this.decoder) return;
+    if (!this.decoder || !this.configured) return;
     const chunk = new EncodedVideoChunk({
       type: frame.isKey ? 'key' : 'delta',
       // WebCodecs timestamp is in microseconds
@@ -56,6 +92,7 @@ export class WebCodecsDecoder {
    */
   setCodec(codec: string): void {
     this.codec = codec;
+    this.configured = false;
   }
 
   close(): void {
@@ -63,6 +100,7 @@ export class WebCodecsDecoder {
     this.decoder = null;
     this.decodedCount = 0;
     this.errorCount = 0;
+    this.configured = false;
   }
 
   hasOutput(): boolean {

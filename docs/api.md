@@ -73,6 +73,38 @@ interface PlayerOptions {
 }
 ```
 
+### WebCodecsSupport
+
+```typescript
+interface WebCodecsSupport {
+  h264: boolean
+  h265: boolean
+  av1: boolean
+  vp9: boolean
+  /** Ordered codec strings that passed isConfigSupported() */
+  h264Codecs?: string[]
+  h265Codecs?: string[]
+}
+```
+
+### WebCodecsConfig & WasmDecoderConfig
+
+```typescript
+interface WebCodecsConfig {
+  enable?: boolean
+  allowH265?: boolean
+}
+
+interface WasmDecoderConfig {
+  enableSharedArrayBuffer?: boolean
+  transferFrames?: boolean
+  workerThreads?: number
+  requireCrossOriginIsolated?: boolean
+}
+```
+
+
+
 ### Source 类型
 
 ```typescript
@@ -130,7 +162,12 @@ interface WSRawSource {
   url: string
   codec: 'h264' | 'h265'
   transport?: 'flv' | 'ts' | 'annexb' | 'ps'
+  decoderUrl?: string
+  wasm?: WasmDecoderConfig
+  heartbeatMs?: number
   metadata?: MetadataConfig
+  audioOptional?: boolean
+  disableAudio?: boolean
   webTransport?: boolean
   preferTech?: 'ws-raw'
 }
@@ -150,6 +187,13 @@ interface Gb28181Source {
   url: string
   control: { invite: string; bye: string; ptz?: string }
   gb: { deviceId: string; channelId: string }
+  responseMapping?: {
+    url?: string
+    callId?: string
+    ssrc?: string
+    streamInfo?: string
+    streamId?: string
+  }
   format?: 'annexb' | 'ts' | 'ps'
   codecHints?: { video?: 'h264' | 'h265'; audio?: 'aac' | 'pcma' | 'pcmu' | 'opus' }
   webTransport?: boolean
@@ -256,6 +300,9 @@ WebSocket + WebCodecs 低延迟播放：
 - 支持元数据提取（KLV/SEI）
 - HTTP-FLV 通过 mpegts.js 回退
 
+- WebCodecs auto-builds codec string from SPS/VPS; if config fails and decoderUrl exists it falls back to WASM decode
+
+
 ```typescript
 { type: 'ws-raw', url: 'wss://...', codec: 'h264', transport: 'flv', preferTech: 'ws-raw' }
 ```
@@ -270,6 +317,8 @@ WebSocket + WebCodecs 低延迟播放：
 | TS | mpegts.js | MSE 播放 |
 | FLV | mpegts.js | MSE 播放 |
 | blob: URL | 根据 container hint | 本地文件需指定 container 类型 |
+
+TS + WebCodecs now derives codec strings from SPS/VPS and falls back to mpegts.js when unsupported.
 
 ```typescript
 // 本地 TS 文件播放示例

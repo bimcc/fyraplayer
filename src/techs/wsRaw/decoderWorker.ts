@@ -1,3 +1,5 @@
+import type { WasmDecoderConfig } from '../../types.js';
+
 export interface DecodedFrame {
   width: number;
   height: number;
@@ -17,22 +19,39 @@ export class DecoderWorker {
   private decodeId = 0;
   private outputQueue: DecodedFrame[] = [];
   private onFrame?: (frame: DecodedFrame) => void;
+  private wasmConfig?: WasmDecoderConfig;
+  private useSharedArrayBuffer = false;
 
-  constructor(decoderUrl?: string, onFrame?: (frame: DecodedFrame) => void) {
+  constructor(decoderUrl?: string, onFrame?: (frame: DecodedFrame) => void, wasmConfig?: WasmDecoderConfig) {
     this.decoderUrl = decoderUrl;
     this.onFrame = onFrame;
+    this.wasmConfig = wasmConfig;
   }
 
   async init(): Promise<void> {
     if (this.worker) return;
+    const wantSAB = !!this.wasmConfig?.enableSharedArrayBuffer || (this.wasmConfig?.workerThreads ?? 0) > 0;
+    const isolated = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated === true;
+    const hasSAB = typeof SharedArrayBuffer !== 'undefined';
+    if (wantSAB && (!isolated || !hasSAB)) {
+      if (this.wasmConfig?.requireCrossOriginIsolated) {
+        throw new Error('SharedArrayBuffer requires COOP/COEP (crossOriginIsolated)');
+      }
+      console.warn('[DecoderWorker] SharedArrayBuffer not available; falling back to normal buffers');
+    }
+    this.useSharedArrayBuffer = wantSAB && isolated && hasSAB;
     const code = `
       let ready = false;
       let decodeFn = null;
       self.onmessage = async (e) => {
-        const { type, frames, decoderUrl, id } = e.data;
+        const { type, frames, decoderUrl, id, wasmConfig } = e.data;
         if (type === 'init') {
           if (decoderUrl) {
             try {
+              if (wasmConfig && wasmConfig.workerThreads) {
+                self.Module = self.Module || {};
+                self.Module.PTHREAD_POOL_SIZE = wasmConfig.workerThreads;
+              }
               importScripts(decoderUrl);
               decodeFn = self.decode || null;
               ready = true;
@@ -102,7 +121,7 @@ export class DecoderWorker {
         }
       };
       this.worker!.addEventListener('message', handler);
-      this.worker!.postMessage({ type: 'init', decoderUrl: this.decoderUrl });
+      this.worker!.postMessage({ type: 'init', decoderUrl: this.decoderUrl, wasmConfig: this.wasmConfig });
     });
   }
 
@@ -117,7 +136,8 @@ export class DecoderWorker {
     const id = ++this.decodeId;
     return new Promise<DecodedFrame[]>((resolve) => {
       this.pendingDecodes.set(id, resolve);
-      worker.postMessage({ type: 'decode', id, frames: nalus });
+      const transfer = this.buildTransferList(nalus);
+      worker.postMessage({ type: 'decode', id, frames: nalus }, transfer);
     });
   }
 
@@ -131,7 +151,20 @@ export class DecoderWorker {
     
     const id = ++this.decodeId;
     // Don't track promise, just fire
-    worker.postMessage({ type: 'decode', id, frames: nalus });
+    const transfer = this.buildTransferList(nalus);
+    worker.postMessage({ type: 'decode', id, frames: nalus }, transfer);
+  }
+
+  private buildTransferList(nalus: Uint8Array[]): Transferable[] {
+    if (this.useSharedArrayBuffer || !this.wasmConfig?.transferFrames) return [];
+    const transfers: Transferable[] = [];
+    for (const nalu of nalus) {
+      const buf = nalu.buffer;
+      if (buf && !(buf instanceof SharedArrayBuffer)) {
+        transfers.push(buf);
+      }
+    }
+    return transfers;
   }
 
   /**

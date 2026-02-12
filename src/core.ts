@@ -1,15 +1,8 @@
 /**
- * FyraPlayer Core Entry Point (Minimal Bundle)
- * 
- * This module exports only the core player functionality without any plugins.
- * Use this for minimal bundle size when you don't need PSV/Cesium/Engine adapters.
- * 
- * Usage:
- *   import { FyraPlayer } from 'fyraplayer/core';
- *   
- * For plugins, import separately:
- *   import { FyraPsvAdapter } from 'fyraplayer/plugins/psv';
- *   import { EngineFactory } from 'fyraplayer/plugins/engines';
+ * FyraPlayer Core entry.
+ *
+ * Note: this export surface is intentionally broad and includes techs/UI.
+ * It is not a strict "minimal bundle" entry.
  */
 
 // Types

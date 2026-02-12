@@ -32,8 +32,8 @@ export class CanvasFrameBuffer {
       this.canvas.width = w;
       this.canvas.height = h;
     }
-    // @ts-ignore VideoFrame is allowed in drawImage in modern browsers
-    this.ctx.drawImage(frame as any, 0, 0, w, h);
+    const imageSource = frame as unknown as CanvasImageSource;
+    this.ctx.drawImage(imageSource, 0, 0, w, h);
   }
 
   /**

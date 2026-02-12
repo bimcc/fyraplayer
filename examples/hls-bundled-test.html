@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HLS.js Bundled Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #1a1a1a; color: white; }
+        video { width: 100%; max-width: 800px; background: black; }
+        input { width: 100%; max-width: 600px; padding: 8px; margin: 10px 0; }
+        button { padding: 8px 16px; cursor: pointer; }
+        #log { background: #333; padding: 10px; margin-top: 20px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>HLS.js Bundled Test (npm version via Vite)</h1>
+    <p>This page uses hls.js from npm package (same as fyraplayer) to test LLHLS playback.</p>
+    
+    <div>
+        <input type="text" id="url" value="http://localhost:3333/app/test/llhls.m3u8" placeholder="Enter HLS URL">
+        <button onclick="loadVideo()">Load</button>
+    </div>
+    
+    <video id="video" controls autoplay muted></video>
+    
+    <div id="log"></div>
+
+    <script type="module">
+        import Hls from 'hls.js';
+
+        const video = document.getElementById('video');
+        const urlInput = document.getElementById('url');
+        const logDiv = document.getElementById('log');
+        let hls = null;
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML = `[${time}] ${msg}<br>` + logDiv.innerHTML;
+            console.log(msg);
+        }
+
+        window.loadVideo = function() {
+            const url = urlInput.value;
+            log(`Loading: ${url}`);
+
+            if (hls) {
+                hls.destroy();
+            }
+
+            if (Hls.isSupported()) {
+                log('HLS.js is supported');
+                log(`HLS.js version: ${Hls.version}`);
+                
+                hls = new Hls({
+                    debug: true,
+                    enableWorker: true,
+                    lowLatencyMode: true
+                });
+
+                hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+                    log('Media attached');
+                    hls.loadSource(url);
+                });
+
+                hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+                    log(`Manifest parsed, ${data.levels.length} quality levels`);
+                    video.play().catch(e => log(`Play error: ${e.message}`));
+                });
+
+                hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+                    log(`Level loaded: ${data.details.live ? 'LIVE' : 'VOD'}`);
+                });
+
+                hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
+                    log(`Fragment loaded: ${data.frag.sn}`);
+                });
+
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    log(`ERROR: ${data.type} - ${data.details}`);
+                    if (data.fatal) {
+                        log(`FATAL ERROR: ${data.details}`);
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                log('Network error, trying to recover...');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                log('Media error, trying to recover...');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                log('Unrecoverable error');
+                                hls.destroy();
+                                break;
+                        }
+                    }
+                });
+
+                hls.attachMedia(video);
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                log('Using native HLS (Safari)');
+                video.src = url;
+            } else {
+                log('HLS not supported');
+            }
+        };
+
+        // Auto-load on page load
+        window.onload = window.loadVideo;
+    </script>
+</body>
+</html>

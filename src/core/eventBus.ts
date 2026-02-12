@@ -1,4 +1,4 @@
-type Listener = (...args: any[]) => void;
+type Listener = (...args: unknown[]) => void;
 
 export class EventBus {
   private listeners: Map<string, Set<Listener>> = new Map();
@@ -33,7 +33,7 @@ export class EventBus {
     }
   }
 
-  emit(event: string, ...args: any[]): void {
+  emit(event: string, ...args: unknown[]): void {
     const ls = this.listeners.get(event);
     if (ls) {
       for (const l of ls) {

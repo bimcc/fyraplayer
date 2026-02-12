@@ -1,6 +1,15 @@
 import { AbstractTech } from './abstractTech.js';
 import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, FMP4Source } from '../types.js';
 
+interface ErrorWithName {
+  name?: string;
+}
+
+interface VideoPlaybackQualityLike {
+  totalVideoFrames?: number;
+  droppedVideoFrames?: number;
+}
+
 /**
  * fMP4 Tech - handles fragmented MP4 streams without manifest (no .m3u8/.mpd)
  * Supports:
@@ -42,7 +51,7 @@ export class FMP4Tech extends AbstractTech {
       throw new Error('FMP4Tech only supports fmp4 source type');
     }
 
-    const fmp4Source = source as unknown as FMP4Source;
+    const fmp4Source = source;
     
     // Determine MIME type based on codec hints
     this.mimeType = this.buildMimeType(fmp4Source);
@@ -140,8 +149,9 @@ export class FMP4Tech extends AbstractTech {
           this.appendBuffer(value.buffer);
         }
       }
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
+    } catch (err) {
+      const error = err as ErrorWithName;
+      if (error.name !== 'AbortError') {
         this.bus.emit('error', { type: 'fetch-error', error: err });
         this.bus.emit('network', { type: 'fmp4-http-error', fatal: true });
       }
@@ -202,8 +212,9 @@ export class FMP4Tech extends AbstractTech {
       const buffer = this.pendingBuffers.shift()!;
       this.isBufferUpdating = true;
       this.sourceBuffer.appendBuffer(buffer);
-    } catch (err: any) {
-      if (err.name === 'QuotaExceededError') {
+    } catch (err) {
+      const error = err as ErrorWithName;
+      if (error.name === 'QuotaExceededError') {
         // Buffer full, try to remove old data
         this.removeOldBufferData();
       } else {
@@ -243,7 +254,10 @@ export class FMP4Tech extends AbstractTech {
 
   override getStats() {
     if (this.video) {
-      const quality = (this.video as any).getVideoPlaybackQuality?.();
+      const videoWithPlaybackQuality = this.video as HTMLVideoElement & {
+        getVideoPlaybackQuality?: () => VideoPlaybackQualityLike;
+      };
+      const quality = videoWithPlaybackQuality.getVideoPlaybackQuality?.();
       const buffered = this.sourceBuffer?.buffered;
       let bufferLevel = 0;
       

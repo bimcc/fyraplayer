@@ -23,11 +23,11 @@ export abstract class AbstractTech implements Tech {
     }
   ): Promise<void>;
 
-  on(event: string, handler: (...args: any[]) => void): void {
+  on(event: string, handler: (...args: unknown[]) => void): void {
     this.bus.on(event, handler);
   }
 
-  off(event: string, handler: (...args: any[]) => void): void {
+  off(event: string, handler: (...args: unknown[]) => void): void {
     this.bus.off(event, handler);
   }
 
@@ -37,7 +37,10 @@ export abstract class AbstractTech implements Tech {
 
   getStats(): EngineStats {
     if (this.video) {
-      const quality = (this.video as any).getVideoPlaybackQuality?.();
+      const videoWithPlaybackQuality = this.video as HTMLVideoElement & {
+        getVideoPlaybackQuality?: () => { droppedVideoFrames?: number; totalVideoFrames?: number };
+      };
+      const quality = videoWithPlaybackQuality.getVideoPlaybackQuality?.();
       return {
         ts: Date.now(),
         width: this.video.videoWidth,

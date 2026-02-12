@@ -55,7 +55,7 @@ const bridge = new KlvBridge({
 const adapter = new FyraPlayerCesiumAdapter({
   video: videoEl,
   sources,
-  techOrder: ["ws-raw", "hlsdash"],
+  techOrder: ["ws-raw", "hls", "dash"],
   onMetadata: (evt) => bridge.handle(evt),
 });
 

@@ -1,13 +1,13 @@
 declare module 'mp4box' {
   export interface MP4File {
     onReady: (info: MP4Info) => void;
-    onSamples: (id: number, user: any, samples: MP4Sample[]) => void;
+    onSamples: (id: number, user: unknown, samples: MP4Sample[]) => void;
     onError: (error: Error) => void;
     appendBuffer(buffer: ArrayBuffer): number;
     start(): void;
     stop(): void;
     flush(): void;
-    setExtractionOptions(trackId: number, user: any, options?: { nbSamples?: number }): void;
+    setExtractionOptions(trackId: number, user: unknown, options?: { nbSamples?: number }): void;
   }
 
   export interface MP4Info {
@@ -52,7 +52,7 @@ declare module 'mp4box' {
     track_id: number;
     timescale: number;
     description_index: number;
-    description: any;
+    description: unknown;
     data: ArrayBuffer;
     size: number;
     alreadyRead: number;

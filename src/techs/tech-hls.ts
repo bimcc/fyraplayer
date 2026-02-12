@@ -6,6 +6,14 @@ import { Renderer } from './wsRaw/renderer.js';
 import { Demuxer } from './wsRaw/demuxer.js';
 import { probeWebCodecs } from '../utils/webcodecs.js';
 import { buildLowLatencyConfig } from './hlsConfig.js';
+import { decideWebCodecsCodec } from '../utils/decodeDecision.js';
+
+type HlsEventHandler = (...args: unknown[]) => void;
+
+interface HlsErrorPayload {
+  details?: string;
+  fatal?: boolean;
+}
 
 // Re-export for backwards compatibility
 export { buildLowLatencyConfig } from './hlsConfig.js';
@@ -20,10 +28,9 @@ export class HLSTech extends AbstractTech {
   private wcRenderer: Renderer | null = null;
   private wcDecoder: WebCodecsDecoder | null = null;
   private wcDemuxer: Demuxer | null = null;
-  private hlsErrorHandler?: any;
-  private hlsLevelHandler?: any;
-  private hlsBufferHandler?: any;
-  private hlsManifestHandler?: any;
+  private hlsErrorHandler?: HlsEventHandler;
+  private hlsLevelHandler?: HlsEventHandler;
+  private hlsManifestHandler?: HlsEventHandler;
 
   canPlay(source: Source): boolean {
     return source.type === 'hls';
@@ -49,7 +56,7 @@ export class HLSTech extends AbstractTech {
       throw new Error('HLSTech only supports hls source type');
     }
     
-    await this.setupHls(source as HLSSource, opts.video, opts.webCodecs);
+    await this.setupHls(source, opts.video, opts.webCodecs);
     this.bus.emit('ready');
   }
 
@@ -59,7 +66,7 @@ export class HLSTech extends AbstractTech {
     // Try WebCodecs path for TS segments
     if (wc?.enable && WebCodecsDecoder.isSupported() && (await this.isSafeForWebCodecs(source))) {
       try {
-        await this.pullWithWebCodecs(source.url, video);
+        await this.pullWithWebCodecs(source.url, video, wc);
         return;
       } catch (err) {
         console.warn('[hls] WebCodecs pull failed, fallback to hls.js', err);
@@ -67,47 +74,63 @@ export class HLSTech extends AbstractTech {
       }
     }
     
-    // Check native HLS support (Safari)
-    const canNative = video.canPlayType('application/vnd.apple.mpegurl');
-    
-    // Build config with low-latency settings
-    const lowLatencyConfig = buildLowLatencyConfig(source, this.buffer);
+    // Build config - keep it simple like OvenPlayer
+    // Low-latency settings only when explicitly requested
     const config: Partial<HlsConfig> = {
+      debug: false,
       capLevelToPlayerSize: true,
-      ...lowLatencyConfig
+      enableWorker: true,
+      // Only add low-latency config if explicitly requested
+      ...(source.lowLatency ? buildLowLatencyConfig(source, this.buffer) : {})
     };
     
-    if (canNative) {
-      video.src = source.url;
-      await video.load();
+    // Priority: hls.js (MSE) > native HLS (Safari/iOS only)
+    // Chrome/Edge return "maybe" for canPlayType but their native HLS is unreliable
+    // Only Safari/iOS have proper native HLS support
+    if (Hls.isSupported()) {
+      // Use hls.js for consistent cross-browser behavior
+      console.log('[hls] Using hls.js (MSE)');
+      this.hls = new Hls(config);
+      this.hls.attachMedia(video);
+      this.setupHlsEventHandlers(video);
+      this.hls.loadSource(source.url);
       return;
     }
     
-    if (!Hls.isSupported()) {
-      throw new Error('HLS not supported in this browser');
+    // Fallback to native HLS only when hls.js is not supported (Safari/iOS)
+    const canNative = video.canPlayType('application/vnd.apple.mpegurl');
+    if (canNative) {
+      console.log('[hls] Using native HLS (Safari/iOS fallback)');
+      video.src = source.url;
+      video.load();
+      return;
     }
     
-    this.hls = new Hls(config);
-    this.setupHlsEventHandlers(video);
-    this.hls.loadSource(source.url);
-    this.hls.attachMedia(video);
+    throw new Error('HLS not supported in this browser');
   }
 
   private setupHlsEventHandlers(video: HTMLVideoElement): void {
     if (!this.hls) return;
+
+    const asErrorPayload = (value: unknown): HlsErrorPayload => {
+      if (typeof value !== 'object' || value === null) return {};
+      return value as HlsErrorPayload;
+    };
     
-    this.hlsErrorHandler = (_e: any, data: any) => {
+    this.hlsErrorHandler = (_event: unknown, payload: unknown) => {
+      const data = asErrorPayload(payload);
       this.bus.emit('error', data);
+      if (data?.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+        this.bus.emit('buffer');
+      }
       if (data?.fatal) {
         this.bus.emit('network', { type: 'hls-fatal', details: data.details });
         this.hls?.recoverMediaError?.();
       }
     };
     
-    this.hlsLevelHandler = (_e: any, data: any) => this.bus.emit('levelSwitch', data);
-    this.hlsBufferHandler = () => this.bus.emit('buffer');
-    
-    this.hlsManifestHandler = (_e: any, _data: any) => {
+    this.hlsLevelHandler = (_event: unknown, data: unknown) => this.bus.emit('levelSwitch', data);
+    this.hlsManifestHandler = (_event: unknown, _data: unknown) => {
       const maxH = this.deriveMaxHeight(video);
       if (this.hls?.levels?.length) {
         const capped = this.hls.levels.reduce(
@@ -120,13 +143,15 @@ export class HLSTech extends AbstractTech {
     
     this.hls.on(Hls.Events.ERROR, this.hlsErrorHandler);
     this.hls.on(Hls.Events.LEVEL_SWITCHED, this.hlsLevelHandler);
-    this.hls.on(Hls.Events.BUFFER_APPENDED, this.hlsBufferHandler);
     this.hls.on(Hls.Events.MANIFEST_PARSED, this.hlsManifestHandler);
   }
 
   override getStats() {
     if (this.video && this.hls) {
-      const quality = (this.video as any).getVideoPlaybackQuality?.();
+      const videoWithPlaybackQuality = this.video as HTMLVideoElement & {
+        getVideoPlaybackQuality?: () => { totalVideoFrames?: number };
+      };
+      const quality = videoWithPlaybackQuality.getVideoPlaybackQuality?.();
       const hlsBitrate = this.hls.levels && this.hls.currentLevel >= 0 
         ? this.hls.levels[this.hls.currentLevel]?.bitrate 
         : undefined;
@@ -150,7 +175,6 @@ export class HLSTech extends AbstractTech {
     if (this.hls) {
       if (this.hlsErrorHandler) this.hls.off(Hls.Events.ERROR, this.hlsErrorHandler);
       if (this.hlsLevelHandler) this.hls.off(Hls.Events.LEVEL_SWITCHED, this.hlsLevelHandler);
-      if (this.hlsBufferHandler) this.hls.off(Hls.Events.BUFFER_APPENDED, this.hlsBufferHandler);
       if (this.hlsManifestHandler) this.hls.off(Hls.Events.MANIFEST_PARSED, this.hlsManifestHandler);
       try {
         this.hls.detachMedia();
@@ -178,19 +202,21 @@ export class HLSTech extends AbstractTech {
   }
 
   private async isSafeForWebCodecs(source: HLSSource): Promise<boolean> {
-    if ((source as any).drm) return false;
+    if (source.drm) return false;
     if (!source.url.toLowerCase().endsWith('.ts')) return false;
     const support = await probeWebCodecs();
     return support.h264;
   }
 
-  private async pullWithWebCodecs(url: string, video: HTMLVideoElement): Promise<void> {
+  private async pullWithWebCodecs(url: string, video: HTMLVideoElement, wc?: WebCodecsConfig): Promise<void> {
     this.cleanupWebCodecs();
     this.wcAbort = new AbortController();
     this.wcRenderer = new Renderer(video);
     this.wcDemuxer = new Demuxer('ts');
     this.wcDecoder = new WebCodecsDecoder((frame) => this.wcRenderer?.renderFrame(frame));
-    await this.wcDecoder.init();
+    await this.wcDecoder.init(false);
+    let configured = false;
+    let configuredCodec: string | null = null;
     
     const res = await fetch(url, { signal: this.wcAbort.signal });
     if (!res.body) throw new Error('ReadableStream not supported');
@@ -201,13 +227,36 @@ export class HLSTech extends AbstractTech {
       if (done || !value) break;
       const frames = this.wcDemuxer.demux(value.buffer);
       for (const f of frames) {
+        if (f.track !== 'video') continue;
+        if (!configured) {
+          const decision = await decideWebCodecsCodec({
+            annexb: f.data,
+            codecHint: 'h264',
+            allowH265: wc?.allowH265
+          });
+          if (!decision.supported || !decision.codec) {
+            throw new Error(`WebCodecs configure failed: ${decision.reason ?? 'unsupported'}`);
+          }
+          const ok = await this.wcDecoder.configure(decision.codec);
+          if (!ok) {
+            throw new Error(`WebCodecs configure failed for codec ${decision.codec}`);
+          }
+          configured = true;
+          configuredCodec = decision.codec;
+        }
         this.wcDecoder.decode(f);
       }
     }
     
-    if (!this.wcDecoder.hasOutput() || this.wcDecoder.hasErrors()) {
+    if (!configured || !this.wcDecoder.hasOutput() || this.wcDecoder.hasErrors()) {
+      this.wcRenderer?.destroy();
+      this.wcRenderer = null;
+      this.wcDecoder?.close();
+      this.wcDecoder = null;
+      this.wcDemuxer = null;
       throw new Error('HLS WebCodecs decode error, fallback to hls.js');
     }
+    this.bus.emit('qos', { type: 'webcodecs-config', codec: configuredCodec });
   }
 
   private deriveMaxHeight(video: HTMLVideoElement): number {

@@ -53,12 +53,24 @@ export function isFullscreen(): boolean {
   return !!document.fullscreenElement;
 }
 
+type DocumentWithPip = Document & {
+  pictureInPictureEnabled?: boolean;
+  pictureInPictureElement?: Element | null;
+  exitPictureInPicture?: () => Promise<void>;
+};
+
+type VideoWithPip = HTMLVideoElement & {
+  requestPictureInPicture?: () => Promise<unknown>;
+};
+
 export async function togglePip(video: HTMLVideoElement | null): Promise<void> {
-  if (!video || !(document as any).pictureInPictureEnabled) return;
-  if ((document as any).pictureInPictureElement) {
-    await (document as any).exitPictureInPicture();
+  const pipDocument = document as DocumentWithPip;
+  const pipVideo = video as VideoWithPip | null;
+  if (!pipVideo || !pipDocument.pictureInPictureEnabled) return;
+  if (pipDocument.pictureInPictureElement) {
+    await pipDocument.exitPictureInPicture?.();
   } else {
-    await (video as any).requestPictureInPicture();
+    await pipVideo.requestPictureInPicture?.();
   }
 }
 

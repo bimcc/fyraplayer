@@ -6,6 +6,26 @@ interface TechEntry {
   impl: Tech;
 }
 
+interface TechLoadError {
+  tech: TechName;
+  source: Source;
+  reason: unknown;
+}
+
+type SourceWithPreferTech = Source & {
+  preferTech?: TechName;
+};
+
+class TechSelectionError extends Error {
+  causes: TechLoadError[];
+
+  constructor(message: string, causes: TechLoadError[]) {
+    super(message);
+    this.name = 'TechSelectionError';
+    this.causes = causes;
+  }
+}
+
 export class TechManager {
   private techs: TechEntry[] = [];
   private current: TechEntry | null = null;
@@ -94,7 +114,7 @@ export class TechManager {
     }
   ): Promise<{ source: Source; tech: TechName } | null> {
     await this.destroyCurrent();
-    const errors: { tech: TechName; source: Source; reason: any }[] = [];
+    const errors: TechLoadError[] = [];
     
     // Requirements 5.5: Filter out failed techs
     const effectiveOrder = techOrder.filter(t => !this.failedTechs.has(t));
@@ -123,11 +143,13 @@ export class TechManager {
     
     if (errors.length) {
       const detail = errors
-        .map((e) => `${e.tech} (${(e.source as any)?.url ?? e.source.type}): ${(e.reason as any)?.message ?? e.reason}`)
+        .map((e) => {
+          const sourceUrl = typeof e.source.url === 'string' ? e.source.url : e.source.type;
+          const reasonMessage = e.reason instanceof Error ? e.reason.message : String(e.reason);
+          return `${e.tech} (${sourceUrl}): ${reasonMessage}`;
+        })
         .join('; ');
-      const err: any = new Error(`No compatible tech/source. Reasons: ${detail}`);
-      err.causes = errors;
-      throw err;
+      throw new TechSelectionError(`No compatible tech/source. Reasons: ${detail}`, errors);
     }
     return null;
   }
@@ -146,10 +168,10 @@ export class TechManager {
       webCodecs?: import('../types.js').WebCodecsConfig;
       dataChannel?: DataChannelOptions;
     },
-    errors: { tech: TechName; source: Source; reason: any }[]
+    errors: TechLoadError[]
   ): Promise<{ source: Source; tech: TechName } | null> {
     // Requirements 5.6: Respect user-configured techOrder as priority
-    const preferred = (source as any).preferTech as TechName | undefined;
+    const preferred = (source as SourceWithPreferTech).preferTech;
     const ordered = preferred ? [preferred, ...techOrder.filter((t) => t !== preferred)] : techOrder;
     
     for (const name of ordered) {

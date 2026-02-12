@@ -27,7 +27,7 @@ export class MiddlewareManager {
       return entry.fn(ctx);
     }
     const timeoutMs = entry.timeoutMs ?? CONTROL_TIMEOUT_MS;
-    let timer: any;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const res = await Promise.race([
         entry.fn(ctx),
@@ -41,7 +41,7 @@ export class MiddlewareManager {
       console.warn('[middleware] control middleware error, bypass', err);
       return;
     } finally {
-      if (timer) clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 }

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FyraPlayer HLS Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #1a1a1a; color: white; }
+        video { width: 100%; max-width: 800px; background: black; }
+        input { width: 100%; max-width: 600px; padding: 8px; margin: 10px 0; }
+        button { padding: 8px 16px; cursor: pointer; }
+        #log { background: #333; padding: 10px; margin-top: 20px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>FyraPlayer HLS Test</h1>
+    <p>This page tests FyraPlayer with HLS/LLHLS streams.</p>
+    
+    <div>
+        <input type="text" id="url" value="http://localhost:3333/app/test/llhls.m3u8" placeholder="Enter HLS URL">
+        <button onclick="loadVideo()">Load</button>
+        <label style="margin-left:8px;font-size:12px;">
+            <input type="checkbox" id="toggle-low-latency" /> Low latency (LL-HLS)
+        </label>
+    </div>
+    
+    <video id="video" controls autoplay muted></video>
+    
+    <div id="log"></div>
+
+    <script type="module">
+        import { FyraPlayer } from '../src/index.js';
+
+        const video = document.getElementById('video');
+        const urlInput = document.getElementById('url');
+        const logDiv = document.getElementById('log');
+        const lowLatencyToggle = document.getElementById('toggle-low-latency');
+        let player = null;
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML = `[${time}] ${msg}<br>` + logDiv.innerHTML;
+            console.log(msg);
+        }
+
+        window.loadVideo = async function() {
+            const url = urlInput.value;
+            log(`Loading with FyraPlayer: ${url}`);
+
+            if (player) {
+                await player.destroy();
+                player = null;
+            }
+
+            try {
+                player = new FyraPlayer({
+                    video,
+                    sources: [{
+                        type: 'hls',
+                        url: url,
+                        lowLatency: !!lowLatencyToggle?.checked
+                    }],
+                    techOrder: ['hls']
+                });
+
+                player.on('ready', () => log('Player ready'));
+                player.on('play', () => log('Playing'));
+                player.on('pause', () => log('Paused'));
+                player.on('error', (e) => log(`Error: ${e?.message || JSON.stringify(e)}`));
+                player.on('network', (e) => log(`Network: ${JSON.stringify(e)}`));
+
+                await player.init();
+                log('Player initialized');
+                
+                await player.play();
+                log('Play called');
+            } catch (e) {
+                log(`Failed: ${e?.message || e}`);
+                console.error(e);
+            }
+        };
+
+        // Auto-load on page load
+        window.onload = () => {
+            log('Page loaded, FyraPlayer imported successfully');
+            loadVideo();
+        };
+    </script>
+</body>
+</html>

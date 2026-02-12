@@ -1,6 +1,74 @@
 ﻿import { AbstractTech } from "./abstractTech.js";
-import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebRTCSignalConfig, DataChannelOptions } from "../types.js";
+import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebRTCSignalConfig, DataChannelOptions, EngineStats } from "../types.js";
 import { createSignalAdapter, WebRTCSignalAdapter } from "./webrtc/signalAdapter.js";
+
+type VideoElementWithPlaybackHints = HTMLVideoElement & {
+  disableRemotePlayback?: boolean;
+};
+
+type ReceiverWithDelayHints = RTCRtpReceiver & {
+  playoutDelayHint?: number;
+  jitterBufferDelayHint?: number;
+};
+
+type WindowWithWebkitAudioContext = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+type RenditionInfo = {
+  name?: string;
+  rendition_name?: string;
+  video_track?: { video?: { bitrate?: number } };
+  audio_track?: { bitrate?: number };
+};
+
+type SignalSideEvent = {
+  type?: string;
+  event?: string;
+  reason?: string;
+  rendition?: string | null;
+  playlist?: RenditionInfo[];
+  auto?: boolean;
+  payload?: { rendition?: string | null };
+};
+
+type CandidatePairStats = RTCStats & {
+  type: 'candidate-pair';
+  state?: string;
+  currentRoundTripTime?: number;
+  localCandidateId?: string;
+  remoteCandidateId?: string;
+};
+
+type InboundRtpStats = RTCStats & {
+  type: 'inbound-rtp';
+  kind?: 'audio' | 'video';
+  isRemote?: boolean;
+  bytesReceived?: number;
+  framesDecoded?: number;
+  framesDropped?: number;
+  packetsReceived?: number;
+  packetsLost?: number;
+  pliCount?: number;
+  nackCount?: number;
+  firCount?: number;
+  jitterBufferDelay?: number;
+  jitterBufferEmittedCount?: number;
+  totalDecodeTime?: number;
+  jitter?: number;
+};
+
+type TrackStats = Omit<RTCStats, 'type'> & {
+  type: 'track';
+  kind?: 'audio' | 'video';
+  frameWidth?: number;
+  frameHeight?: number;
+};
+
+type IceCandidateStats = RTCStats & {
+  candidateType?: string;
+  protocol?: string;
+};
 
 /**
  * WebRTC Tech implementation.
@@ -11,14 +79,14 @@ export class WebRTCTech extends AbstractTech {
   private adapter: WebRTCSignalAdapter | null = null;
   private dataChannel: RTCDataChannel | null = null;
   private dataChannelOpts: DataChannelOptions | undefined;
-  private dataHeartbeat: any = null;
-  private connectTimer: any = null;
+  private dataHeartbeat: ReturnType<typeof setInterval> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastStatsTs = 0;
   private lastBytes = 0;
   private lastFrames = 0;
   private readyFired = false;
-  private lastStatsSnapshot: any = null;
-  private iceReconnectTimer: any = null;
+  private lastStatsSnapshot: EngineStats | null = null;
+  private iceReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private playoutDelayHintSeconds: number | null = null;
   private lastLoadOpts:
     | {
@@ -32,11 +100,11 @@ export class WebRTCTech extends AbstractTech {
     | null = null;
   private abrSwitching = false;
   private currentRendition: string | null = null;
-  private omePlaylist: Array<any> | null = null;
+  private omePlaylist: RenditionInfo[] | null = null;
   private omeAutoQuality = true;
   private packetLossWindow: number[] = [];
   private packetLossPrevLost: number | null = null;
-  private packetLossTimer: any = null;
+  private packetLossTimer: ReturnType<typeof setInterval> | null = null;
   private lastAbrDownswitchTs = 0;
   private audioCtx: AudioContext | null = null;
 
@@ -77,12 +145,12 @@ export class WebRTCTech extends AbstractTech {
     this.video.autoplay = true;
     // Disable default buffering for real-time playback
     if ('disableRemotePlayback' in this.video) {
-      (this.video as any).disableRemotePlayback = true;
+      (this.video as VideoElementWithPlaybackHints).disableRemotePlayback = true;
     }
     
     // Requirements 2.5: Metadata load timeout warning
     const metadataTimeout = this.reconnect?.timeoutMs ?? 10000;
-    let metadataTimer: any = null;
+    let metadataTimer: ReturnType<typeof setTimeout> | null = null;
     
     this.video.onloadedmetadata = () => {
       if (metadataTimer) {
@@ -200,12 +268,13 @@ export class WebRTCTech extends AbstractTech {
     const hint = this.playoutDelayHintSeconds;
     if (!receiver || hint === null) return;
     try {
+      const receiverWithHints = receiver as ReceiverWithDelayHints;
       if ('playoutDelayHint' in receiver) {
-        (receiver as any).playoutDelayHint = hint;
+        receiverWithHints.playoutDelayHint = hint;
       }
       // Audio receivers can also take jitterBufferDelayHint in some browsers
       if (receiver.track?.kind === 'audio' && 'jitterBufferDelayHint' in receiver) {
-        (receiver as any).jitterBufferDelayHint = hint;
+        receiverWithHints.jitterBufferDelayHint = hint;
       }
     } catch (e) {
       console.warn('[webrtc] Failed to set playoutDelayHint', e);
@@ -317,7 +386,7 @@ export class WebRTCTech extends AbstractTech {
     if (!effectiveSignal) throw new Error("WebRTC signal config required");
     this.adapter = createSignalAdapter(effectiveSignal);
     await this.adapter.setup(this.pc, src, (evt) => {
-      this.bus.emit("network", { type: "webrtc-signal", ...evt });
+      this.bus.emit("network", { ...evt, stage: "webrtc-signal" });
       if (evt?.type === "offer") {
         // signaling 已经收到 offer，视为 ready 进入缓冲状态
         this.bus.emit("buffer");
@@ -350,8 +419,25 @@ export class WebRTCTech extends AbstractTech {
       }
     }
     // Default to WHEP for HTTP(S) URLs
+    // Auto-detect MediaMTX style URLs and append /whep if missing
+    let whepUrl = url;
+    if (!url.endsWith('/whep') && !url.endsWith('/whip')) {
+      try {
+        const parsed = new URL(url);
+        // MediaMTX default WebRTC port is 8889
+        // Also check common patterns: no file extension, looks like a stream path
+        const isLikelyMediaMTX = parsed.port === '8889' || 
+          (!parsed.pathname.includes('.') && parsed.pathname !== '/');
+        if (isLikelyMediaMTX) {
+          whepUrl = url.endsWith('/') ? `${url}whep` : `${url}/whep`;
+          console.log('[webrtc] Auto-appended /whep suffix for MediaMTX-style URL:', whepUrl);
+        }
+      } catch {
+        // Invalid URL, use as-is
+      }
+    }
     console.log('[webrtc] Auto-detected WHEP signaling');
-    return { type: 'whep', url };
+    return { type: 'whep', url: whepUrl };
   }
 
   private setupDataChannel(opts?: DataChannelOptions): void {
@@ -414,14 +500,14 @@ export class WebRTCTech extends AbstractTech {
     }
   }
   
-  private handleSignalSideEvents(evt: any): void {
+  private handleSignalSideEvents(evt: SignalSideEvent): void {
     if (!evt) return;
     if (evt.type === "notification") {
       this.bus.emit("network", { type: "webrtc-notification", event: evt.event, reason: evt.reason, rendition: evt.rendition });
     }
     if (evt.type === "playlist") {
       const playlist = Array.isArray(evt.playlist) ? evt.playlist : [];
-      this.omePlaylist = playlist.slice().sort((a: any, b: any) => {
+      this.omePlaylist = playlist.slice().sort((a, b) => {
         const aBitrate = a?.video_track?.video?.bitrate ?? a?.audio_track?.bitrate ?? 0;
         const bBitrate = b?.video_track?.video?.bitrate ?? b?.audio_track?.bitrate ?? 0;
         return bBitrate - aBitrate;
@@ -485,7 +571,7 @@ export class WebRTCTech extends AbstractTech {
     this.readyFired = false;
   }
   
-  private async handleAbrRenditionChange(evt: any): Promise<void> {
+  private async handleAbrRenditionChange(evt: SignalSideEvent): Promise<void> {
     if (this.abrSwitching) return;
     const rendition = evt?.rendition ?? evt?.payload?.rendition ?? null;
     const reason = evt?.reason;
@@ -546,9 +632,10 @@ export class WebRTCTech extends AbstractTech {
     const report = await this.pc.getStats().catch(() => null);
     if (!report) return;
     let packetsLost: number | null = null;
-    report.forEach((s: any) => {
-      if (s.type === "inbound-rtp" && s.kind === "video" && !s.isRemote) {
-        packetsLost = typeof s.packetsLost === 'number' ? s.packetsLost : packetsLost;
+    report.forEach((s) => {
+      const inbound = s as InboundRtpStats;
+      if (inbound.type === "inbound-rtp" && inbound.kind === "video" && !inbound.isRemote) {
+        packetsLost = typeof inbound.packetsLost === 'number' ? inbound.packetsLost : packetsLost;
       }
     });
     if (packetsLost === null) return;
@@ -584,7 +671,7 @@ export class WebRTCTech extends AbstractTech {
     
     // Determine current index in playlist
     const currentIndex = this.currentRendition
-      ? this.omePlaylist.findIndex((r: any) => r?.name === this.currentRendition || r?.rendition_name === this.currentRendition)
+      ? this.omePlaylist.findIndex((r) => r?.name === this.currentRendition || r?.rendition_name === this.currentRendition)
       : 0;
     const nextIndex = currentIndex >= 0 && currentIndex < this.omePlaylist.length - 1 ? currentIndex + 1 : this.omePlaylist.length - 1;
     if (nextIndex === currentIndex) return false;
@@ -604,7 +691,8 @@ export class WebRTCTech extends AbstractTech {
     if (this.audioCtx) return;
     if (!stream.getAudioTracks().length) return;
     try {
-      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const windowWithLegacyAudio = window as WindowWithWebkitAudioContext;
+      const AudioCtx = window.AudioContext || windowWithLegacyAudio.webkitAudioContext;
       if (!AudioCtx) return;
       this.audioCtx = new AudioCtx();
       const source = this.audioCtx!.createMediaStreamSource(stream);
@@ -631,8 +719,8 @@ export class WebRTCTech extends AbstractTech {
     let width: number | undefined;
     let height: number | undefined;
     let candidatePairId: string | undefined;
-    const localCandidates = new Map<string, any>();
-    const remoteCandidates = new Map<string, any>();
+    const localCandidates = new Map<string, IceCandidateStats>();
+    const remoteCandidates = new Map<string, IceCandidateStats>();
     let jitterMs: number | undefined;
     let rttMs: number | undefined;
     let bitrateKbps: number | undefined;
@@ -642,48 +730,53 @@ export class WebRTCTech extends AbstractTech {
     let candidateType: string | undefined;
     let transport: string | undefined;
     report.forEach((s) => {
-      if ((s as any).type === "inbound-rtp" && (s as any).kind === "video") {
-        bytes += (s as any).bytesReceived || 0;
-        frames += (s as any).framesDecoded || 0;
-        framesDecoded = (s as any).framesDecoded;
-        framesDropped = (s as any).framesDropped;
-        framesReceived = (s as any).packetsReceived;
-        pliCount = (s as any).pliCount;
-        nackCount = (s as any).nackCount;
-        firCount = (s as any).firCount;
-        if ((s as any).jitterBufferDelay !== undefined && (s as any).jitterBufferEmittedCount) {
-          const avg = (s as any).jitterBufferDelay / (s as any).jitterBufferEmittedCount;
+      const inbound = s as InboundRtpStats;
+      const pair = s as CandidatePairStats;
+      const track = s as TrackStats;
+      const candidate = s as IceCandidateStats;
+
+      if (inbound.type === "inbound-rtp" && inbound.kind === "video") {
+        bytes += inbound.bytesReceived || 0;
+        frames += inbound.framesDecoded || 0;
+        framesDecoded = inbound.framesDecoded;
+        framesDropped = inbound.framesDropped;
+        framesReceived = inbound.packetsReceived;
+        pliCount = inbound.pliCount;
+        nackCount = inbound.nackCount;
+        firCount = inbound.firCount;
+        if (inbound.jitterBufferDelay !== undefined && inbound.jitterBufferEmittedCount) {
+          const avg = inbound.jitterBufferDelay / inbound.jitterBufferEmittedCount;
           jitterBufferMs = Math.round(avg * 1000);
         }
-        if ((s as any).totalDecodeTime !== undefined && (s as any).framesDecoded) {
-          decodeMs = Math.round(((s as any).totalDecodeTime / (s as any).framesDecoded) * 1000);
+        if (inbound.totalDecodeTime !== undefined && inbound.framesDecoded) {
+          decodeMs = Math.round((inbound.totalDecodeTime / inbound.framesDecoded) * 1000);
         }
-        packetsLost = (s as any).packetsLost;
-        packetsRecv = (s as any).packetsReceived;
+        packetsLost = inbound.packetsLost;
+        packetsRecv = inbound.packetsReceived;
       }
-      if ((s as any).type === "candidate-pair" && (s as any).state === "succeeded") {
-        rttMs = Math.round(((s as any).currentRoundTripTime || 0) * 1000);
-        candidatePairId = (s as any).id;
+      if (pair.type === "candidate-pair" && pair.state === "succeeded") {
+        rttMs = Math.round((pair.currentRoundTripTime || 0) * 1000);
+        candidatePairId = pair.id;
       }
-      if ((s as any).type === "inbound-rtp" && (s as any).kind === "audio") {
-        if ((s as any).jitter !== undefined) {
-          jitterMs = Math.round(((s as any).jitter || 0) * 1000);
+      if (inbound.type === "inbound-rtp" && inbound.kind === "audio") {
+        if (inbound.jitter !== undefined) {
+          jitterMs = Math.round((inbound.jitter || 0) * 1000);
         }
       }
-      if ((s as any).type === "track" && (s as any).kind === "video") {
-        width = (s as any).frameWidth ?? width;
-        height = (s as any).frameHeight ?? height;
+      if (track.type === "track" && track.kind === "video") {
+        width = track.frameWidth ?? width;
+        height = track.frameHeight ?? height;
       }
-      if ((s as any).type === "local-candidate") {
-        localCandidates.set((s as any).id, s);
+      if (candidate.type === "local-candidate") {
+        localCandidates.set(candidate.id, candidate);
       }
-      if ((s as any).type === "remote-candidate") {
-        remoteCandidates.set((s as any).id, s);
+      if (candidate.type === "remote-candidate") {
+        remoteCandidates.set(candidate.id, candidate);
       }
     });
     // Resolve selected candidate info
     if (candidatePairId) {
-      const pair = Array.from(report.values()).find((s: any) => s.id === candidatePairId) as any;
+      const pair = Array.from(report.values()).find((s) => s.id === candidatePairId) as CandidatePairStats | undefined;
       const local = pair?.localCandidateId ? localCandidates.get(pair.localCandidateId) : null;
       const remote = pair?.remoteCandidateId ? remoteCandidates.get(pair.remoteCandidateId) : null;
       candidateType = remote?.candidateType || local?.candidateType;

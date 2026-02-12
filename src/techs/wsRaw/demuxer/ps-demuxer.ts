@@ -19,6 +19,7 @@ export function createPsState(): PsDemuxerState {
  * Assumes payload carries AnnexB NAL (H.264/H.265) and raw AAC/G711/Opus.
  */
 export function demuxPs(data: Uint8Array, state: PsDemuxerState, ctx: PsDemuxerContext): DemuxedFrame[] {
+  void ctx;
   const frames: DemuxedFrame[] = [];
   let offset = 0;
   while (offset + 4 < data.length) {
@@ -50,7 +51,7 @@ export function demuxPs(data: Uint8Array, state: PsDemuxerState, ctx: PsDemuxerC
     if (offset + 2 > data.length) break;
     const pesLen = (data[offset] << 8) | data[offset + 1];
     offset += 2;
-    const pesFlags1 = data[offset];
+    // pes_flags_1 currently unused in minimal parser
     const pesFlags2 = data[offset + 1];
     const headerLen = data[offset + 2];
     offset += 3;
