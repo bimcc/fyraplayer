@@ -185,7 +185,7 @@ Still pending:
 
 - Long-run memory and listener growth evidence.
 - Real fMP4 live stream bounded-buffer evidence.
-- Long-run MediaMTX/WebRTC performance evidence.
+- Long-run MediaMTX/WebRTC performance evidence, including WebRTC audio validation with an Opus-capable ingest path.
 - Cross-browser performance records for Edge/Safari/Firefox.
 
 Track those pending records under `CR-005` and `CR-013` in `docs/commercial-readiness-roadmap.md`.

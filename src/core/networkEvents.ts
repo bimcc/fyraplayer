@@ -39,6 +39,7 @@ const NETWORK_CODE_BY_TYPE: Record<string, PlayerNetworkCode> = {
   error: 'WEBRTC_SIGNAL_ERROR',
   'parse-error': 'WEBRTC_SIGNAL_PARSE_ERROR',
   'ws-error': 'WEBRTC_SIGNAL_WS_ERROR',
+  'webrtc-audio-muted': 'WEBRTC_AUDIO_MUTED',
   'offer-timeout': 'WEBRTC_OFFER_TIMEOUT',
   'offer-error': 'WEBRTC_OFFER_ERROR',
   notification: 'WEBRTC_NOTIFICATION',
@@ -94,6 +95,7 @@ const WARNING_EVENT_TYPES = new Set([
   'abr-rendition',
   'abr-fallback-error',
   'ice-restart-failed',
+  'webrtc-audio-muted',
   'webcodecs-config-unsupported',
   'webcodecs-fallback'
 ]);
@@ -203,6 +205,8 @@ function normalizeNetworkMessage(evt: NetworkEventPayload): string {
       return `正在重启 ICE: ${evt.reason || 'unknown'}`;
     case 'ice-restart-failed':
       return 'ICE 重启失败';
+    case 'webrtc-audio-muted':
+      return 'WebRTC audio track is present but muted; check source codec and server transcoding';
     case 'ws-open':
       return evt.stage === 'webrtc-signal' ? '信令 WebSocket 连接已建立' : 'WebSocket 连接已建立';
     case 'ws-close':

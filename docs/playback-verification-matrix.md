@@ -47,6 +47,11 @@ RTMP:   rtmp://127.0.0.1:1935/live/test
 
 Browser verification should use HLS through FyraPlayer/hls.js and WHEP through `tech-webrtc`; direct browser address-bar playback of `.m3u8` does not prove HLS support.
 
+MediaMTX codec note:
+
+- Browser WebRTC audio should be validated with an ingest path that provides Opus-compatible audio to WebRTC. OBS RTMP commonly publishes AAC audio, which can work through HLS while leaving the browser WebRTC audio track present but muted. MediaMTX documents an OBS WebRTC-readable publishing path through RTSP with H.264 settings and `libopus` audio.
+- If FyraPlayer emits `network.code: 'WEBRTC_AUDIO_MUTED'`, first check the MediaMTX/OBS codec path before treating it as a player volume defect.
+
 ---
 
 ## 2. Automatic Checks
@@ -145,6 +150,8 @@ Append new rows; do not overwrite historical failures.
 | 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX WebRTC WHEP local `http://127.0.0.1:8889/live/test/whep` | OBS RTMP -> MediaMTX WHEP -> FyraPlayer WebRTC | pass | WHEP POST returned 201; ICE reached `checking -> connected`; playback reached `readyState=4`, `currentTime=10.627s`, `1280x720`; events included `ready=1`, `stats` with `bitrateKbps=2365`, `fps=30`, `rttMs=1`, `packetLoss=0`, `candidateType='host'`, `transport='udp'`; no fatal `network` events. |
 | 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX WebRTC WHEP local `http://127.0.0.1:8889/live/test/whep` | destroy -> recreate | pass | Two sequential WHEP loads after player destroy both reached `readyState=4`, `1280x720`, `readyCount=1`, `errorCount=0`, `videoErrorNetworkCount=0`, `fatalNetworkCount=0`; second run reported `fps=28`, `rttMs=1`, `packetLoss=0`, no public empty-source video error after cleanup fix. |
 | 2026-05-17 | Codex | Jest unit test / Windows | WebRTC Tech stats + cleanup | MediaMTX validation regression coverage | pass | `pnpm exec jest tests/webrtc-tech-stats.test.ts --runInBand`; verified RTC stats fall back to video element dimensions, `ready` de-duplication, and cleanup of video callbacks/srcObject on destroy. |
+| 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX HLS local `http://127.0.0.1:8888/live/test/index.m3u8` | repeated HLS reload after user-reported duplicated audio | pass | After HLS cleanup hardening and demo command serialization, three repeated loads stayed at `videoCount=1`, `audioCount=0`, `fyra-ui-shell=1`, `state='playing'`, `muted=false`, `readyState=4`, `1280x720`; no front-end duplicate media element or UI shell accumulation was observed. |
+| 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX WebRTC WHEP local `http://127.0.0.1:8889/live/test/whep` | WebRTC audio no-sound investigation | partial | Player-side forced mute and extra `AudioContext` output path were removed. Browser state showed `video.muted=false`, one `video`, zero `audio`, and one WebRTC audio track, but the track was `muted=true` and `webkitAudioDecodedByteCount=0`; this points to source/server codec delivery rather than player volume. Added `WEBRTC_AUDIO_MUTED` diagnostic for this state. |
 
 ---
 

@@ -793,6 +793,40 @@ Remaining:
 
 - Long-run browser evidence is still needed to prove no memory/listener growth across repeated create/destroy cycles.
 
+### 2026-05-17 MediaMTX Audio/Lifecycle Follow-up
+
+Summary:
+
+- Investigated user-reported local MediaMTX symptoms:
+  - WebRTC video played but audio was silent.
+  - HLS playback was smooth but audio appeared to repeat and layer after several seconds.
+- Fixed player-side WebRTC audio behavior:
+  - removed forced `video.muted = true` from `tech-webrtc`;
+  - removed the extra `AudioContext.createMediaStreamSource(stream).connect(destination)` output path, so the `HTMLVideoElement` is the only WebRTC audio renderer;
+  - added `WEBRTC_AUDIO_MUTED` diagnostics when a live WebRTC audio track remains browser-muted after startup.
+- Hardened HLS lifecycle cleanup:
+  - `HLSTech.destroy()` now stops hls.js loading before detach/destroy;
+  - pauses the media element, clears callbacks, removes `src`, clears `srcObject`, and calls `load()`.
+- Hardened the demo command flow:
+  - load/play/stop operations now run through a serialized queue so repeated clicks do not overlap player create/destroy.
+- Browser evidence:
+  - repeated local MediaMTX HLS reloads stayed at one `video`, zero `audio`, one `fyra-ui-shell`, and `state='playing'`;
+  - WebRTC state showed `video.muted=false` and no extra audio element/path, but the MediaStream audio track remained `muted=true` with zero decoded audio bytes.
+- Interpretation:
+  - the WebRTC silent-audio state is no longer explained by player mute controls;
+  - with OBS RTMP publishing, HLS audio can work while WebRTC audio remains muted because the WebRTC browser path expects codecs such as Opus, whereas RTMP output is commonly AAC-oriented. Validate WebRTC audio with an Opus-capable MediaMTX ingest path.
+
+Validation:
+
+- `pnpm exec jest tests/webrtc-tech-stats.test.ts tests/hls-dash-events.test.ts --runInBand`: passed, 2 suites / 11 tests.
+- `pnpm bundle:examples`: passed.
+- Chrome browser run on `http://127.0.0.1:4185/basic.html`: local MediaMTX HLS repeated reload and WHEP audio diagnostics recorded in `docs/playback-verification-matrix.md`.
+
+Remaining:
+
+- Re-test MediaMTX WHEP audio using an Opus-capable publish path, such as MediaMTX's OBS RTSP/libopus workflow or another WebRTC/WHIP-compatible ingest path.
+- Continue `CR-006` interruption/reconnect and `CR-013` long-run profiling evidence.
+
 ---
 
 ## 8. How To Update This Document

@@ -21,6 +21,10 @@ interface HlsErrorPayload {
   error?: unknown;
 }
 
+type HlsWithStopLoad = Hls & {
+  stopLoad?: () => void;
+};
+
 // Re-export for backwards compatibility
 export { buildLowLatencyConfig } from './hlsConfig.js';
 
@@ -210,17 +214,29 @@ export class HLSTech extends AbstractTech {
       if (this.hlsManifestHandler) this.hls.off(Hls.Events.MANIFEST_PARSED, this.hlsManifestHandler);
       if (this.hlsFragBufferedHandler) this.hls.off(Hls.Events.FRAG_BUFFERED, this.hlsFragBufferedHandler);
       try {
+        (this.hls as HlsWithStopLoad).stopLoad?.();
+      } catch { /* ignore */ }
+      try {
         this.hls.detachMedia();
       } catch { /* ignore */ }
       this.hls.destroy();
       this.hls = undefined;
     }
+    this.hlsErrorHandler = undefined;
+    this.hlsLevelHandler = undefined;
+    this.hlsManifestHandler = undefined;
+    this.hlsFragBufferedHandler = undefined;
     if (this.video) {
       this.video.onloadedmetadata = null;
+      this.video.onloadeddata = null;
       this.video.oncanplay = null;
-      this.video.src = '';
+      this.video.onerror = null;
+      try { this.video.pause(); } catch { /* ignore */ }
       this.video.srcObject = null;
-      try { this.video.load(); } catch { /* ignore */ }
+      try {
+        this.video.removeAttribute('src');
+        this.video.load();
+      } catch { /* ignore */ }
     }
     this.readyEmitted = false;
   }

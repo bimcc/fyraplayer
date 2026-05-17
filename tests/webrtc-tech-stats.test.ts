@@ -6,6 +6,10 @@ type VideoLike = {
   getVideoPlaybackQuality: () => { totalVideoFrames: number; droppedVideoFrames: number };
 };
 
+type PeerConnectionStub = Pick<RTCPeerConnection, 'getReceivers'> & {
+  ontrack: ((event: RTCTrackEvent) => void) | null;
+};
+
 function reportFrom(stats: Array<Record<string, unknown>>): RTCStatsReport {
   const map = new Map<string, Record<string, unknown>>();
   stats.forEach((stat, index) => {
@@ -95,5 +99,58 @@ describe('WebRTCTech stats and lifecycle helpers', () => {
     expect(pause).toHaveBeenCalledTimes(1);
     expect(removeAttribute).toHaveBeenCalledWith('src');
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not force WebRTC media element muted during autoplay', () => {
+    const tech = new WebRTCTech();
+    const play = jest.fn(() => Promise.resolve());
+    const stream = {} as MediaStream;
+    const video = {
+      srcObject: null,
+      muted: false,
+      play,
+    } as unknown as HTMLVideoElement;
+    const pc: PeerConnectionStub = {
+      ontrack: null,
+      getReceivers: () => [],
+    };
+
+    (tech as unknown as { video: HTMLVideoElement }).video = video;
+    (tech as unknown as { pc: PeerConnectionStub }).pc = pc;
+    (tech as unknown as { bindTracks: () => void }).bindTracks();
+
+    pc.ontrack?.({
+      track: { kind: 'video' } as MediaStreamTrack,
+      receiver: {} as RTCRtpReceiver,
+      transceiver: { receiver: {} as RTCRtpReceiver } as RTCRtpTransceiver,
+      streams: [stream],
+    } as unknown as RTCTrackEvent);
+
+    expect(video.srcObject).toBe(stream);
+    expect(video.muted).toBe(false);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  test('emits warning when a live WebRTC audio track remains browser-muted', () => {
+    jest.useFakeTimers();
+    const tech = new WebRTCTech();
+    const network = jest.fn();
+    const track = {
+      kind: 'audio',
+      muted: true,
+      readyState: 'live',
+    } as MediaStreamTrack;
+
+    tech.on('network', network);
+    (tech as unknown as { monitorAudioTrack: (track: MediaStreamTrack) => void }).monitorAudioTrack(track);
+    jest.advanceTimersByTime(3000);
+
+    expect(network).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'webrtc-audio-muted',
+        severity: 'warning',
+      })
+    );
+    jest.useRealTimers();
   });
 });

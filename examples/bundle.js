@@ -13158,6 +13158,7 @@ var NETWORK_CODE_BY_TYPE = {
   error: "WEBRTC_SIGNAL_ERROR",
   "parse-error": "WEBRTC_SIGNAL_PARSE_ERROR",
   "ws-error": "WEBRTC_SIGNAL_WS_ERROR",
+  "webrtc-audio-muted": "WEBRTC_AUDIO_MUTED",
   "offer-timeout": "WEBRTC_OFFER_TIMEOUT",
   "offer-error": "WEBRTC_OFFER_ERROR",
   notification: "WEBRTC_NOTIFICATION",
@@ -13210,6 +13211,7 @@ var WARNING_EVENT_TYPES = /* @__PURE__ */ new Set([
   "abr-rendition",
   "abr-fallback-error",
   "ice-restart-failed",
+  "webrtc-audio-muted",
   "webcodecs-config-unsupported",
   "webcodecs-fallback"
 ]);
@@ -13315,6 +13317,8 @@ function normalizeNetworkMessage(evt) {
       return `\u6B63\u5728\u91CD\u542F ICE: ${evt.reason || "unknown"}`;
     case "ice-restart-failed":
       return "ICE \u91CD\u542F\u5931\u8D25";
+    case "webrtc-audio-muted":
+      return "WebRTC audio track is present but muted; check source codec and server transcoding";
     case "ws-open":
       return evt.stage === "webrtc-signal" ? "\u4FE1\u4EE4 WebSocket \u8FDE\u63A5\u5DF2\u5EFA\u7ACB" : "WebSocket \u8FDE\u63A5\u5DF2\u5EFA\u7ACB";
     case "ws-close":
@@ -14256,7 +14260,7 @@ var WebRTCTech = class extends AbstractTech {
     this.packetLossPrevLost = null;
     this.packetLossTimer = null;
     this.lastAbrDownswitchTs = 0;
-    this.audioCtx = null;
+    this.audioMuteTimers = /* @__PURE__ */ new Set();
   }
   canPlay(source) {
     return source.type === "webrtc";
@@ -14276,7 +14280,6 @@ var WebRTCTech = class extends AbstractTech {
     this.packetLossWindow = [];
     this.packetLossPrevLost = null;
     this.lastAbrDownswitchTs = 0;
-    this.audioCtx = null;
     this.playoutDelayHintSeconds = this.computePlayoutDelayHintSeconds();
     this.video.playsInline = true;
     this.video.autoplay = true;
@@ -14335,14 +14338,8 @@ var WebRTCTech = class extends AbstractTech {
     }, metadataTimeout);
   }
   async destroy() {
+    this.clearAudioMuteTimers();
     this.stopPacketLossMonitor();
-    if (this.audioCtx) {
-      try {
-        this.audioCtx.close();
-      } catch {
-      }
-      this.audioCtx = null;
-    }
     if (this.connectTimer) {
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
@@ -14423,6 +14420,9 @@ var WebRTCTech = class extends AbstractTech {
       console.log("[webrtc] ontrack:", evt.track.kind);
       this.applyPlayoutDelayHint(evt.receiver);
       this.applyPlayoutDelayHint(evt.transceiver?.receiver);
+      if (evt.track.kind === "audio") {
+        this.monitorAudioTrack(evt.track);
+      }
       const stream = evt.streams[0];
       if (!stream) {
         console.warn("[webrtc] No stream in track event");
@@ -14434,10 +14434,8 @@ var WebRTCTech = class extends AbstractTech {
           this.video.srcObject = stream;
         }
         this.applyPlayoutDelayHintToReceivers();
-        this.ensureAudioContext(stream);
         if (!playAttempted) {
           playAttempted = true;
-          this.video.muted = true;
           this.video.play().catch((err) => {
             if (err.name === "AbortError") {
               console.log("[webrtc] Play interrupted, will retry on user interaction");
@@ -14646,14 +14644,8 @@ var WebRTCTech = class extends AbstractTech {
     return next ?? null;
   }
   async resetPeerConnection() {
+    this.clearAudioMuteTimers();
     this.stopPacketLossMonitor();
-    if (this.audioCtx) {
-      try {
-        this.audioCtx.close();
-      } catch {
-      }
-      this.audioCtx = null;
-    }
     if (this.connectTimer) {
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
@@ -14671,6 +14663,27 @@ var WebRTCTech = class extends AbstractTech {
     this.adapter = null;
     this.cleanupVideoElement();
     this.readyFired = false;
+  }
+  monitorAudioTrack(track) {
+    const timer = setTimeout(() => {
+      this.audioMuteTimers.delete(timer);
+      if (track.readyState !== "live")
+        return;
+      if (!track.muted)
+        return;
+      this.bus.emit("network", {
+        type: "webrtc-audio-muted",
+        severity: "warning",
+        message: "WebRTC audio track is present but muted by the browser; check source codec and server transcoding."
+      });
+    }, 3e3);
+    this.audioMuteTimers.add(timer);
+  }
+  clearAudioMuteTimers() {
+    for (const timer of this.audioMuteTimers) {
+      clearTimeout(timer);
+    }
+    this.audioMuteTimers.clear();
   }
   cleanupVideoElement() {
     if (!this.video)
@@ -14805,23 +14818,6 @@ var WebRTCTech = class extends AbstractTech {
     this.bus.emit("network", { type: "abr-change_rendition", rendition: name, auto: true });
     this.bus.emit("levelSwitch", { from: prev, to: name, auto: true });
     return true;
-  }
-  ensureAudioContext(stream) {
-    if (this.audioCtx)
-      return;
-    if (!stream.getAudioTracks().length)
-      return;
-    try {
-      const windowWithLegacyAudio = window;
-      const AudioCtx = window.AudioContext || windowWithLegacyAudio.webkitAudioContext;
-      if (!AudioCtx)
-        return;
-      this.audioCtx = new AudioCtx();
-      const source = this.audioCtx.createMediaStreamSource(stream);
-      source.connect(this.audioCtx.destination);
-    } catch (e2) {
-      console.warn("[webrtc] audio context init failed", e2);
-    }
   }
   async computeRtcStats() {
     const base = super.getStats();
@@ -32349,11 +32345,11 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
   unblockAudio() {
     const {
       blockedAudioAppend,
-      operationQueue
+      operationQueue: operationQueue2
     } = this;
-    if (blockedAudioAppend && operationQueue) {
+    if (blockedAudioAppend && operationQueue2) {
       this.blockedAudioAppend = null;
-      operationQueue.unblockAudio(blockedAudioAppend.op);
+      operationQueue2.unblockAudio(blockedAudioAppend.op);
     }
   }
   onBufferAppending(event, eventData) {
@@ -33086,7 +33082,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
       return Promise.resolve().then(onUnblocked);
     }
     const {
-      operationQueue
+      operationQueue: operationQueue2
     } = this;
     const blockingOperations = bufferNames.map((type) => this.appendBlocker(type));
     const audioBlocked = bufferNames.length > 1 && !!this.blockedAudioAppend;
@@ -33094,7 +33090,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
       this.unblockAudio();
     }
     return Promise.all(blockingOperations).then((result) => {
-      if (operationQueue !== this.operationQueue) {
+      if (operationQueue2 !== this.operationQueue) {
         return;
       }
       onUnblocked();
@@ -49691,18 +49687,32 @@ var HLSTech = class extends AbstractTech {
       if (this.hlsFragBufferedHandler)
         this.hls.off(Hls.Events.FRAG_BUFFERED, this.hlsFragBufferedHandler);
       try {
+        this.hls.stopLoad?.();
+      } catch {
+      }
+      try {
         this.hls.detachMedia();
       } catch {
       }
       this.hls.destroy();
       this.hls = void 0;
     }
+    this.hlsErrorHandler = void 0;
+    this.hlsLevelHandler = void 0;
+    this.hlsManifestHandler = void 0;
+    this.hlsFragBufferedHandler = void 0;
     if (this.video) {
       this.video.onloadedmetadata = null;
+      this.video.onloadeddata = null;
       this.video.oncanplay = null;
-      this.video.src = "";
+      this.video.onerror = null;
+      try {
+        this.video.pause();
+      } catch {
+      }
       this.video.srcObject = null;
       try {
+        this.video.removeAttribute("src");
         this.video.load();
       } catch {
       }
@@ -75011,6 +75021,7 @@ var fileInput = document.getElementById("file-input");
 var openFileBtn = document.getElementById("btn-open-file");
 var player = null;
 var busy = false;
+var operationQueue = Promise.resolve();
 var uiStatus = "idle";
 var currentSrc = null;
 var useSkin = true;
@@ -75315,7 +75326,7 @@ async function createPlayer(source) {
     throw e2;
   });
 }
-async function safeRun(label, fn) {
+async function runExclusive(label, fn) {
   if (busy) {
     appendLog(`busy: ${busy}, skip ${label}`);
     return;
@@ -75328,6 +75339,11 @@ async function safeRun(label, fn) {
   } finally {
     setBusy(false);
   }
+}
+function safeRun(label, fn) {
+  operationQueue = operationQueue.catch(() => {
+  }).then(() => runExclusive(label, fn));
+  return operationQueue;
 }
 async function stopPlayback(reason) {
   if (player) {
@@ -75397,7 +75413,7 @@ playBtn.onclick = () => safeRun("play", () => player?.play());
 pauseBtn.onclick = () => {
   const isWebrtc = currentSrc?.type === "webrtc" || currentSrc?.type === "webrtc-oven";
   if (busy || uiStatus === "loading" || uiStatus === "buffering" || isWebrtc) {
-    void stopPlayback("manual stop");
+    void safeRun("stop", () => stopPlayback("manual stop"));
     return;
   }
   safeRun("pause", () => player?.pause());

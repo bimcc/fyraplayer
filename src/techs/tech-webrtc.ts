@@ -11,10 +11,6 @@ type ReceiverWithDelayHints = RTCRtpReceiver & {
   jitterBufferDelayHint?: number;
 };
 
-type WindowWithWebkitAudioContext = Window & {
-  webkitAudioContext?: typeof AudioContext;
-};
-
 type RenditionInfo = {
   name?: string;
   rendition_name?: string;
@@ -106,7 +102,7 @@ export class WebRTCTech extends AbstractTech {
   private packetLossPrevLost: number | null = null;
   private packetLossTimer: ReturnType<typeof setInterval> | null = null;
   private lastAbrDownswitchTs = 0;
-  private audioCtx: AudioContext | null = null;
+  private audioMuteTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
   canPlay(source: Source): boolean {
     return source.type === "webrtc";
@@ -137,7 +133,6 @@ export class WebRTCTech extends AbstractTech {
     this.packetLossWindow = [];
     this.packetLossPrevLost = null;
     this.lastAbrDownswitchTs = 0;
-    this.audioCtx = null;
     this.playoutDelayHintSeconds = this.computePlayoutDelayHintSeconds();
     
     // Configure video element for low-latency WebRTC playback
@@ -209,15 +204,8 @@ export class WebRTCTech extends AbstractTech {
   }
 
   override async destroy(): Promise<void> {
+    this.clearAudioMuteTimers();
     this.stopPacketLossMonitor();
-    if (this.audioCtx) {
-      try {
-        this.audioCtx.close();
-      } catch {
-        /* ignore */
-      }
-      this.audioCtx = null;
-    }
     if (this.connectTimer) {
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
@@ -305,6 +293,9 @@ export class WebRTCTech extends AbstractTech {
       console.log('[webrtc] ontrack:', evt.track.kind);
       this.applyPlayoutDelayHint(evt.receiver);
       this.applyPlayoutDelayHint(evt.transceiver?.receiver);
+      if (evt.track.kind === 'audio') {
+        this.monitorAudioTrack(evt.track);
+      }
       
       // Use the stream from the event directly (standard WebRTC behavior)
       const stream = evt.streams[0];
@@ -320,12 +311,10 @@ export class WebRTCTech extends AbstractTech {
           this.video.srcObject = stream;
         }
         this.applyPlayoutDelayHintToReceivers();
-        this.ensureAudioContext(stream);
         
         // Attempt autoplay (only once)
         if (!playAttempted) {
           playAttempted = true;
-          this.video.muted = true;
           this.video.play().catch((err) => {
             if (err.name === 'AbortError') {
               console.log('[webrtc] Play interrupted, will retry on user interaction');
@@ -551,15 +540,8 @@ export class WebRTCTech extends AbstractTech {
   }
   
   private async resetPeerConnection(): Promise<void> {
+    this.clearAudioMuteTimers();
     this.stopPacketLossMonitor();
-    if (this.audioCtx) {
-      try {
-        this.audioCtx.close();
-      } catch {
-        /* ignore */
-      }
-      this.audioCtx = null;
-    }
     if (this.connectTimer) {
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
@@ -577,6 +559,28 @@ export class WebRTCTech extends AbstractTech {
     this.adapter = null;
     this.cleanupVideoElement();
     this.readyFired = false;
+  }
+
+  private monitorAudioTrack(track: MediaStreamTrack): void {
+    const timer = setTimeout(() => {
+      this.audioMuteTimers.delete(timer);
+      if (track.readyState !== 'live') return;
+      if (!track.muted) return;
+      this.bus.emit("network", {
+        type: "webrtc-audio-muted",
+        severity: "warning",
+        message:
+          "WebRTC audio track is present but muted by the browser; check source codec and server transcoding."
+      });
+    }, 3000);
+    this.audioMuteTimers.add(timer);
+  }
+
+  private clearAudioMuteTimers(): void {
+    for (const timer of this.audioMuteTimers) {
+      clearTimeout(timer);
+    }
+    this.audioMuteTimers.clear();
   }
 
   private cleanupVideoElement(): void {
@@ -712,24 +716,6 @@ export class WebRTCTech extends AbstractTech {
     this.bus.emit("levelSwitch", { from: prev, to: name, auto: true });
     return true;
   }
-  
-  private ensureAudioContext(stream: MediaStream): void {
-    // Safari/Chrome workaround: keep audio pipeline alive to avoid A/V drift
-    if (this.audioCtx) return;
-    if (!stream.getAudioTracks().length) return;
-    try {
-      const windowWithLegacyAudio = window as WindowWithWebkitAudioContext;
-      const AudioCtx = window.AudioContext || windowWithLegacyAudio.webkitAudioContext;
-      if (!AudioCtx) return;
-      this.audioCtx = new AudioCtx();
-      const source = this.audioCtx!.createMediaStreamSource(stream);
-      // Connect to destination to keep context running; volume unaffected
-      source.connect(this.audioCtx!.destination);
-    } catch (e) {
-      console.warn('[webrtc] audio context init failed', e);
-    }
-  }
-
   private async computeRtcStats() {
     const base = super.getStats();
     if (!this.pc) return base;

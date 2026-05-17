@@ -56,6 +56,7 @@ const openFileBtn = document.getElementById("btn-open-file") as HTMLButtonElemen
 
 let player: FyraPlayer | null = null;
 let busy: string | false = false;
+let operationQueue: Promise<void> = Promise.resolve();
 let uiStatus: "idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "error" | "buffering" = "idle";
 let currentSrc: SimpleSource | null = null;
 let useSkin = true;
@@ -370,7 +371,7 @@ async function createPlayer(source: SimpleSource) {
     });
 }
 
-async function safeRun(label: string, fn: () => Promise<void> | void) {
+async function runExclusive(label: string, fn: () => Promise<void> | void) {
   if (busy) {
     appendLog(`busy: ${busy}, skip ${label}`);
     return;
@@ -383,6 +384,15 @@ async function safeRun(label: string, fn: () => Promise<void> | void) {
   } finally {
     setBusy(false);
   }
+}
+
+function safeRun(label: string, fn: () => Promise<void> | void) {
+  operationQueue = operationQueue
+    .catch(() => {
+      /* keep the demo command queue alive after a failed operation */
+    })
+    .then(() => runExclusive(label, fn));
+  return operationQueue;
 }
 
 async function stopPlayback(reason?: string) {
@@ -455,7 +465,7 @@ playBtn.onclick = () => safeRun("play", () => player?.play());
 pauseBtn.onclick = () => {
   const isWebrtc = currentSrc?.type === "webrtc" || currentSrc?.type === "webrtc-oven";
   if (busy || uiStatus === "loading" || uiStatus === "buffering" || isWebrtc) {
-    void stopPlayback("manual stop");
+    void safeRun("stop", () => stopPlayback("manual stop"));
     return;
   }
   safeRun("pause", () => player?.pause());

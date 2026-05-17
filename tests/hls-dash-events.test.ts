@@ -68,6 +68,9 @@ class FakeHls {
   public handlers = new Map<string, Handler>();
   public autoLevelCapping = -1;
   public recovered = 0;
+  public stopLoadCalls = 0;
+  public detachMediaCalls = 0;
+  public destroyCalls = 0;
   public levels = [
     { bitrate: 800000, width: 640, height: 360, videoCodec: 'avc1.42e01e' },
     { bitrate: 2500000, width: 1280, height: 720, videoCodec: 'avc1.4d401f' }
@@ -81,8 +84,18 @@ class FakeHls {
     this.handlers.delete(event);
   }
 
-  detachMedia(): void {}
-  destroy(): void {}
+  stopLoad(): void {
+    this.stopLoadCalls += 1;
+  }
+
+  detachMedia(): void {
+    this.detachMediaCalls += 1;
+  }
+
+  destroy(): void {
+    this.destroyCalls += 1;
+  }
+
   recoverMediaError(): void {
     this.recovered += 1;
   }
@@ -107,6 +120,10 @@ function createVideoStub(): HTMLVideoElement {
   return {
     src: '',
     srcObject: null,
+    onloadedmetadata: null,
+    onloadeddata: null,
+    oncanplay: null,
+    onerror: null,
     videoWidth: 1280,
     videoHeight: 720,
     clientHeight: 360,
@@ -117,6 +134,8 @@ function createVideoStub(): HTMLVideoElement {
     removeEventListener: (event: string) => {
       handlers.delete(event);
     },
+    pause: () => {},
+    removeAttribute: () => {},
     load: () => {},
     dispatchEvent: (event: Event) => {
       const handler = handlers.get(event.type);
@@ -219,6 +238,44 @@ describe('HLS and DASH event semantics', () => {
         codec: 'avc1.4d401f'
       }
     ]);
+  });
+
+  test('HLS destroy stops loading and fully detaches the media element', async () => {
+    const tech = new HLSTech();
+    const fakeHls = new FakeHls();
+    const pause = jest.fn();
+    const load = jest.fn();
+    const removeAttribute = jest.fn();
+    const video = {
+      ...createVideoStub(),
+      pause,
+      load,
+      removeAttribute,
+      srcObject: {} as MediaStream,
+      onloadedmetadata: jest.fn(),
+      onloadeddata: jest.fn(),
+      oncanplay: jest.fn(),
+      onerror: jest.fn(),
+    } as unknown as HTMLVideoElement;
+
+    (tech as unknown as { video: HTMLVideoElement }).video = video;
+    (tech as unknown as { hls: FakeHls }).hls = fakeHls;
+    (tech as unknown as { setupHlsEventHandlers(video: HTMLVideoElement): void }).setupHlsEventHandlers(video);
+
+    await tech.destroy();
+
+    expect(fakeHls.handlers.size).toBe(0);
+    expect(fakeHls.stopLoadCalls).toBe(1);
+    expect(fakeHls.detachMediaCalls).toBe(1);
+    expect(fakeHls.destroyCalls).toBe(1);
+    expect(video.onloadedmetadata).toBeNull();
+    expect(video.onloadeddata).toBeNull();
+    expect(video.oncanplay).toBeNull();
+    expect(video.onerror).toBeNull();
+    expect(video.srcObject).toBeNull();
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(removeAttribute).toHaveBeenCalledWith('src');
+    expect(load).toHaveBeenCalledTimes(1);
   });
 
   test('DASH maps fatal and non-fatal errors deterministically', () => {

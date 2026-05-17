@@ -433,6 +433,18 @@ WebRTC 低延迟播放，支持多种信令协议：
 | WHIP | `http(s)://...` | 标准 WHIP 协议 |
 | Oven-WS | `ws(s)://...` | OvenMediaEngine WebSocket 信令 |
 
+WebRTC audio is rendered only through the attached `HTMLVideoElement`. The
+Tech does not force `video.muted = true` and does not create a separate
+`AudioContext` output path, so application volume/mute controls remain the
+single audio authority.
+
+When a WebRTC audio track exists but remains browser-muted after startup, the
+player emits `network.code: 'WEBRTC_AUDIO_MUTED'`. This usually means the
+browser did not receive decodable audio packets for the negotiated track. For
+MediaMTX, WebRTC browser playback is safest with Opus audio; OBS RTMP output is
+often AAC-oriented, while MediaMTX documents a WebRTC-readable OBS path through
+RTSP output with `libopus`.
+
 ### tech-hls
 
 HLS/LL-HLS 自适应码率播放：
@@ -598,6 +610,7 @@ Common stable codes:
 | `CONNECT_TIMEOUT` / `METADATA_TIMEOUT` / `AUTOPLAY_BLOCKED` | browser/runtime playback warnings |
 | `WEBRTC_ICE_FAILED` / `WEBRTC_ICE_RESTART` / `WEBRTC_SIGNAL_ERROR` | WebRTC connection and signaling |
 | `WEBRTC_SIGNAL_WS_OPEN` / `WEBRTC_SIGNAL_WS_CLOSE` / `WEBRTC_SIGNAL_WS_ERROR` | WebRTC signaling WebSocket events |
+| `WEBRTC_AUDIO_MUTED` | WebRTC audio track exists but the browser reports it muted/no audio packets |
 | `WS_RAW_FALLBACK_ERROR` / `AUDIO_FALLBACK` / `VIDEO_DECODE_ERROR` | ws-raw pipeline diagnostics |
 | `FMP4_HTTP_ERROR` / `FMP4_WS_CLOSED` | fMP4 transport failures |
 | `FMP4_BACKPRESSURE` / `FMP4_QUOTA_EXCEEDED` | fMP4 pending queue overflow and MSE quota cleanup |
