@@ -27,10 +27,25 @@ http://localhost:3000/
 For local MediaMTX WebRTC/HLS checks:
 
 ```bash
-docker compose up mediamtx
+G:\MTX\mediamtx.exe
 ```
 
-Publish a stream to `rtsp://localhost:8554/test`; MediaMTX exposes HLS on port `8888` and WHEP/WebRTC on port `8889`.
+Publish from OBS with:
+
+```text
+Server: rtmp://127.0.0.1:1935/live
+Stream key: test
+```
+
+The expected local playback URLs are:
+
+```text
+HLS:    http://127.0.0.1:8888/live/test/index.m3u8
+WHEP:   http://127.0.0.1:8889/live/test/whep
+RTMP:   rtmp://127.0.0.1:1935/live/test
+```
+
+Browser verification should use HLS through FyraPlayer/hls.js and WHEP through `tech-webrtc`; direct browser address-bar playback of `.m3u8` does not prove HLS support.
 
 ---
 
@@ -78,8 +93,8 @@ Use exact browser versions in the run log.
 | DASH alternate | `https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd` | Chrome, Edge, Firefox | `ready`, `play`, `stats`; no fatal `network` | Starts playback and pause/play works | pending |
 | MP4 file | `https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4` | Chrome, Edge, Safari, Firefox | `ready`, `play`, `ended` when allowed to finish | Starts playback and seeking works | Chrome pass; Edge/Safari/Firefox pending |
 | HTTP-FLV / ws-raw fallback | `https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv` | Chrome, Edge | `ready`, `play`, `stats`; no fatal `network` | MSE fallback starts playback; no unbounded error loop | Chrome pass; Edge pending |
-| WebRTC WHEP local | `http://localhost:8889/test-webrtc/whep` | Chrome, Edge | `ready`, `play`, `network`, `stats` | Starts under MediaMTX with a published stream; disconnect/reconnect behavior recorded | pending |
-| HLS local MediaMTX | `http://localhost:8888/test/index.m3u8` | Chrome, Edge, Safari | `ready`, `play`, `stats` | Starts under MediaMTX with a published stream | pending |
+| WebRTC WHEP local | `http://127.0.0.1:8889/live/test/whep` | Chrome, Edge | `ready`, `play`, `network`, `stats` | Starts under MediaMTX with a published stream; destroy/recreate is clean; disconnect/reconnect behavior recorded separately | Chrome pass; Edge and interruption pending |
+| HLS local MediaMTX | `http://127.0.0.1:8888/live/test/index.m3u8` | Chrome, Edge, Safari | `ready`, `play`, `stats` | Starts under MediaMTX with a published stream | Chrome pass; Edge/Safari pending |
 | GB28181 gateway adapter | Project-specific invite/control endpoint returning FLV/TS/HLS/WebRTC/fMP4 | Chrome, Edge | `network`, `ready`, control responses | Backend invite returns a browser-playable URL and bye/ptz/query/keepalive behavior is recorded | unit adapter pass; real gateway pending |
 | fMP4 direct | Project-specific HTTP/WS fMP4 source | Chrome, Edge | `ready`, `play`, `stats`, no quota errors | Buffer remains bounded for a 10 minute run | unit backpressure pass; real stream pending |
 
@@ -91,11 +106,11 @@ Run these for each stable protocol before promotion:
 
 | Scenario | Expected Result | Status |
 |---|---|---:|
-| init -> ready -> play | Playback begins or autoplay block is surfaced as non-fatal network/error event | Chrome pass for HLS/DASH/MP4/ws-raw fallback |
+| init -> ready -> play | Playback begins or autoplay block is surfaced as non-fatal network/error event | Chrome pass for HLS/DASH/MP4/ws-raw fallback and local MediaMTX HLS/WHEP |
 | pause -> play | No duplicate tech load, state returns to playing | Chrome browser pass for HLS; unit pass for Player lifecycle |
 | seek for VOD | `currentTime` changes and playback resumes | Chrome browser pass for HLS VOD; unit pass for active Tech delegation |
 | switchSource | Previous tech is destroyed; new source reaches ready/play | Chrome browser pass for HLS -> DASH; unit pass for old Tech event isolation |
-| destroy -> recreate | DOM/event listeners do not duplicate; UI plugin cleans up | Chrome browser pass for DASH destroy -> HLS recreate; UI cleanup unit pass |
+| destroy -> recreate | DOM/event listeners do not duplicate; UI plugin cleans up | Chrome browser pass for DASH destroy -> HLS recreate and MediaMTX WHEP destroy -> recreate; UI cleanup unit pass |
 | network interruption | Fatal event shape is recorded; reconnect/fallback behavior is deterministic | pending |
 | 30 minute live run | Memory and listener count do not grow unbounded | pending |
 
@@ -126,6 +141,10 @@ Append new rows; do not overwrite historical failures.
 | 2026-05-17 | Codex | Jest unit test / Windows | fMP4 Tech direct queue | pending append backpressure and quota cleanup | pass | `pnpm exec jest tests/fmp4-tech.test.ts --runInBand`; verified bounded pending queue, `drop-oldest` overflow, fail-fast `error` strategy, `QuotaExceededError` cleanup/requeue, and retry exhaustion behavior. Real HTTP/WS fMP4 browser stream remains pending because no project-specific fMP4 source is available. |
 | 2026-05-17 | Codex | Jest unit test / Windows | GB28181 gateway adapter | invite/control contract and FLV/TS MSE dispatch | pass | `pnpm exec jest tests/gb28181.tech.test.ts --runInBand`; verified invite request/auth config, response mapping, FLV vs TS MSE dispatch, PTZ/BYE/query/keepalive control calls, missing endpoint error, and invite HTTP auth diagnostics. Real GB backend/device verification remains pending. |
 | 2026-05-17 | Codex | Jest unit test / Windows | Performance monitor plugin + built-in stats | budget contract and FPS sampling | pass | `pnpm exec jest tests/performance-plugin.test.ts tests/abstract-tech-stats.test.ts --runInBand`; verified normalized samples, cumulative-counter mode, budget violations, `PERFORMANCE_BUDGET` QoS emission, cooldown, teardown, and HTML video FPS delta sampling. Real long-run browser profiling remains pending. |
+| 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX HLS local `http://127.0.0.1:8888/live/test/index.m3u8` | OBS RTMP -> MediaMTX HLS -> FyraPlayer/hls.js | pass | OBS published to `rtmp://127.0.0.1:1935/live` with stream key `test`; Vite demo on `http://127.0.0.1:4185/basic.html`; HLS playlist, init segments, and media parts returned 200; reached `ready`, `play`, `stats`, `1280x720`, about 2 Mbps and about 30 fps after user play; non-fatal hls.js startup warnings were recorded as `HLS_WARNING`. |
+| 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX WebRTC WHEP local `http://127.0.0.1:8889/live/test/whep` | OBS RTMP -> MediaMTX WHEP -> FyraPlayer WebRTC | pass | WHEP POST returned 201; ICE reached `checking -> connected`; playback reached `readyState=4`, `currentTime=10.627s`, `1280x720`; events included `ready=1`, `stats` with `bitrateKbps=2365`, `fps=30`, `rttMs=1`, `packetLoss=0`, `candidateType='host'`, `transport='udp'`; no fatal `network` events. |
+| 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX WebRTC WHEP local `http://127.0.0.1:8889/live/test/whep` | destroy -> recreate | pass | Two sequential WHEP loads after player destroy both reached `readyState=4`, `1280x720`, `readyCount=1`, `errorCount=0`, `videoErrorNetworkCount=0`, `fatalNetworkCount=0`; second run reported `fps=28`, `rttMs=1`, `packetLoss=0`, no public empty-source video error after cleanup fix. |
+| 2026-05-17 | Codex | Jest unit test / Windows | WebRTC Tech stats + cleanup | MediaMTX validation regression coverage | pass | `pnpm exec jest tests/webrtc-tech-stats.test.ts --runInBand`; verified RTC stats fall back to video element dimensions, `ready` de-duplication, and cleanup of video callbacks/srcObject on destroy. |
 
 ---
 

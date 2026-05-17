@@ -75,13 +75,14 @@ if (!Array.from(typeSelect.options).some((o) => o.value === "webrtc-oven")) {
 
 const presetSources: SimpleSource[] = [
   { label: "HLS demo", type: "hls", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8" },
+  { label: "MediaMTX HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false },
+  { label: "MediaMTX WebRTC WHEP local (live/test)", type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep" },
   { label: "DASH bbb", type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd" },
   { label: "DASH sintel", type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd" },
   { label: "MP4 demo", type: "file", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4" },
   { label: "TS 本地 (/testvideo/DJI_20250611085647_0001_V.TS)", type: "file", url: "/testvideo/DJI_20250611085647_0001_V.TS", webCodecs: { enable: true, preferMp4: false } },
   { label: "MP4 本地 (/testvideo/Rec 0017.mp4)", type: "file", url: "/testvideo/Rec%200017.mp4", webCodecs: { enable: true, preferMp4: true } },
-  { label: "FLV demo (ws-raw)", type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv" },
-  { label: "WebRTC (WHEP localhost:8889/test-webrtc/whep)", type: "webrtc", url: "http://localhost:8889/test-webrtc/whep" }
+  { label: "FLV demo (ws-raw)", type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv" }
 ];
 
 defaultSources?.forEach((s: any, idx: number) => {
@@ -331,10 +332,12 @@ function bindPlayerEvents(p: FyraPlayer) {
   });
 }
 
-function createPlayer(source: SimpleSource) {
+async function createPlayer(source: SimpleSource) {
   if (player) {
-    player.destroy().catch(() => {});
+    const previous = player;
     player = null;
+    (window as any).fyraPlayer = null;
+    await previous.destroy().catch(() => {});
   }
   const effectiveSource = applyLowLatencyToggle(source);
   const host = document.querySelector(".player-shell") as HTMLElement | null;

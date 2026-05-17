@@ -14296,7 +14296,7 @@ var WebRTCTech = class extends AbstractTech {
         clearTimeout(metadataTimer);
         metadataTimer = null;
       }
-      this.bus.emit("ready");
+      this.emitReadyOnce();
     };
     this.video.onerror = (e2) => {
       this.bus.emit("error", e2);
@@ -14358,6 +14358,7 @@ var WebRTCTech = class extends AbstractTech {
     this.teardownDataChannel();
     await this.adapter?.destroy();
     this.adapter = null;
+    this.cleanupVideoElement();
     this.lastLoadOpts = null;
     this.abrSwitching = false;
     this.currentRendition = null;
@@ -14367,6 +14368,7 @@ var WebRTCTech = class extends AbstractTech {
     this.packetLossPrevLost = null;
     this.lastAbrDownswitchTs = 0;
     this.playoutDelayHintSeconds = null;
+    this.resetPlaybackFpsSampler();
   }
   getStats() {
     const base = super.getStats();
@@ -14451,10 +14453,9 @@ var WebRTCTech = class extends AbstractTech {
       if (!this.pc)
         return;
       if (this.pc.connectionState === "connected") {
-        this.readyFired = true;
         this.clearConnectTimeout();
         this.clearIceReconnectTimer();
-        this.bus.emit("ready");
+        this.emitReadyOnce();
       }
       if (this.pc.connectionState === "failed" || this.pc.connectionState === "disconnected") {
         this.bus.emit("network", { type: "disconnect", state: this.pc.connectionState, fatal: this.pc.connectionState === "failed" });
@@ -14500,6 +14501,12 @@ var WebRTCTech = class extends AbstractTech {
       }
       this.handleSignalSideEvents(evt);
     });
+  }
+  emitReadyOnce() {
+    if (this.readyFired)
+      return;
+    this.readyFired = true;
+    this.bus.emit("ready");
   }
   /**
    * Infer signal config from URL.
@@ -14662,7 +14669,25 @@ var WebRTCTech = class extends AbstractTech {
     this.teardownDataChannel();
     await this.adapter?.destroy();
     this.adapter = null;
+    this.cleanupVideoElement();
     this.readyFired = false;
+  }
+  cleanupVideoElement() {
+    if (!this.video)
+      return;
+    this.video.onloadedmetadata = null;
+    this.video.onloadeddata = null;
+    this.video.onerror = null;
+    try {
+      this.video.pause();
+    } catch {
+    }
+    this.video.srcObject = null;
+    try {
+      this.video.removeAttribute("src");
+      this.video.load();
+    } catch {
+    }
   }
   async handleAbrRenditionChange(evt) {
     if (this.abrSwitching)
@@ -14799,8 +14824,9 @@ var WebRTCTech = class extends AbstractTech {
     }
   }
   async computeRtcStats() {
+    const base = super.getStats();
     if (!this.pc)
-      return super.getStats();
+      return base;
     const report = await this.pc.getStats();
     let bytes = 0;
     let frames = 0;
@@ -14899,12 +14925,13 @@ var WebRTCTech = class extends AbstractTech {
       packetsRecv,
       framesDecoded,
       framesDropped,
+      droppedFrames: framesDropped ?? base.droppedFrames,
       framesReceived,
       pliCount,
       nackCount,
       firCount,
-      width,
-      height,
+      width: width ?? base.width,
+      height: height ?? base.height,
       candidateType,
       transport
     };
@@ -74936,6 +74963,8 @@ var sources_default = [
   { type: "hls", url: "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8", preferTech: "hls" },
   { type: "hls", url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", preferTech: "hls" },
   { type: "hls", url: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8", preferTech: "hls" },
+  { type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false, preferTech: "hls" },
+  { type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep", preferTech: "webrtc" },
   // === DASH 测试流 ===
   { type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd", preferTech: "dash" },
   { type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd", preferTech: "dash" },
@@ -74996,13 +75025,14 @@ if (!Array.from(typeSelect.options).some((o2) => o2.value === "webrtc-oven")) {
 }
 var presetSources = [
   { label: "HLS demo", type: "hls", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8" },
+  { label: "MediaMTX HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false },
+  { label: "MediaMTX WebRTC WHEP local (live/test)", type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep" },
   { label: "DASH bbb", type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd" },
   { label: "DASH sintel", type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd" },
   { label: "MP4 demo", type: "file", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4" },
   { label: "TS \u672C\u5730 (/testvideo/DJI_20250611085647_0001_V.TS)", type: "file", url: "/testvideo/DJI_20250611085647_0001_V.TS", webCodecs: { enable: true, preferMp4: false } },
   { label: "MP4 \u672C\u5730 (/testvideo/Rec 0017.mp4)", type: "file", url: "/testvideo/Rec%200017.mp4", webCodecs: { enable: true, preferMp4: true } },
-  { label: "FLV demo (ws-raw)", type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv" },
-  { label: "WebRTC (WHEP localhost:8889/test-webrtc/whep)", type: "webrtc", url: "http://localhost:8889/test-webrtc/whep" }
+  { label: "FLV demo (ws-raw)", type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv" }
 ];
 sources_default?.forEach((s2, idx) => {
   presetSources.push({
@@ -75251,11 +75281,13 @@ function bindPlayerEvents(p2) {
     statsEl.textContent = `bitrate: ${stats.bitrateKbps || "-"} kbps | fps: ${stats.fps || "-"} | res: ${stats.width || "-"}x${stats.height || "-"}`;
   });
 }
-function createPlayer(source) {
+async function createPlayer(source) {
   if (player) {
-    player.destroy().catch(() => {
-    });
+    const previous = player;
     player = null;
+    window.fyraPlayer = null;
+    await previous.destroy().catch(() => {
+    });
   }
   const effectiveSource = applyLowLatencyToggle(source);
   const host = document.querySelector(".player-shell");

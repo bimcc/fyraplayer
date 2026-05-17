@@ -18,6 +18,8 @@ These scenarios have code, tests, and repeatable evidence.
 | DASH VOD | Verified | Chrome/Chromium browser evidence exists; `ready`, `play`, `stats`, and normalized `levelSwitch` payloads are documented. |
 | MP4 file playback | Verified | Browser native playback path is stable enough for the current baseline. |
 | HTTP-FLV / ws-raw default path | Verified | The commercial/default path is `pipeline: 'mse'`; it uses mpegts.js + browser MSE. |
+| Local MediaMTX HLS | Verified in Chrome | OBS RTMP -> MediaMTX HLS -> FyraPlayer/hls.js is verified on Chrome with `ready`, `play`, `stats`, 1280x720, and about 30 fps. |
+| Local MediaMTX WebRTC WHEP | Verified in Chrome, conditional overall | OBS RTMP -> MediaMTX WHEP -> FyraPlayer WebRTC is verified on Chrome with ICE connected, `ready=1`, stats, 1280x720, RTT/packet-loss metrics, and clean destroy/recreate. Edge, interruption, and long-run evidence remain pending. |
 | Playback lifecycle | Verified | `pause -> play`, `seek`, `switchSource`, and `destroy -> recreate` are covered by unit and Chromium evidence. |
 | Observability | Verified | Stable `network.code`, `qos.code`, `stats`, and `levelSwitch` payloads are documented and tested. |
 | Performance budget monitoring | Verified contract | Optional plugin samples `stats`, reports budget violations, and emits `PERFORMANCE_BUDGET` QoS warnings; real long-run profiling is still pending. |
@@ -32,7 +34,7 @@ This is the current commercial baseline. Do not expand the promise beyond this s
 | Scenario | Current status | Boundary |
 |---|---|---|
 | fMP4 direct | Conditional | Queue backpressure and quota cleanup exist, but project-specific browser stream evidence is still pending. |
-| WebRTC / MediaMTX | Deferred for backend validation | API and lifecycle contracts exist, but local backend verification is intentionally postponed. |
+| WebRTC / MediaMTX broader support | Conditional | Local Chrome WHEP evidence exists. Do not claim broad commercial support until Edge/cross-browser, network interruption/reconnect, and long-run evidence are recorded. |
 | GB28181 gateway adapter | Conditional | Player-side invite/control adapter exists for server-side GB gateways. The browser player does not implement SIP/RTP/PS; project-specific backend verification is still pending. |
 | ws-raw experimental pipeline | Experimental opt-in | Use only with `pipeline: 'experimental'` or the deprecated compatibility alias. May fall back to MSE. |
 | Safari / Edge / Firefox parity | Partial | Record exact browser/version evidence before claiming support beyond Chromium/Chrome. |

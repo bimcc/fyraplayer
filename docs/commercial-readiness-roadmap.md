@@ -80,7 +80,7 @@ Status values:
 | CR-003 | P0 | done | API Consistency | Align docs and public API for `currentTime`, UI options, events, and exports | README/docs examples compile against package exports |
 | CR-004 | P0 | done | Release Hygiene | Define package entrypoints and bundle contract | `exports`, `dist`, examples, and docs agree |
 | CR-005 | P1 | doing | Test Matrix | Add browser/manual verification matrix for core protocols | Matrix covers Chrome/Edge/Safari where applicable, with stream URLs and expected events |
-| CR-006 | P1 | todo | WebRTC | Harden session lifecycle, ready/error semantics, reconnect and stats | Deferred for later MediaMTX/backend validation; disconnect/reconnect/destroy/reload cases are repeatably verified |
+| CR-006 | P1 | doing | WebRTC | Harden session lifecycle, ready/error semantics, reconnect and stats | Chrome + local MediaMTX WHEP startup/stats/destroy-recreate are verified; disconnect/reconnect, Edge, and long-run cases remain pending |
 | CR-007 | P1 | done | HLS/DASH | Normalize ready/error/level/stats semantics | `ready` means playable or explicitly documented; error recovery behavior is tested |
 | CR-008 | P1 | doing | fMP4 | Add buffer queue backpressure and quota policy | `pendingBuffers` has bounded memory behavior under slow/blocked SourceBuffer |
 | CR-009 | P1 | done | ws-raw | Decide commercial path for experimental pipeline vs MSE fallback | Default behavior and experimental contract are documented and tested |
@@ -424,10 +424,48 @@ Summary:
 - `CR-006` remains important, but local MediaMTX/WebRTC verification is intentionally deferred.
 - Reason: it depends on a local backend, a published test stream, and browser/network environment. Current work should continue on core contracts that do not require external services.
 - `CR-005` still keeps MediaMTX WebRTC/HLS rows as pending evidence; do not mark WebRTC commercial-ready without a later real backend run.
+- Superseded note: local MediaMTX HLS/WHEP evidence was later added on 2026-05-17 in "Local MediaMTX HLS/WHEP Evidence Pass". This historical note explains why the task paused earlier in the day; it is no longer the current status.
 
 Next action when resumed:
 
 - Start MediaMTX, publish a stream, verify WHEP startup, disconnect/reconnect, destroy/recreate, and stats payload.
+
+### 2026-05-17 Local MediaMTX HLS/WHEP Evidence Pass
+
+Summary:
+
+- Resumed `CR-005` and started practical `CR-006` validation with the user's local MediaMTX v1.18.2 and OBS RTMP publishing.
+- Added local MediaMTX demo presets:
+  - HLS: `http://127.0.0.1:8888/live/test/index.m3u8`
+  - WHEP: `http://127.0.0.1:8889/live/test/whep`
+- Verified MediaMTX HLS in Chrome through FyraPlayer/hls.js:
+  - playlist, init segments, and media parts returned 200;
+  - playback reached `ready`, `play`, `stats`, `1280x720`, about 2 Mbps and about 30 fps;
+  - hls.js startup warnings remained non-fatal `HLS_WARNING` events.
+- Verified MediaMTX WHEP in Chrome through `tech-webrtc`:
+  - WHEP POST returned 201 and ICE reached `checking -> connected`;
+  - playback reached `readyState=4`, `1280x720`, `currentTime=10.627s`;
+  - public events included `ready=1` and `stats` with `bitrateKbps=2365`, `fps=30`, `rttMs=1`, `packetLoss=0`, `candidateType='host'`, `transport='udp'`;
+  - no fatal `network` events were observed.
+- Fixed WebRTC issues exposed by the real stream run:
+  - `ready` is now de-duplicated across connection-state and video-loaded events;
+  - WebRTC stats fall back to the video element dimensions when RTC track stats omit width/height;
+  - WebRTC destroy/reset clears video callbacks and media source to avoid public empty-source `video-error` noise during reloads;
+  - the demo now waits for the previous player destroy before creating a new one.
+- Verified WHEP destroy -> recreate twice in the browser with `readyCount=1`, `errorCount=0`, `videoErrorNetworkCount=0`, `fatalNetworkCount=0`.
+
+Validation:
+
+- `pnpm exec jest tests/webrtc-tech-stats.test.ts --runInBand`: passed, 1 suite / 3 tests.
+- `pnpm check:public-api`: passed.
+- `pnpm bundle:examples`: passed.
+- Browser run on `http://127.0.0.1:4185/basic.html`: passed for MediaMTX HLS, WHEP startup/stats, and WHEP destroy -> recreate.
+
+Remaining:
+
+- `CR-005` still needs Edge/Safari/Firefox evidence where applicable.
+- `CR-006` still needs controlled network interruption/reconnect evidence and longer live-run stability before it can close.
+- `CR-013` still needs long-run performance evidence; the WHEP stats run is useful evidence, not a full performance profile.
 
 ### 2026-05-17 ws-raw Commercial Pipeline Contract Pass
 

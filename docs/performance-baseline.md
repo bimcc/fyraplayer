@@ -21,7 +21,7 @@ Current scope:
 Out of scope for this pass:
 
 - Claiming all protocols are optimized.
-- Real MediaMTX/WebRTC performance proof.
+- Full long-run MediaMTX/WebRTC performance proof.
 - Real fMP4 live-stream memory proof.
 - Browser-specific tuning for Safari/Firefox/Edge.
 - WebGL/canvas renderer optimization outside FyraPlayer core.
@@ -179,12 +179,13 @@ Implemented and verified:
 - Public package import for `fyraplayer/plugins/performance`.
 - `PERFORMANCE_BUDGET` QoS code in the public type contract.
 - Built-in HTML video FPS sampling regression test.
+- Local Chrome MediaMTX WHEP smoke stats were recorded with bitrate, FPS, RTT, packet loss, candidate type, transport, dropped frames, and resolution.
 
 Still pending:
 
 - Long-run memory and listener growth evidence.
 - Real fMP4 live stream bounded-buffer evidence.
-- Real MediaMTX/WebRTC performance evidence.
+- Long-run MediaMTX/WebRTC performance evidence.
 - Cross-browser performance records for Edge/Safari/Firefox.
 
 Track those pending records under `CR-005` and `CR-013` in `docs/commercial-readiness-roadmap.md`.

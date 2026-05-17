@@ -164,7 +164,7 @@ export class WebRTCTech extends AbstractTech {
         clearTimeout(metadataTimer);
         metadataTimer = null;
       }
-      this.bus.emit("ready");
+      this.emitReadyOnce();
     };
     
     this.video.onerror = (e) => {
@@ -233,6 +233,7 @@ export class WebRTCTech extends AbstractTech {
     this.teardownDataChannel();
     await this.adapter?.destroy();
     this.adapter = null;
+    this.cleanupVideoElement();
     this.lastLoadOpts = null;
     this.abrSwitching = false;
     this.currentRendition = null;
@@ -242,6 +243,7 @@ export class WebRTCTech extends AbstractTech {
     this.packetLossPrevLost = null;
     this.lastAbrDownswitchTs = 0;
     this.playoutDelayHintSeconds = null;
+    this.resetPlaybackFpsSampler();
   }
 
   override getStats() {
@@ -339,10 +341,9 @@ export class WebRTCTech extends AbstractTech {
     this.pc.onconnectionstatechange = () => {
       if (!this.pc) return;
       if (this.pc.connectionState === "connected") {
-        this.readyFired = true;
         this.clearConnectTimeout();
         this.clearIceReconnectTimer();
-        this.bus.emit("ready");
+        this.emitReadyOnce();
       }
       if (this.pc.connectionState === "failed" || this.pc.connectionState === "disconnected") {
         this.bus.emit("network", { type: "disconnect", state: this.pc.connectionState, fatal: this.pc.connectionState === "failed" });
@@ -393,6 +394,12 @@ export class WebRTCTech extends AbstractTech {
       }
       this.handleSignalSideEvents(evt);
     });
+  }
+
+  private emitReadyOnce(): void {
+    if (this.readyFired) return;
+    this.readyFired = true;
+    this.bus.emit("ready");
   }
 
   /**
@@ -568,7 +575,27 @@ export class WebRTCTech extends AbstractTech {
     this.teardownDataChannel();
     await this.adapter?.destroy();
     this.adapter = null;
+    this.cleanupVideoElement();
     this.readyFired = false;
+  }
+
+  private cleanupVideoElement(): void {
+    if (!this.video) return;
+    this.video.onloadedmetadata = null;
+    this.video.onloadeddata = null;
+    this.video.onerror = null;
+    try {
+      this.video.pause();
+    } catch {
+      /* ignore */
+    }
+    this.video.srcObject = null;
+    try {
+      this.video.removeAttribute('src');
+      this.video.load();
+    } catch {
+      /* ignore */
+    }
   }
   
   private async handleAbrRenditionChange(evt: SignalSideEvent): Promise<void> {
@@ -704,7 +731,8 @@ export class WebRTCTech extends AbstractTech {
   }
 
   private async computeRtcStats() {
-    if (!this.pc) return super.getStats();
+    const base = super.getStats();
+    if (!this.pc) return base;
     const report = await this.pc.getStats();
     let bytes = 0;
     let frames = 0;
@@ -805,12 +833,13 @@ export class WebRTCTech extends AbstractTech {
       packetsRecv,
       framesDecoded,
       framesDropped,
+      droppedFrames: framesDropped ?? base.droppedFrames,
       framesReceived,
       pliCount,
       nackCount,
       firCount,
-      width,
-      height,
+      width: width ?? base.width,
+      height: height ?? base.height,
       candidateType,
       transport
     };

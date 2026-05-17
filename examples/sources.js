@@ -5,6 +5,8 @@ export default [
   { type: 'hls', url: 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8', preferTech: 'hls' },
   { type: 'hls', url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', preferTech: 'hls' },
   { type: 'hls', url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8', preferTech: 'hls' },
+  { type: 'hls', url: 'http://127.0.0.1:8888/live/test/index.m3u8', lowLatency: false, preferTech: 'hls' },
+  { type: 'webrtc', url: 'http://127.0.0.1:8889/live/test/whep', preferTech: 'webrtc' },
   
   // === DASH 测试流 ===
   { type: 'dash', url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd', preferTech: 'dash' },
