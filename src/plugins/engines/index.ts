@@ -31,3 +31,12 @@ export {
 };
 
 export type { Engine, EngineUrls, EngineConfig } from './engineFactory.js';
+export {
+  createSourceResolverMiddleware,
+  engineUrlsToResolvedSources
+} from './sourceResolver.js';
+export type {
+  EngineUrlsToSourcesOptions,
+  SourceResolverMiddlewareOptions,
+  SourceResolverProtocol
+} from './sourceResolver.js';

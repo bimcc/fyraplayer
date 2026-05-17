@@ -7,7 +7,6 @@ import type { DemuxedFrame, DemuxerCallbacks, DemuxerOptions } from './types.js'
 import { demuxFlv, createFlvState, type FlvDemuxerState, type FlvDemuxerContext } from './flv-demuxer.js';
 import { demuxTs, createTsDemuxerState, type TsDemuxerState, type TsDemuxerContext } from './ts-demuxer.js';
 import { demuxAnnexB, type AnnexBDemuxerContext } from './annexb-demuxer.js';
-import { demuxPs, createPsState, type PsDemuxerState, type PsDemuxerContext } from './ps-demuxer.js';
 import type { SeiProcessorState } from './sei.js';
 
 // Re-export types
@@ -32,14 +31,13 @@ export { getPrivateDataTypeName } from './private-data.js';
  * Supports FLV, MPEG-TS, and AnnexB formats with metadata extraction
  */
 export class Demuxer {
-  private format: 'flv' | 'ts' | 'annexb' | 'ps';
+  private format: 'flv' | 'ts' | 'annexb';
   private callbacks?: DemuxerCallbacks;
   private manualPrivateDataPids?: number[];
   
   // Format-specific state
   private flvState: FlvDemuxerState | null = null;
   private tsState: TsDemuxerState | null = null;
-  private psState: PsDemuxerState | null = null;
   
   // Detect-only mode
   private privateDataDetectOnly = false;
@@ -48,7 +46,7 @@ export class Demuxer {
   private detectedPrivateDataPids = new Set<number>();
   private detectedSeiTypes = new Set<number>();
 
-  constructor(options: DemuxerOptions | 'flv' | 'ts' | 'annexb' | 'ps' = 'flv') {
+  constructor(options: DemuxerOptions | 'flv' | 'ts' | 'annexb' = 'flv') {
     if (typeof options === 'string') {
       this.format = options;
     } else {
@@ -74,9 +72,6 @@ export class Demuxer {
       case 'ts':
         this.tsState = createTsDemuxerState(this.manualPrivateDataPids);
         break;
-      case 'ps':
-        this.psState = createPsState();
-        break;
       // annexb is stateless
     }
   }
@@ -99,8 +94,6 @@ export class Demuxer {
         return this.demuxTsInternal(data);
       case 'annexb':
         return this.demuxAnnexBInternal(data);
-      case 'ps':
-        return this.demuxPsInternal(data);
       default:
         return [];
     }
@@ -136,17 +129,8 @@ export class Demuxer {
     return demuxAnnexB(data, ctx);
   }
 
-  private demuxPsInternal(data: Uint8Array): DemuxedFrame[] {
-    if (!this.psState) this.psState = createPsState();
-    const ctx: PsDemuxerContext = {
-      callbacks: this.callbacks,
-      seiState: this.getSeiState()
-    };
-    return demuxPs(data, this.psState, ctx);
-  }
-
   // Public API methods
-  isAnnexB(): boolean { return this.format === 'annexb' || this.format === 'ps'; }
+  isAnnexB(): boolean { return this.format === 'annexb'; }
   
   enableExtraction(): void {
     this.extractionEnabled = true;

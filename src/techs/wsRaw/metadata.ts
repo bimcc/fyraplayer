@@ -4,7 +4,7 @@ import type { DemuxerCallbacks, DemuxerOptions } from './demuxer.js';
 type MetadataDetectedHandler = (event: MetadataDetectedEvent) => void;
 
 export function buildDemuxerOptionsWithMetadata(
-  transport: 'flv' | 'ts' | 'annexb' | 'ps',
+  transport: 'flv' | 'ts' | 'annexb',
   metadataConfig: MetadataConfig | undefined,
   onMetadata: ((event: MetadataEvent) => void) | undefined,
   onMetadataDetected: MetadataDetectedHandler | undefined,
@@ -108,4 +108,3 @@ export function flushMetadataBuffer(
 
   return [];
 }
-

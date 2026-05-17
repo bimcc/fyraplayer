@@ -36,5 +36,5 @@ export * from './utils/formatDetector.js';
 // Render
 export * from './render/canvasFrameBuffer.js';
 
-// UI (默认启用，可通过 ui: false 关闭)
+// Optional UI plugin. Enable with createUiComponentsPlugin().
 export * from './ui/index.js';

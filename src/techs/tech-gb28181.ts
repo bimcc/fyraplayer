@@ -1,30 +1,13 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, Gb28181Source, MetricsOptions, ReconnectPolicy, Source, WSRawSource } from '../types.js';
-import { WsRawPipeline, type WsRawHandlers } from './wsRaw/pipeline.js';
+import { BufferPolicy, Gb28181Source, MetricsOptions, ReconnectPolicy, Source } from '../types.js';
 import { MseFallback } from './wsRaw/mseFallback.js';
-import { DEFAULT_H264_DECODER_URL } from './wsRaw/defaultDecoders.js';
-
-type Base64OrBytes = string | Uint8Array | null | undefined;
 
 interface GbStreamInfo {
   streamId?: string;
-  codecVideo?: string;
-  videoCodec?: string;
-  codecAudio?: string;
-  audioCodec?: string;
-  width?: number;
-  height?: number;
-  sampleRate?: number;
-  channels?: number;
-  ptsBase?: number;
-  sps?: Base64OrBytes;
-  pps?: Base64OrBytes;
-  vps?: Base64OrBytes;
-  asc?: Base64OrBytes;
-  opusHead?: Base64OrBytes;
+  [key: string]: unknown;
 }
 
-interface GbControlResponse extends Partial<GbStreamInfo> {
+interface GbControlResponse {
   url?: string;
   wsUrl?: string;
   streamInfo?: GbStreamInfo;
@@ -32,21 +15,6 @@ interface GbControlResponse extends Partial<GbStreamInfo> {
   dialogId?: string;
   ssrc?: string;
   [key: string]: unknown;
-}
-
-interface GbCodecHints {
-  videoCodec?: 'h264' | 'h265';
-  audioCodec?: 'aac' | 'pcma' | 'pcmu' | 'opus';
-  width?: number;
-  height?: number;
-  sampleRate?: number;
-  channels?: number;
-  ptsBase?: number;
-  sps?: Uint8Array;
-  pps?: Uint8Array;
-  vps?: Uint8Array;
-  asc?: Uint8Array;
-  opusHead?: Uint8Array;
 }
 
 interface GbInviteResult {
@@ -77,10 +45,62 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+function summarizeControlJsonError(json: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const message = asString(json.message) ?? asString(json.error) ?? asString(json.reason);
+  const code = asString(json.code);
+  if (message) parts.push(message);
+  if (code) parts.push(`code=${code}`);
+
+  const details = isRecord(json.details) ? json.details : undefined;
+  if (details) {
+    const step = asString(details.step);
+    if (step) parts.push(`step=${step}`);
+    const inviteDebug = isRecord(details.invite_debug) ? details.invite_debug : undefined;
+    if (inviteDebug) {
+      const inviteStatus = typeof inviteDebug.invite_status === 'number' ? inviteDebug.invite_status : undefined;
+      const inviteReason = asString(inviteDebug.invite_reason);
+      if (inviteStatus !== undefined || inviteReason) {
+        parts.push(`sip=${inviteStatus ?? '-'}${inviteReason ? ` ${inviteReason}` : ''}`);
+      }
+      const streamMode = asString(inviteDebug.stream_mode);
+      if (streamMode) {
+        parts.push(`stream_mode=${streamMode}`);
+      }
+    }
+  }
+
+  return parts.length ? parts.join(' | ') : JSON.stringify(json);
+}
+
+async function parseHttpErrorBody(res: Response): Promise<string | undefined> {
+  const contentType = res.headers.get('content-type') || '';
+  try {
+    if (contentType.includes('application/json')) {
+      const json = (await res.json()) as Record<string, unknown>;
+      return summarizeControlJsonError(json);
+    }
+    const text = (await res.text()).trim();
+    return text || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function buildControlHttpError(action: 'invite' | 'control', res: Response): Promise<Error> {
+  const parts = [`gb28181 ${action} failed: ${res.status} ${res.statusText}`];
+  const body = await parseHttpErrorBody(res);
+  if (body) {
+    parts.push(`body=${body.length > 480 ? `${body.slice(0, 480)}...` : body}`);
+  }
+  if (res.status === 401 || res.status === 403) {
+    parts.push('hint=control API requires auth; set source.controlRequest.headers.Authorization or source.controlRequest.credentials="include"');
+  }
+  return new Error(parts.join(' | '));
+}
+
 export class Gb28181Tech extends AbstractTech {
-  private pipeline: WsRawPipeline | null = null;
-  private fallback: MseFallback | null = null;
-  private fallbackStarted = false;
+  private mse: MseFallback | null = null;
   private session: { callId?: string; ssrc?: string; streamId?: string } = {};
 
   canPlay(source: Source): boolean {
@@ -94,7 +114,6 @@ export class Gb28181Tech extends AbstractTech {
       reconnect?: ReconnectPolicy;
       metrics?: MetricsOptions;
       video: HTMLVideoElement;
-      webCodecs?: import('../types.js').WebCodecsConfig;
     }
   ): Promise<void> {
     if (source.type !== 'gb28181') {
@@ -107,51 +126,39 @@ export class Gb28181Tech extends AbstractTech {
     this.metrics = opts.metrics;
     this.video = opts.video;
     this.cleanup();
-    this.fallbackStarted = false;
 
     const invite = await this.performInvite(gbSource);
-    const dataUrl = invite.url || gbSource.url;
+    const mediaUrl = invite.url || gbSource.url;
+    if (!mediaUrl) {
+      throw new Error('gb28181 invite did not return a playable FLV/TS URL');
+    }
+
     this.session = {
       callId: invite.callId,
       ssrc: invite.ssrc ?? gbSource.gb.ssrc,
       streamId: invite.streamId ?? invite.streamInfo?.streamId
     };
 
-    const wsSource = this.toWsSource(gbSource, dataUrl, invite.streamInfo);
-
-    const startFallback = (reason?: string) => {
-      if (this.fallbackStarted) return;
-      this.fallbackStarted = true;
-      this.pipeline?.stop();
-      this.fallback = new MseFallback();
-      this.fallback.start(dataUrl, opts.video, {
+    this.mse = new MseFallback();
+    this.mse.start(
+      mediaUrl,
+      opts.video,
+      {
         onReady: () => this.bus.emit('ready'),
         onError: (e) => {
           this.bus.emit('error', e);
           this.bus.emit('network', { type: 'gb-fallback-error', fatal: true });
         }
-      });
-      if (reason) this.bus.emit('network', { type: 'fallback', reason });
-    };
-
-    const handlers: WsRawHandlers = {
-      onReady: () => this.bus.emit('ready'),
-      onError: (e) => {
-        this.bus.emit('error', e);
-        startFallback('pipeline-error');
       },
-      onNetwork: (evt) => {
-        this.bus.emit('network', evt);
-      },
-      onFallback: (reason) => startFallback(reason)
-    };
-
-    this.pipeline = new WsRawPipeline(wsSource, opts.video, opts.buffer, handlers, {
-      webCodecsConfig: opts.webCodecs,
-      gbMode: true,
-      gbCodecHints: this.normalizeStreamInfo(invite.streamInfo)
+      this.resolveMseFormat(gbSource, mediaUrl)
+    );
+    this.bus.emit('network', {
+      type: 'gb-control',
+      action: 'invite',
+      callId: this.session.callId,
+      ssrc: this.session.ssrc,
+      streamId: this.session.streamId
     });
-    await this.pipeline.start();
   }
 
   override async destroy(): Promise<void> {
@@ -160,7 +167,7 @@ export class Gb28181Tech extends AbstractTech {
   }
 
   /**
-   * Invoke GB28181 control actions (invite/bye/ptz/query/keepalive).
+   * Invoke GB28181 gateway control actions (invite/bye/ptz/query/keepalive).
    */
   async invoke(action: string, payload?: unknown): Promise<unknown> {
     if (!this.source) throw new Error('tech not loaded');
@@ -208,18 +215,29 @@ export class Gb28181Tech extends AbstractTech {
     const body = {
       deviceId: source.gb.deviceId,
       channelId: source.gb.channelId,
+      stream_mode: source.gb.streamMode,
       ssrc: source.gb.ssrc,
       transport: source.gb.transport,
       expires: source.gb.expires,
       ...overrideRecord
     };
-    const res = await fetch(inviteUrl, {
+    const requestInit: RequestInit = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
-    });
+    };
+    if (source.controlRequest?.headers) {
+      requestInit.headers = {
+        ...(requestInit.headers as Record<string, string>),
+        ...source.controlRequest.headers
+      };
+    }
+    if (source.controlRequest?.credentials) {
+      requestInit.credentials = source.controlRequest.credentials;
+    }
+    const res = await fetch(inviteUrl, requestInit);
     if (!res.ok) {
-      throw new Error(`gb28181 invite failed: ${res.status} ${res.statusText}`);
+      throw await buildControlHttpError('invite', res);
     }
     const json = (await res.json()) as GbControlResponse;
     const mappedUrl = asString(getByPath(json, source.responseMapping?.url));
@@ -232,7 +250,16 @@ export class Gb28181Tech extends AbstractTech {
       ? (mappedStreamInfo as GbStreamInfo)
       : undefined;
     const streamInfoCandidate: GbStreamInfo | undefined =
-      streamInfoFromMapping ?? json.streamInfo ?? (isRecord(json) ? (json as GbStreamInfo) : undefined);
+      streamInfoFromMapping ?? json.streamInfo;
+
+    const fallbackUrl =
+      json.url ??
+      json.wsUrl ??
+      asString(getByPath(json, 'play_urls.urls.ws_flv')) ??
+      asString(getByPath(json, 'play_urls.ws_flv')) ??
+      asString(getByPath(json, 'play_urls.urls.flv')) ??
+      asString(getByPath(json, 'play_urls.urls.ws_ts')) ??
+      asString(getByPath(json, 'play_urls.ws_ts'));
 
     const defaultStreamId: string | undefined =
       asString((json as Record<string, unknown>).stream_id) ??
@@ -242,7 +269,7 @@ export class Gb28181Tech extends AbstractTech {
     const resolvedStreamId: string | undefined = mappedStreamId ?? defaultStreamId;
 
     return {
-      url: mappedUrl ?? json.url ?? json.wsUrl ?? source.url,
+      url: mappedUrl ?? fallbackUrl ?? source.url,
       streamInfo: streamInfoCandidate,
       callId: mappedCallId ?? json.callId ?? json.dialogId,
       ssrc: mappedSsrc ?? json.ssrc ?? source.gb.ssrc,
@@ -252,13 +279,26 @@ export class Gb28181Tech extends AbstractTech {
 
   private async callControl(url?: string, payload?: unknown): Promise<unknown> {
     if (!url) throw new Error('control endpoint not configured');
-    const res = await fetch(url, {
+    const source = this.source?.type === 'gb28181' ? this.source : undefined;
+    const requestInit: RequestInit = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload ?? {})
+    };
+    if (source?.controlRequest?.headers) {
+      requestInit.headers = {
+        ...(requestInit.headers as Record<string, string>),
+        ...source.controlRequest.headers
+      };
+    }
+    if (source?.controlRequest?.credentials) {
+      requestInit.credentials = source.controlRequest.credentials;
+    }
+    const res = await fetch(url, {
+      ...requestInit
     });
     if (!res.ok) {
-      throw new Error(`gb28181 control failed: ${res.status} ${res.statusText}`);
+      throw await buildControlHttpError('control', res);
     }
     try {
       return await res.json();
@@ -267,65 +307,18 @@ export class Gb28181Tech extends AbstractTech {
     }
   }
 
-  private toWsSource(source: Gb28181Source, url: string, info?: GbStreamInfo): WSRawSource {
-    const hintedCodec = info?.codecVideo ?? info?.videoCodec ?? source.codecHints?.video;
-    const videoCodec: 'h264' | 'h265' = hintedCodec === 'h265' ? 'h265' : 'h264';
-    const transport = source.format ?? 'annexb';
-    const decoderUrl =
-      source.decoderUrl ?? (videoCodec === 'h264' ? DEFAULT_H264_DECODER_URL : undefined);
-    const audioOptional = source.audioOptional ?? true;
-    return {
-      type: 'ws-raw',
-      url,
-      codec: videoCodec,
-      transport,
-      heartbeatMs: source.heartbeatMs,
-      decoderUrl,
-      audioOptional,
-      disableAudio: audioOptional === false ? false : undefined,
-      webTransport: source.webTransport
-    };
-  }
-
-  private normalizeStreamInfo(info: GbStreamInfo | null | undefined): GbCodecHints | undefined {
-    if (!info) return undefined;
-    const decode = (v: Base64OrBytes): Uint8Array | undefined => {
-      if (!v) return undefined;
-      if (v instanceof Uint8Array) return v;
-      try {
-        const bin = atob(v);
-        const out = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-        return out;
-      } catch {
-        return undefined;
-      }
-    };
-    const audioCodec = info.codecAudio ?? info.audioCodec;
-    return {
-      videoCodec: (info.codecVideo ?? info.videoCodec) === 'h265' ? 'h265' : 'h264',
-      audioCodec:
-        audioCodec === 'opus' || audioCodec === 'pcma' || audioCodec === 'pcmu' || audioCodec === 'aac'
-          ? audioCodec
-          : undefined,
-      width: info.width,
-      height: info.height,
-      sampleRate: info.sampleRate,
-      channels: info.channels,
-      ptsBase: info.ptsBase,
-      sps: decode(info.sps),
-      pps: decode(info.pps),
-      vps: decode(info.vps),
-      asc: decode(info.asc),
-      opusHead: decode(info.opusHead)
-    };
+  private resolveMseFormat(source: Gb28181Source, url: string): 'flv' | 'mpegts' {
+    if (source.format === 'ts') return 'mpegts';
+    if (source.format === 'flv') return 'flv';
+    const lowerUrl = url.toLowerCase();
+    return lowerUrl.includes('.ts') || lowerUrl.includes('mpegts') || lowerUrl.includes('mp2t')
+      ? 'mpegts'
+      : 'flv';
   }
 
   private cleanup(): void {
-    this.pipeline?.stop();
-    this.pipeline = null;
-    this.fallback?.stop();
-    this.fallback = null;
+    this.mse?.stop();
+    this.mse = null;
     this.session = {};
   }
 }

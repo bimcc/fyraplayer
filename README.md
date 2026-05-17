@@ -4,11 +4,11 @@
 
 ## 特性
 
-- **多播放技术**: WebRTC (OME/WHIP/WHEP)、WS-raw (WebCodecs, FLV/TS)、HLS/DASH、fMP4、GB28181、本地文件
+- **多播放技术**: WebRTC (OME/WHIP/WHEP)、WS-raw (WebCodecs, FLV/TS)、HLS/DASH、fMP4、GB28181 网关适配、本地文件
 - **本地文件播放**: 支持 MP4（原生）、TS/MTS（mpegts.js）、FLV 等格式的本地文件播放
 - **高可靠性**: 自动重连、ICE 重启、playoutDelayHint、基于丢包的 ABR 回退、DataChannel 心跳
 - **可扩展**: 中间件管线、插件管理器、信令适配器、流媒体服务器 URL 工厂、元数据桥接 (KLV/SEI)
-- **可选 UI**: 默认播放控件，可关闭用于嵌入场景
+- **可选 UI 插件**: 通过 `createUiComponentsPlugin()` 显式启用，嵌入场景可只使用核心播放器
 - **渲染器分离**: PSV 全景、Cesium 3D 地图适配器放在各自独立项目
 
 ## 架构
@@ -21,7 +21,7 @@
 ├─────────────────────────────────────────────────────────────┤
 │  plugins/metadata    plugins/engines                         │  ← 播放相关插件
 ├─────────────────────────────────────────────────────────────┤
-│                          ui/                                 │  ← 默认 UI
+│                          ui/                                 │  ← 可选 UI 插件
 ├─────────────────────────────────────────────────────────────┤
 │                       FyraPlayer                             │  ← 主入口
 ├─────────────────────────────────────────────────────────────┤
@@ -38,7 +38,7 @@
 | `dash` | tech-dash.ts | DASH 自适应码率播放 (.mpd) | dash.js |
 | `fmp4` | tech-fmp4.ts | fMP4 直播流 (无清单，HTTP/WS + MSE) | 原生 MSE |
 | `ws-raw` | tech-ws-raw.ts | WebSocket + WebCodecs (FLV/TS) | 自研 + mpegts.js |
-| `gb28181` | tech-gb28181.ts | 国标 GB28181 流播放 | 自研 |
+| `gb28181` | tech-gb28181.ts | 服务端 GB28181 网关 invite/control + FLV/TS 播放适配 | mpegts.js |
 | `file` | tech-file.ts | 本地/远程文件播放 (MP4/TS/FLV) | 原生 + mpegts.js |
 
 ## 格式与 Tech 对应关系
@@ -59,9 +59,9 @@
 
 | 库 | 版本 | 用途 |
 |----|------|------|
-| `hls.js` | ^1.4.12 | HLS/LL-HLS 流播放 |
-| `dashjs` | ^4.7.4 | DASH 流播放 |
-| `mpegts.js` | ^1.7.3 | TS/FLV 容器解析 + MSE 播放 |
+| `hls.js` | ^1.6.15 | HLS/LL-HLS 流播放 |
+| `dashjs` | ^5.1.0 | DASH 流播放 |
+| `mpegts.js` | ^1.8.0 | TS/FLV 容器解析 + MSE 播放 |
 | `mp4box` | ^0.5.4 | MP4 容器解析（WebCodecs 路径） |
 
 ## 安装
@@ -86,6 +86,28 @@ const player = new FyraPlayer({
 
 player.on('ready', () => console.log('Player ready'));
 player.on('error', (err) => console.error('Error:', err));
+
+await player.init();
+```
+
+### 启用 UI 插件
+
+核心播放器不会默认挂载控件；需要 UI 时显式加入插件：
+
+```typescript
+import { FyraPlayer } from 'fyraplayer';
+import { createUiComponentsPlugin } from 'fyraplayer/plugins/ui-components';
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'hls', url: 'https://example.com/stream.m3u8' }],
+  plugins: [
+    createUiComponentsPlugin({
+      target: '.player-shell',
+      poster: '/poster.jpg'
+    })
+  ]
+});
 
 await player.init();
 ```
@@ -150,6 +172,23 @@ const player = new FyraPlayer({
 });
 ```
 
+`ws-raw` defaults to the stable MSE path (`pipeline: 'mse'`). The in-house
+WebCodecs/WASM path is opt-in and should be treated as experimental:
+
+```typescript
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{
+    type: 'ws-raw',
+    url: 'wss://server/stream.ts',
+    codec: 'h264',
+    transport: 'ts',
+    pipeline: 'experimental',
+    preferTech: 'ws-raw'
+  }]
+});
+```
+
 ### 本地文件播放
 
 ```typescript
@@ -201,9 +240,22 @@ player.on('metadata', (evt) => {
 
 详细 API 文档请参阅 [docs/api.md](./docs/api.md)
 
+## 长期跟进文档
+
+- [商业化成熟度路线图](./docs/commercial-readiness-roadmap.md)：当前商业级差距、优先级、验收门槛和延期插件占位。
+- [插件化边界地图](./docs/pluginization-map.md)：已插件化能力、候选插件、核心边界和插件 API 后续方向。
+- [支持场景与已知限制](./docs/supported-scenarios.md)：当前可对外承诺的场景、实验项和明确边界。
+- [播放验证矩阵](./docs/playback-verification-matrix.md)：真实浏览器/协议验证范围、样例流、场景和证据记录。
+- [性能基线](./docs/performance-baseline.md)：可选性能预算插件、默认阈值和后续 profiling 证据状态。
+- [代码审查对齐文档](./docs/review-alignment.md)：历史审查结论、已完成整改和复审记录。
+- [P0 执行清单](./docs/p0-execution-checklist.md)：第一批正确性修复的执行与验收记录。
+
 ## 脚本
 
 - `pnpm build` — 构建到 `dist/`
+- `pnpm check:sources` — 校验 `examples/sources.js` 的示例源结构
+- `pnpm check:public-api` — 校验 README/API 关键公共用法可通过 TypeScript 编译
+- `pnpm check:exports` — 清理并重建 `dist/`，校验 `package.json` exports 指向的文件存在
 - `pnpm test` — 运行 Jest 测试
 - `pnpm dev:vite` — Vite 开发服务器
 - `pnpm bundle:examples` — 打包示例

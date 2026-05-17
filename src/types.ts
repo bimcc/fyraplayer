@@ -1,4 +1,19 @@
-export type TechName = 'webrtc' | 'hls' | 'dash' | 'fmp4' | 'ws-raw' | 'file' | 'gb28181';
+export type BuiltinTechName = 'webrtc' | 'hls' | 'dash' | 'fmp4' | 'ws-raw' | 'file' | 'gb28181';
+
+/**
+ * Module-augmentation hook for third-party Tech names.
+ *
+ * Example:
+ * declare module 'fyraplayer' {
+ *   interface CustomTechNameMap {
+ *     'acme-live': true;
+ *   }
+ * }
+ */
+export interface CustomTechNameMap {}
+
+export type CustomTechName = Extract<keyof CustomTechNameMap, string>;
+export type TechName = BuiltinTechName | CustomTechName;
 
 /** @deprecated Use 'hls' or 'dash' instead */
 export type LegacyTechName = 'hlsdash';
@@ -100,9 +115,16 @@ export type WSRawSource = BaseSourceFields & {
   type: 'ws-raw';
   url: string;
   codec: 'h264' | 'h265';
-  transport?: 'flv' | 'ts' | 'annexb' | 'ps';
+  transport?: 'flv' | 'ts' | 'annexb';
   heartbeatMs?: number;
   preferTech?: 'ws-raw';
+  /**
+   * Playback pipeline selection.
+   * - `mse` is the stable default and uses mpegts.js/MSE fallback.
+   * - `experimental` enables the in-house WebCodecs/WASM pipeline and may fall back to MSE.
+   */
+  pipeline?: 'mse' | 'experimental';
+  /** @deprecated Use `pipeline: 'experimental'` instead. */
   experimental?: boolean;
   decoderUrl?: string;
   wasm?: WasmDecoderConfig;
@@ -126,10 +148,17 @@ export type Gb28181Source = BaseSourceFields & {
     query?: string;
     keepalive?: string;
   };
+  /** Optional request config for control endpoints (invite/bye/ptz/query/keepalive). */
+  controlRequest?: {
+    headers?: Record<string, string>;
+    credentials?: RequestCredentials;
+  };
   gb: {
     deviceId: string;
     channelId: string;
     ssrc?: string;
+    /** Optional GB invite stream mode override */
+    streamMode?: 'UDP' | 'TCP-Active' | 'TCP-Passive';
     transport?: 'udp' | 'tcp';
     expires?: number;
   };
@@ -144,27 +173,13 @@ export type Gb28181Source = BaseSourceFields & {
     callId?: string;
     /** SSRC path. Fallback: ssrc */
     ssrc?: string;
-    /** Stream info object path. Fallback: streamInfo */
+    /** Optional stream/session info object path. Fallback: streamInfo. Player does not parse GB media details. */
     streamInfo?: string;
     /** Stream id path. Fallbacks: stream_id -> streamId */
     streamId?: string;
   };
-  /** Container format delivered over data channel */
-  format?: 'annexb' | 'ts' | 'ps';
-  /** Optional codec hints to preconfigure decoders */
-  codecHints?: {
-    video?: 'h264' | 'h265';
-    audio?: 'aac' | 'pcma' | 'pcmu' | 'opus';
-    width?: number;
-    height?: number;
-    sampleRate?: number;
-    channels?: number;
-  };
-  heartbeatMs?: number;
-  decoderUrl?: string;
-  audioOptional?: boolean;
-  /** Use WebTransport datagrams instead of WebSocket */
-  webTransport?: boolean;
+  /** Standard container returned by the GB gateway. Browser-side GB28181 only supports FLV/TS playback. */
+  format?: 'flv' | 'ts';
   preferTech?: 'gb28181';
 };
 
@@ -190,7 +205,7 @@ export type AutoSource = BaseSourceFields & {
   preferTech?: TechName;
 };
 
-export type Source =
+export type BuiltinSource =
   | WebRTCSource
   | HLSSource
   | DASHSource
@@ -199,6 +214,28 @@ export type Source =
   | Gb28181Source
   | FileSource
   | AutoSource;
+
+/**
+ * Module-augmentation hook for third-party Source shapes.
+ *
+ * Example:
+ * declare module 'fyraplayer' {
+ *   interface CustomSourceMap {
+ *     AcmeLiveSource: { type: 'acme-live'; url: string; preferTech?: 'acme-live' };
+ *   }
+ * }
+ */
+export interface CustomSourceMap {}
+
+export type CustomSource = keyof CustomSourceMap extends never
+  ? never
+  : CustomSourceMap[keyof CustomSourceMap] &
+      BaseSourceFields & {
+        type: string;
+        url: string;
+        preferTech?: TechName;
+      };
+export type Source = BuiltinSource | CustomSource;
 
 // Type guards for Source discriminated union
 export function isWebRTCSource(s: Source): s is WebRTCSource {
@@ -294,11 +331,31 @@ export interface BufferPolicy {
   playoutDelayHintMs?: number;
   catchUpMode?: 'drop-b' | 'drop-bp' | 'skip-to-latest';
   decodeBudgetMs?: number;
+  /** fMP4/MSE pending append queue and quota policy. */
+  fmp4?: FMP4BufferPolicy;
   catchUp?: {
     maxBufferMs?: number;
     maxFrames?: number;
     mode?: 'none' | 'drop-to-key' | 'latest';
   };
+}
+
+export interface FMP4BufferPolicy {
+  /** Maximum queued fMP4 segments waiting for SourceBuffer.appendBuffer(). */
+  maxPendingSegments?: number;
+  /** Maximum queued fMP4 bytes waiting for SourceBuffer.appendBuffer(). */
+  maxPendingBytes?: number;
+  /**
+   * Queue overflow behavior.
+   * - drop-oldest keeps low-latency live playback bounded.
+   * - drop-newest protects existing queued media.
+   * - error rejects the overflowing segment and emits player error.
+   */
+  overflowStrategy?: 'drop-oldest' | 'drop-newest' | 'error';
+  /** Buffered media kept behind currentTime when recovering from QuotaExceededError. */
+  quotaCleanupKeepBehindMs?: number;
+  /** Number of quota cleanup attempts before the queued segment is dropped or rejected. */
+  quotaRetryLimit?: number;
 }
 
 export interface ReconnectPolicy {
@@ -347,7 +404,6 @@ export interface PlayerOptions {
   muted?: boolean;
   preload?: 'none' | 'metadata' | 'auto';
   video: HTMLVideoElement | string; // element or selector
-  ui?: UIOptions;
   plugins?: PluginCtor[];
   middleware?: MiddlewareEntry[];
   metrics?: MetricsOptions;
@@ -357,6 +413,7 @@ export interface PlayerOptions {
   dataChannel?: DataChannelOptions;
 }
 
+/** @deprecated UI is enabled through createUiComponentsPlugin(), not PlayerOptions.ui. */
 export interface UIOptions {
   skin?: string;
   layout?: string;
@@ -387,6 +444,58 @@ export interface MiddlewareEntry {
 }
 
 export type PlayerState = 'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'ended' | 'error';
+
+export type PlayerNetworkSeverity = 'fatal' | 'warning' | 'info';
+
+export type PlayerNetworkCode =
+  | 'NETWORK_EVENT'
+  | 'SOURCE_FALLBACK'
+  | 'RECONNECT_ATTEMPT'
+  | 'RECONNECT_EXHAUSTED'
+  | 'CONNECT_TIMEOUT'
+  | 'AUTOPLAY_BLOCKED'
+  | 'METADATA_TIMEOUT'
+  | 'VIDEO_ERROR'
+  | 'HLS_WARNING'
+  | 'HLS_FATAL'
+  | 'DASH_ERROR'
+  | 'FMP4_HTTP_ERROR'
+  | 'FMP4_WS_CLOSED'
+  | 'FMP4_BACKPRESSURE'
+  | 'FMP4_QUOTA_EXCEEDED'
+  | 'WS_OPEN'
+  | 'WS_CLOSE'
+  | 'WEBTRANSPORT_OPEN'
+  | 'WEBTRANSPORT_CLOSE'
+  | 'WS_RAW_FALLBACK_ERROR'
+  | 'GB28181_FALLBACK_ERROR'
+  | 'GB28181_CONTROL'
+  | 'WEBRTC_DISCONNECTED'
+  | 'WEBRTC_ICE_STATE'
+  | 'WEBRTC_ICE_FAILED'
+  | 'WEBRTC_ICE_RESTART'
+  | 'WEBRTC_ICE_RESTART_FAILED'
+  | 'WEBRTC_SIGNAL_ERROR'
+  | 'WEBRTC_SIGNAL_PARSE_ERROR'
+  | 'WEBRTC_SIGNAL_WS_OPEN'
+  | 'WEBRTC_SIGNAL_WS_CLOSE'
+  | 'WEBRTC_SIGNAL_WS_ERROR'
+  | 'WEBRTC_SIGNAL_EVENT'
+  | 'WEBRTC_OFFER_TIMEOUT'
+  | 'WEBRTC_OFFER_ERROR'
+  | 'WEBRTC_NOTIFICATION'
+  | 'WEBRTC_PLAYLIST'
+  | 'ABR_RENDITION'
+  | 'ABR_RENDITION_CHANGED'
+  | 'ABR_FALLBACK_ERROR'
+  | 'AUDIO_DISABLED'
+  | 'AUDIO_FALLBACK'
+  | 'VIDEO_DECODE_ERROR'
+  | 'CATCHUP_DROP'
+  | 'JITTER_BUFFER'
+  | 'WEBCODECS_CONFIG'
+  | 'WEBCODECS_CONFIG_UNSUPPORTED'
+  | 'WEBCODECS_FALLBACK';
 
 export type EngineEvent =
   | 'ready'
@@ -433,7 +542,95 @@ export interface EngineStats {
   jitterMs?: number;
   liveLatencyMs?: number;
   decodeLatencyMs?: number;
+  pendingSegments?: number;
+  pendingBytes?: number;
 }
+
+export interface PlayerStatsEvent {
+  tech: TechName;
+  stats?: EngineStats;
+}
+
+export type PlayerQosSeverity = 'warning' | 'info';
+
+export type PlayerQosCode =
+  | 'QOS_EVENT'
+  | 'PERFORMANCE_BUDGET'
+  | 'WEBCODECS_CONFIG'
+  | 'WEBCODECS_TS_WARNING'
+  | 'WEBCODECS_CONFIG_UNSUPPORTED'
+  | 'WEBCODECS_FALLBACK';
+
+export interface PlayerQosEvent {
+  type?: string;
+  code?: PlayerQosCode | (string & {});
+  severity?: PlayerQosSeverity;
+  message?: string;
+  tech?: TechName;
+  ts?: number;
+  codec?: string;
+  decodedFrames?: number;
+  decodeErrors?: number;
+  reason?: string;
+  [key: string]: unknown;
+}
+
+export interface PlayerNetworkEvent {
+  type?: string;
+  code?: PlayerNetworkCode | (string & {});
+  fatal?: boolean;
+  severity?: PlayerNetworkSeverity;
+  message?: string;
+  state?: string;
+  timeoutMs?: number;
+  attempt?: number;
+  maxRetries?: number;
+  from?: string;
+  to?: string;
+  reason?: string;
+  errors?: number;
+  dropped?: number;
+  droppedBytes?: number;
+  kept?: number;
+  mode?: string;
+  pendingSegments?: number;
+  pendingBytes?: number;
+  maxPendingSegments?: number;
+  maxPendingBytes?: number;
+  [key: string]: unknown;
+}
+
+export interface PlayerLevelSwitchEvent {
+  tech?: TechName;
+  mediaType?: string;
+  from?: number | string | null;
+  to?: number | string | null;
+  bitrateKbps?: number;
+  width?: number;
+  height?: number;
+  codec?: string;
+  reason?: string;
+  [key: string]: unknown;
+}
+
+export interface PlayerEventMap {
+  ready: [];
+  play: [];
+  pause: [];
+  ended: [];
+  error: [error: unknown];
+  buffer: [payload?: unknown];
+  tracks: [payload?: unknown];
+  levelSwitch: [payload?: PlayerLevelSwitchEvent];
+  stats: [payload: PlayerStatsEvent];
+  qos: [payload?: PlayerQosEvent];
+  sei: [payload?: unknown];
+  network: [event: PlayerNetworkEvent | undefined];
+  data: [payload?: unknown];
+  metadata: [event: MetadataEvent | MetadataDetectedEvent];
+}
+
+export type PlayerEventHandler<E extends keyof PlayerEventMap> = (...args: PlayerEventMap[E]) => void;
 
 export interface PluginContext {
   player: PlayerAPI;
@@ -450,6 +647,7 @@ export interface PluginLifecycle {
 export type PluginCtor = (ctx: PluginContext) => void | PluginLifecycle;
 
 export interface PlayerAPI {
+  readonly currentTime: number;
   play(): Promise<void>;
   pause(): Promise<void>;
   seek(time: number): Promise<void>;
@@ -457,11 +655,22 @@ export interface PlayerAPI {
   getState(): PlayerState;
   getSources(): Source[];
   getCurrentSource(): Source | undefined;
+  on<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;
   on(event: string, handler: (...args: unknown[]) => void): void;
+  once<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;
   once(event: string, handler: (...args: unknown[]) => void): void;
+  off<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;
   off(event: string, handler: (...args: unknown[]) => void): void;
   /** Invoke a tech-specific control action (e.g., gb28181 invite/ptz). */
   control(action: string, payload?: unknown): Promise<unknown>;
+  /** Enable ws-raw metadata extraction after detect-only metadata discovery. */
+  enableMetadataExtraction(): void;
+  /** Disable ws-raw metadata extraction while keeping detection available. */
+  disableMetadataExtraction(): void;
+  /** Return detected private data PIDs for the active ws-raw tech. */
+  getDetectedPrivateDataPids(): number[];
+  /** Return detected SEI payload types for the active ws-raw tech. */
+  getDetectedSeiTypes(): number[];
 }
 
 // UI and storage interfaces are placeholders for future extension
@@ -484,7 +693,25 @@ export interface EventBusLike {
 
 export interface TechRegistry {
   getCurrentTech(): Tech | null;
+  getTech(name: TechName): Tech | null;
   getCurrentTechName(): TechName | null;
+  getRegisteredTechs(): TechName[];
+  register(name: TechName, tech: Tech, options?: TechRegistrationOptions): TechRegistrationHandle;
+}
+
+export interface TechRegistrationOptions {
+  /** Replace an existing Tech with the same name. Defaults to false. */
+  replace?: boolean;
+  /**
+   * Add the Tech name to Player tech order.
+   * Defaults to `append` for new Tech names and `false` for names already present.
+   */
+  techOrder?: 'prepend' | 'append' | false;
+}
+
+export interface TechRegistrationHandle {
+  readonly name: TechName;
+  unregister(): Promise<void>;
 }
 
 export type WebRTCSignalConfig =

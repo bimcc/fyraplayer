@@ -2,6 +2,8 @@ import { EventBus } from './core/eventBus.js';
 import { MiddlewareManager } from './core/middleware.js';
 import { TechManager } from './core/techManager.js';
 import { PluginManager } from './core/pluginManager.js';
+import { enhanceNetworkEvent, isFatalNetworkEvent, type NetworkEventPayload } from './core/networkEvents.js';
+import { enhanceQosEvent, type QosEventPayload } from './core/qosEvents.js';
 import { WebRTCTech } from './techs/tech-webrtc.js';
 import { HLSTech } from './techs/tech-hls.js';
 import { DASHTech } from './techs/tech-dash.js';
@@ -17,9 +19,14 @@ import {
   MiddlewareContext,
   PluginContext,
   PlayerAPI,
+  PlayerEventHandler,
+  PlayerEventMap,
   PlayerOptions,
   PlayerState,
   Source,
+  Tech,
+  TechRegistrationHandle,
+  TechRegistrationOptions,
   TechName
 } from './types.js';
 import { DEFAULT_BUFFER_POLICY, DEFAULT_METRICS_OPTIONS, DEFAULT_RECONNECT_POLICY, DEFAULT_TECH_ORDER } from './core/defaults.js';
@@ -27,30 +34,6 @@ import { resolveVideoElement } from './utils/video.js';
 import { probeWebCodecs, WebCodecsSupport } from './utils/webcodecs.js';
 
 type EventHandler = (...args: unknown[]) => void;
-
-type NetworkEventPayload = {
-  type?: string;
-  fatal?: boolean;
-  message?: string;
-  severity?: 'fatal' | 'warning' | 'info';
-  state?: string;
-  timeoutMs?: number;
-  attempt?: number;
-  maxRetries?: number;
-  from?: string;
-  to?: string;
-  reason?: string;
-  errors?: number;
-  dropped?: number;
-  kept?: number;
-  mode?: string;
-  [key: string]: unknown;
-};
-
-type EnhancedNetworkEvent = NetworkEventPayload & {
-  severity: 'fatal' | 'warning' | 'info';
-  message: string;
-};
 
 export class FyraPlayer implements PlayerAPI {
   private readonly options: PlayerOptions;
@@ -99,7 +82,7 @@ export class FyraPlayer implements PlayerAPI {
     const pluginCtx: PluginContext = {
       player: this,
       coreBus: this.bus,
-      techs: this.techManager,
+      techs: this.createPluginTechRegistry(),
       ui: undefined,
       storage: window?.localStorage
     };
@@ -123,14 +106,24 @@ export class FyraPlayer implements PlayerAPI {
     return this.options.sources[this.currentSourceIndex];
   }
 
+  get currentTime(): number {
+    return Number.isFinite(this.videoEl.currentTime) ? this.videoEl.currentTime : 0;
+  }
+
+  on<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;
+  on(event: string, handler: EventHandler): void;
   on(event: string, handler: EventHandler): void {
     this.bus.on(event, handler);
   }
 
+  once<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;
+  once(event: string, handler: EventHandler): void;
   once(event: string, handler: EventHandler): void {
     this.bus.once(event, handler);
   }
 
+  off<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;
+  off(event: string, handler: EventHandler): void;
   off(event: string, handler: EventHandler): void {
     this.bus.off(event, handler);
   }
@@ -146,6 +139,7 @@ export class FyraPlayer implements PlayerAPI {
     this.currentSourceIndex = index;
     this.reconnectAttempts = 0;
     this.techManager.resetFailedTechs();
+    this.detachTechEvents();
     await this.techManager.destroyCurrent();
     await this.loadCurrent();
   }
@@ -169,8 +163,6 @@ export class FyraPlayer implements PlayerAPI {
           this.bus.emit('error', err);
         }
       }
-      this.state = 'playing';
-      this.bus.emit('play');
     } catch (e) {
       this.bus.emit('error', e);
       await this.handleReconnect();
@@ -237,6 +229,65 @@ export class FyraPlayer implements PlayerAPI {
       return tech.invoke(action, payload);
     }
     throw new Error(`Current tech does not support control action: ${action}`);
+  }
+
+  private createPluginTechRegistry() {
+    return {
+      getCurrentTech: () => this.techManager.getCurrentTech(),
+      getTech: (name: TechName) => this.techManager.getTech(name),
+      getCurrentTechName: () => this.techManager.getCurrentTechName(),
+      getRegisteredTechs: () => this.techManager.getRegisteredTechs(),
+      register: (name: TechName, tech: Tech, options?: TechRegistrationOptions): TechRegistrationHandle =>
+        this.registerPluginTech(name, tech, options)
+    };
+  }
+
+  private registerPluginTech(name: TechName, tech: Tech, options: TechRegistrationOptions = {}): TechRegistrationHandle {
+    const registeredBefore = this.techManager.getRegisteredTechs().includes(name);
+    const previousTech = this.techManager.getTech(name);
+    const previousTechOrder = [...this.techOrder];
+    if (registeredBefore && !options.replace) {
+      throw new Error(`Tech already registered: ${name}`);
+    }
+
+    if (registeredBefore) {
+      this.techManager.replace(name, tech);
+    } else {
+      this.techManager.register(name, tech);
+    }
+
+    this.applyPluginTechOrder(name, options.techOrder, registeredBefore);
+    let active = true;
+    return {
+      name,
+      unregister: async () => {
+        if (!active) return;
+        active = false;
+        this.detachTechEvents();
+        if (registeredBefore && previousTech) {
+          if (this.techManager.getCurrentTechName() === name) {
+            await this.techManager.destroyCurrent();
+          }
+          this.techOrder = previousTechOrder;
+          this.techManager.replace(name, previousTech);
+          return;
+        }
+        this.techOrder = this.techOrder.filter((techName) => techName !== name);
+        await this.techManager.unregister(name);
+      }
+    };
+  }
+
+  private applyPluginTechOrder(name: TechName, option: TechRegistrationOptions['techOrder'], registeredBefore: boolean): void {
+    if (option === false) return;
+    if (option === undefined && registeredBefore) return;
+    const mode = option ?? 'append';
+    this.techOrder = this.techOrder.filter((techName) => techName !== name);
+    if (mode === 'prepend') {
+      this.techOrder = [name, ...this.techOrder];
+      return;
+    }
+    this.techOrder = [...this.techOrder, name];
   }
 
   private async loadCurrent(): Promise<void> {
@@ -310,12 +361,14 @@ export class FyraPlayer implements PlayerAPI {
           metrics: this.options.metrics ?? DEFAULT_METRICS_OPTIONS,
           video: this.videoEl,
           webCodecs: this.options.webCodecs,
-          dataChannel: this.dataChannelOpts
+          dataChannel: this.dataChannelOpts,
+          onTechWillLoad: (techName) => {
+            this.attachTechEvents(techName);
+          }
         });
         if (!loaded) {
           throw new Error('No compatible tech/source');
         }
-        this.attachTechEvents(loaded.tech);
         this.startStatsTimer();
       } catch (e) {
         this.state = 'error';
@@ -383,117 +436,28 @@ export class FyraPlayer implements PlayerAPI {
       const stats = args[0] as EngineStats | undefined;
       return [{ tech: name, stats }];
     });
-    forward('qos');
+    forward('qos', (args) => {
+      const evt = args?.[0] as QosEventPayload | undefined;
+      return [enhanceQosEvent(evt, name)];
+    });
     forward('sei');
     forward('data');
     forward('metadata');
-    forward('network', (args) => {
+    const networkHandler = (...args: unknown[]) => {
       const evt = args?.[0] as NetworkEventPayload | undefined;
-      // Enhance network event with human-readable message
-      const enhancedEvt = this.enhanceNetworkEvent(evt);
-      
+      const enhancedEvt = enhanceNetworkEvent(evt);
+      this.bus.emit('network', enhancedEvt);
+
       // 仅在明确 fatal/断线事件时触发重连，避免正常抖动导致重置
       // Only treat explicitly fatal or hard failures as fatal. Transient 'disconnected' should not trigger fallback.
-      const fatal =
-        evt?.fatal ||
-        evt?.type === 'ice-failed' ||
-        evt?.type === 'connect-timeout' ||
-        evt?.type === 'ws-fallback-error' ||
-        evt?.type === 'fatal';
-      if (fatal) {
+      if (isFatalNetworkEvent(evt)) {
         const currentTech = this.techManager.getCurrentTechName();
         if (currentTech) this.techManager.markTechFailed(currentTech);
-        this.handleReconnect();
+        void this.handleReconnect();
       }
-      return [enhancedEvt];
-    });
-  }
-
-  /**
-   * Enhance network event with human-readable message and severity
-   */
-  private enhanceNetworkEvent(evt: NetworkEventPayload | undefined): EnhancedNetworkEvent | undefined {
-    if (!evt) return evt;
-    
-    const enhanced = { ...evt };
-    
-    // Add severity level
-    const fatalTypes = ['ice-failed', 'connect-timeout', 'ws-fallback-error', 'fatal', 'signal-error', 'offer-timeout', 'reconnect-exhausted'];
-    const warningTypes = ['metadata-timeout', 'autoplay-blocked', 'audio-disabled', 'audio-fallback', 'catchup', 'jitter'];
-    
-    if (evt.fatal || (typeof evt.type === 'string' && fatalTypes.includes(evt.type))) {
-      enhanced.severity = 'fatal';
-    } else if (typeof evt.type === 'string' && warningTypes.includes(evt.type)) {
-      enhanced.severity = 'warning';
-    } else {
-      enhanced.severity = 'info';
-    }
-    
-    // Add human-readable message
-    switch (evt.type) {
-      case 'disconnect':
-        enhanced.message = `连接断开 (状态: ${evt.state || 'unknown'})`;
-        break;
-      case 'ice-failed':
-        enhanced.message = 'ICE 连接失败，正在尝试重连...';
-        break;
-      case 'connect-timeout':
-        enhanced.message = `连接超时 (${evt.timeoutMs || 15000}ms)`;
-        break;
-      case 'signal-error':
-        enhanced.message = '信令连接失败';
-        break;
-      case 'offer-timeout':
-        enhanced.message = 'SDP Offer 超时';
-        break;
-      case 'ws-fallback-error':
-        enhanced.message = 'WebSocket 回退失败';
-        break;
-      case 'reconnect-exhausted':
-        enhanced.message = `Reconnect attempts exhausted (${evt.attempt || 0}/${evt.maxRetries || 0})`;
-        break;
-      case 'fallback':
-        enhanced.message = `已从 ${evt.from || 'primary'} 切换到 ${evt.to || 'fallback'} 源`;
-        break;
-      case 'reconnect':
-        enhanced.message = `正在重连 (第 ${evt.attempt}/${evt.maxRetries} 次)`;
-        break;
-      case 'audio-disabled':
-        enhanced.message = `音频已禁用: ${evt.reason || 'unknown'}`;
-        break;
-      case 'audio-fallback':
-        enhanced.message = `音频解码失败: ${evt.reason || 'unknown'}`;
-        break;
-      case 'video-decode-error':
-        enhanced.message = `视频解码错误 (累计 ${evt.errors} 次)`;
-        break;
-      case 'autoplay-blocked':
-        enhanced.message = '自动播放被浏览器阻止，请点击播放';
-        break;
-      case 'metadata-timeout':
-        enhanced.message = '视频元数据加载超时';
-        break;
-      case 'catchup':
-        enhanced.message = `追帧: 丢弃 ${evt.dropped} 帧，保留 ${evt.kept} 帧 (模式: ${evt.mode})`;
-        break;
-      case 'ice-state':
-        enhanced.message = `ICE 状态: ${evt.state}`;
-        break;
-      case 'ws-open':
-        enhanced.message = 'WebSocket 连接已建立';
-        break;
-      case 'ws-close':
-        enhanced.message = 'WebSocket 连接已关闭';
-        break;
-      default:
-        enhanced.message = evt.message || `网络事件: ${evt.type}`;
-    }
-    
-    return {
-      ...enhanced,
-      severity: enhanced.severity,
-      message: enhanced.message
     };
+    this.techEventHandlers.set('network', networkHandler);
+    tech.on('network', networkHandler);
   }
 
   private detachTechEvents(): void {
@@ -534,12 +498,12 @@ export class FyraPlayer implements PlayerAPI {
     if (this.reconnectTimer) return;
     const maxRetries = reconnect.maxRetries ?? 3;
     if (this.reconnectAttempts >= maxRetries) {
-      this.bus.emit('network', {
+      this.bus.emit('network', enhanceNetworkEvent({
         type: 'reconnect-exhausted',
         attempt: this.reconnectAttempts,
         maxRetries,
         fatal: true
-      });
+      }));
       this.state = 'error';
       try {
         await this.techManager.destroyCurrent();
@@ -551,11 +515,11 @@ export class FyraPlayer implements PlayerAPI {
     this.reconnectAttempts += 1;
     
     // Requirements 7.5: Emit reconnect event with attempt count
-    this.bus.emit('network', { 
+    this.bus.emit('network', enhanceNetworkEvent({
       type: 'reconnect', 
       attempt: this.reconnectAttempts,
       maxRetries
-    });
+    }));
     
     const delay =
       Math.min((reconnect.baseDelayMs ?? 1000) * Math.pow(2, this.reconnectAttempts - 1), reconnect.maxDelayMs ?? 8000) *

@@ -7,7 +7,6 @@ import { WebCodecsDecoder } from './webcodecsDecoder.js';
 import { decideWebCodecsCodec } from '../../utils/decodeDecision.js';
 import { isValidWebSocketUrl } from './url.js';
 import { applyCatchUp, CatchUpMode } from './catchup.js';
-import { GbCodecHints, concatUint8Arrays, parseGbStreamInfoPayload } from './gbUtils.js';
 import { buildDemuxerOptionsWithMetadata, flushMetadataBuffer } from './metadata.js';
 import { PcmAudioOutput } from './audioOutput.js';
 
@@ -94,14 +93,6 @@ export class WsRawPipeline {
   private metadataBuffer: MetadataEvent[] = [];
   /** Optional WebCodecs config */
   private webCodecsConfig?: WebCodecsConfig;
-  /** GB28181 framing mode flag */
-  private gbMode = false;
-  /** Accumulation buffer for GB framing */
-  private gbBuffer: Uint8Array = new Uint8Array(0);
-  /** Stream info hints for GB framing */
-  private gbStreamInfo?: GbCodecHints;
-  /** PTS base for GB framing */
-  private gbPtsBase = 0;
   /** Optional per-frame hook for VideoFrame (WebCodecs path). Use sync-only. */
   private frameHook?: (frame: VideoFrame) => void;
   /** Use WebTransport instead of WebSocket */
@@ -114,24 +105,18 @@ export class WsRawPipeline {
     video: HTMLVideoElement,
     buffer?: BufferPolicy,
     handlers?: WsRawHandlers,
-    extra?: { webCodecsConfig?: WebCodecsConfig; gbMode?: boolean; gbCodecHints?: GbCodecHints; frameHook?: (frame: VideoFrame) => void }
+    extra?: { webCodecsConfig?: WebCodecsConfig; frameHook?: (frame: VideoFrame) => void }
   ) {
     this.url = source.url;
     this.decoderUrl = source.decoderUrl;
     this.handlers = handlers;
     this.codec = source.codec;
     this.wasmConfig = source.wasm;
-    if (this.gbStreamInfo?.videoCodec) {
-      this.codec = this.gbStreamInfo.videoCodec;
-    }
     this.configDisableAudio = !!source.disableAudio;
     this.configAudioOptional = source.audioOptional !== false;
     this.metadataConfig = source.metadata;
     this.webCodecsConfig = extra?.webCodecsConfig;
     this.frameHook = extra?.frameHook;
-    this.gbMode = !!extra?.gbMode;
-    this.gbStreamInfo = extra?.gbCodecHints;
-    this.gbPtsBase = extra?.gbCodecHints?.ptsBase ?? 0;
     this.useWebTransport = !!source.webTransport;
     this.audioOutput = new PcmAudioOutput();
     
@@ -311,15 +296,9 @@ export class WsRawPipeline {
     this.requestFallbackVideo = false;
     this.videoDecodeErrors = 0;
     this.metadataBuffer = [];
-    this.gbBuffer = new Uint8Array(0);
-    this.gbPtsBase = 0;
   }
 
   private async handleChunk(data: ArrayBuffer): Promise<void> {
-    if (this.gbMode) {
-      await this.handleGbFramedChunk(data);
-      return;
-    }
     const frames = this.demuxer.demux(data);
     if (!frames.length) return;
     const { videoFrames, audioFrames, latestPts } = this.partitionFrames(frames);
@@ -366,114 +345,6 @@ export class WsRawPipeline {
     }
   }
 
-  /**
-   * GB28181 自定义帧头解析: [type][flags][tsMs][len] + payload
-   * type=0 为 stream-info (JSON/TLV)，type=1 视频，type=2 音频，type=3 预留控制
-   */
-  private async handleGbFramedChunk(data: ArrayBuffer): Promise<void> {
-    const incoming = new Uint8Array(data);
-    this.gbBuffer = concatUint8Arrays(this.gbBuffer, incoming);
-    const view = new DataView(this.gbBuffer.buffer, this.gbBuffer.byteOffset, this.gbBuffer.byteLength);
-    let offset = 0;
-    const frames: DemuxedFrame[] = [];
-
-    while (offset + 5 <= this.gbBuffer.length) {
-      const type = this.gbBuffer[offset];
-      // stream-info: [0][len u32]
-      if (type === 0) {
-        if (offset + 5 > this.gbBuffer.length) break;
-        const len = view.getUint32(offset + 1);
-        if (offset + 5 + len > this.gbBuffer.length) break;
-        const payload = this.gbBuffer.slice(offset + 5, offset + 5 + len);
-        this.applyGbStreamInfo(payload);
-        offset += 5 + len;
-        continue;
-      }
-      // frame: [type][flags][tsMs u32][len u32]
-      if (offset + 10 > this.gbBuffer.length) break;
-      const flags = this.gbBuffer[offset + 1];
-      const ts = view.getUint32(offset + 2);
-      const size = view.getUint32(offset + 6);
-      if (offset + 10 + size > this.gbBuffer.length) break;
-      const payload = this.gbBuffer.slice(offset + 10, offset + 10 + size);
-      offset += 10 + size;
-
-      if (type === 1) {
-        frames.push({
-          pts: this.gbPtsBase + ts,
-          data: payload,
-          isKey: (flags & 0x1) === 0x1,
-          track: 'video',
-          codec: this.gbStreamInfo?.videoCodec ?? this.codec
-        });
-      } else if (type === 2) {
-        frames.push({
-          pts: this.gbPtsBase + ts,
-          data: payload,
-          isKey: true,
-          track: 'audio',
-          codec: this.gbStreamInfo?.audioCodec,
-          sampleRate: this.gbStreamInfo?.sampleRate,
-          channels: this.gbStreamInfo?.channels
-        });
-      } else if (type === 3) {
-        this.handlers?.onNetwork?.({ type: 'gb-control', payload: payload.slice() });
-      }
-    }
-
-    // trim consumed bytes
-    if (offset > 0) {
-      this.gbBuffer = this.gbBuffer.slice(offset);
-    }
-    if (!frames.length) return;
-
-    const { videoFrames, audioFrames, latestPts } = this.partitionFrames(frames);
-    if (!this.configDisableAudio && audioFrames.length) {
-      await this.decodeAudioFrames(audioFrames);
-    } else if (this.configDisableAudio && audioFrames.length) {
-      this.handlers?.onNetwork?.({ type: 'audio-disabled', reason: 'config' });
-    }
-    if (!videoFrames.length) return;
-    this.jitter.push(videoFrames);
-    this.latestPts = latestPts;
-    this.jitter.dropLagging(this.latestPts);
-    let ready = this.jitter.popUntil(this.latestPts);
-    if (ready.length > 0) {
-      ready = this.applyCatchUp(ready);
-    }
-    for (const frame of ready) {
-      try {
-        await this.decodeFrame(frame);
-      } catch (err) {
-        this.videoDecodeErrors++;
-        this.handlers?.onError?.(err);
-        this.handlers?.onNetwork?.({ type: 'video-decode-error', errors: this.videoDecodeErrors });
-        if (this.videoDecodeErrors > 3) {
-          this.requestFallbackVideo = true;
-        }
-      }
-    }
-  }
-
-  private applyGbStreamInfo(payload: Uint8Array): void {
-    const result = parseGbStreamInfoPayload(payload, this.gbStreamInfo);
-    if (!result) return;
-    this.gbStreamInfo = result.streamInfo;
-    if (typeof result.ptsBase === 'number') {
-      this.gbPtsBase = result.ptsBase;
-    }
-    if (result.resetWebCodecsConfig) {
-      this.webCodecsConfigured = false;
-    }
-    if (result.codec) {
-      this.codec = result.codec;
-      if (this.webcodecs) {
-        const wcCodec = result.codec === 'h265' ? 'hev1.1.6.L93.B0' : 'avc1.42E01E';
-        this.webcodecs.setCodec(wcCodec);
-      }
-    }
-  }
-
   private partitionFrames(frames: DemuxedFrame[]): {
     videoFrames: DemuxedFrame[];
     audioFrames: DemuxedFrame[];
@@ -499,11 +370,9 @@ export class WsRawPipeline {
     if (!this.webcodecs) return false;
     if (this.webCodecsConfigured) return true;
 
-    const hint = this.gbStreamInfo?.videoCodec ?? (this.codec === 'h265' ? 'h265' : 'h264');
+    const hint = this.codec === 'h265' ? 'h265' : 'h264';
     const decision = await decideWebCodecsCodec({
       annexb: frame.data,
-      sps: this.gbStreamInfo?.sps,
-      vps: this.gbStreamInfo?.vps,
       codecHint: hint,
       allowH265: this.webCodecsConfig?.allowH265
     });
@@ -575,20 +444,15 @@ export class WsRawPipeline {
   private async ensureAudioDecoder(): Promise<void> {
     if (this.audioConfigured) return;
     if (this.configDisableAudio) throw new Error('audio disabled by config');
-    const asc = this.gbMode ? this.gbStreamInfo?.asc : this.demuxer.getAacConfig();
-    const codec = (this.gbMode ? this.gbStreamInfo?.audioCodec : this.demuxer.getAudioCodec()) || 'unknown';
-    if ((codec === 'pcma' || codec === 'pcmu')) {
-      // G.711 不使用 AudioDecoder
-      this.audioConfigured = true;
-      return;
-    }
+    const asc = this.demuxer.getAacConfig();
+    const codec = this.demuxer.getAudioCodec() || 'unknown';
     if (codec === 'aac' && !asc) throw new Error('AAC config missing');
     const audioDecoderCtor = (window as WindowWithExperimentalApis).AudioDecoder;
     if (!audioDecoderCtor) {
       throw new Error('AudioDecoder not supported');
     }
-    const channels = this.gbMode ? this.gbStreamInfo?.channels ?? 2 : 2;
-    const sampleRate = this.gbMode ? this.gbStreamInfo?.sampleRate ?? 48000 : 48000;
+    const channels = 2;
+    const sampleRate = 48000;
     await this.audioOutput.ensureContext(sampleRate);
     this.audioDecoder = new audioDecoderCtor({
       output: (audioData: AudioData) => this.audioOutput.playAudioData(audioData, (error) => this.handlers?.onError?.(error)),
@@ -616,18 +480,6 @@ export class WsRawPipeline {
 
   private async decodeAudioFrames(frames: DemuxedFrame[]): Promise<void> {
     if (!this.useAudio) return;
-    const codec = (this.gbMode ? this.gbStreamInfo?.audioCodec : this.demuxer.getAudioCodec()) || 'unknown';
-    // G.711 直接软解播放
-    if (codec === 'pcma' || codec === 'pcmu') {
-      const sampleRate = this.gbStreamInfo?.sampleRate ?? 8000;
-      const channels = this.gbStreamInfo?.channels ?? 1;
-      for (const f of frames) {
-        await this.audioOutput.playG711Frame(codec, f.data, sampleRate, channels, (error) => this.handlers?.onError?.(error));
-        this.audioFramesDecoded++;
-        this.audioClock = f.pts;
-      }
-      return;
-    }
     try {
       await this.ensureAudioDecoder();
     } catch (err) {

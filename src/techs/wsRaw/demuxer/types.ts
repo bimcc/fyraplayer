@@ -8,11 +8,6 @@ export interface DemuxedFrame {
   data: Uint8Array;
   isKey: boolean;
   track: 'video' | 'audio';
-  /** Optional codec identifier for upstream parsers (e.g., GB framing) */
-  codec?: 'h264' | 'h265' | 'aac' | 'opus' | 'pcma' | 'pcmu' | string;
-  /** Optional audio properties when demuxer is bypassed */
-  sampleRate?: number;
-  channels?: number;
 }
 
 // ============================================================================
@@ -63,7 +58,7 @@ export interface DemuxerCallbacks {
 /** Options for Demuxer construction */
 export interface DemuxerOptions {
   /** Container format */
-  format: 'flv' | 'ts' | 'annexb' | 'ps';
+  format: 'flv' | 'ts' | 'annexb';
   /** Metadata extraction callbacks */
   callbacks?: DemuxerCallbacks;
   /** Manual PID specification for private data; auto-detect from PMT if not provided */

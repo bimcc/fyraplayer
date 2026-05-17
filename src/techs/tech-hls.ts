@@ -10,9 +10,15 @@ import { decideWebCodecsCodec } from '../utils/decodeDecision.js';
 
 type HlsEventHandler = (...args: unknown[]) => void;
 
+interface HlsLevelSwitchPayload {
+  level?: number;
+}
+
 interface HlsErrorPayload {
+  type?: string;
   details?: string;
   fatal?: boolean;
+  error?: unknown;
 }
 
 // Re-export for backwards compatibility
@@ -31,6 +37,8 @@ export class HLSTech extends AbstractTech {
   private hlsErrorHandler?: HlsEventHandler;
   private hlsLevelHandler?: HlsEventHandler;
   private hlsManifestHandler?: HlsEventHandler;
+  private hlsFragBufferedHandler?: HlsEventHandler;
+  private readyEmitted = false;
 
   canPlay(source: Source): boolean {
     return source.type === 'hls';
@@ -57,7 +65,6 @@ export class HLSTech extends AbstractTech {
     }
     
     await this.setupHls(source, opts.video, opts.webCodecs);
-    this.bus.emit('ready');
   }
 
   private async setupHls(source: HLSSource, video: HTMLVideoElement, wc?: WebCodecsConfig): Promise<void> {
@@ -67,6 +74,7 @@ export class HLSTech extends AbstractTech {
     if (wc?.enable && WebCodecsDecoder.isSupported() && (await this.isSafeForWebCodecs(source))) {
       try {
         await this.pullWithWebCodecs(source.url, video, wc);
+        this.emitReadyOnce();
         return;
       } catch (err) {
         console.warn('[hls] WebCodecs pull failed, fallback to hls.js', err);
@@ -101,6 +109,8 @@ export class HLSTech extends AbstractTech {
     const canNative = video.canPlayType('application/vnd.apple.mpegurl');
     if (canNative) {
       console.log('[hls] Using native HLS (Safari/iOS fallback)');
+      video.onloadedmetadata = () => this.emitReadyOnce();
+      video.oncanplay = () => this.emitReadyOnce();
       video.src = source.url;
       video.load();
       return;
@@ -119,17 +129,35 @@ export class HLSTech extends AbstractTech {
     
     this.hlsErrorHandler = (_event: unknown, payload: unknown) => {
       const data = asErrorPayload(payload);
-      this.bus.emit('error', data);
       if (data?.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
         this.bus.emit('buffer');
       }
       if (data?.fatal) {
-        this.bus.emit('network', { type: 'hls-fatal', details: data.details });
+        this.bus.emit('error', data);
+        this.bus.emit('network', { type: 'hls-fatal', details: data.details, fatal: true });
         this.hls?.recoverMediaError?.();
+        return;
       }
+      this.bus.emit('network', {
+        type: 'hls-warning',
+        details: data.details,
+        hlsType: data.type,
+        severity: 'warning'
+      });
     };
     
-    this.hlsLevelHandler = (_event: unknown, data: unknown) => this.bus.emit('levelSwitch', data);
+    this.hlsLevelHandler = (_event: unknown, payload: unknown) => {
+      const data = this.asLevelSwitchPayload(payload);
+      const level = typeof data.level === 'number' ? this.hls?.levels?.[data.level] : undefined;
+      this.bus.emit('levelSwitch', {
+        tech: 'hls',
+        to: data.level,
+        bitrateKbps: level?.bitrate ? Math.round(level.bitrate / 1000) : undefined,
+        width: level?.width,
+        height: level?.height,
+        codec: level?.videoCodec
+      });
+    };
     this.hlsManifestHandler = (_event: unknown, _data: unknown) => {
       const maxH = this.deriveMaxHeight(video);
       if (this.hls?.levels?.length) {
@@ -140,10 +168,12 @@ export class HLSTech extends AbstractTech {
         this.hls.autoLevelCapping = capped;
       }
     };
+    this.hlsFragBufferedHandler = () => this.emitReadyOnce();
     
     this.hls.on(Hls.Events.ERROR, this.hlsErrorHandler);
     this.hls.on(Hls.Events.LEVEL_SWITCHED, this.hlsLevelHandler);
     this.hls.on(Hls.Events.MANIFEST_PARSED, this.hlsManifestHandler);
+    this.hls.on(Hls.Events.FRAG_BUFFERED, this.hlsFragBufferedHandler);
   }
 
   override getStats() {
@@ -152,12 +182,13 @@ export class HLSTech extends AbstractTech {
         getVideoPlaybackQuality?: () => { totalVideoFrames?: number };
       };
       const quality = videoWithPlaybackQuality.getVideoPlaybackQuality?.();
+      const now = Date.now();
       const hlsBitrate = this.hls.levels && this.hls.currentLevel >= 0 
         ? this.hls.levels[this.hls.currentLevel]?.bitrate 
         : undefined;
       return {
-        ts: Date.now(),
-        fps: quality?.totalVideoFrames,
+        ts: now,
+        fps: this.calculatePlaybackFps(quality?.totalVideoFrames, now),
         width: this.video.videoWidth,
         height: this.video.videoHeight,
         bitrateKbps: hlsBitrate ? Math.round(hlsBitrate / 1000) : undefined
@@ -171,11 +202,13 @@ export class HLSTech extends AbstractTech {
   }
 
   private cleanup(): void {
+    this.resetPlaybackFpsSampler();
     this.cleanupWebCodecs();
     if (this.hls) {
       if (this.hlsErrorHandler) this.hls.off(Hls.Events.ERROR, this.hlsErrorHandler);
       if (this.hlsLevelHandler) this.hls.off(Hls.Events.LEVEL_SWITCHED, this.hlsLevelHandler);
       if (this.hlsManifestHandler) this.hls.off(Hls.Events.MANIFEST_PARSED, this.hlsManifestHandler);
+      if (this.hlsFragBufferedHandler) this.hls.off(Hls.Events.FRAG_BUFFERED, this.hlsFragBufferedHandler);
       try {
         this.hls.detachMedia();
       } catch { /* ignore */ }
@@ -183,10 +216,13 @@ export class HLSTech extends AbstractTech {
       this.hls = undefined;
     }
     if (this.video) {
+      this.video.onloadedmetadata = null;
+      this.video.oncanplay = null;
       this.video.src = '';
       this.video.srcObject = null;
       try { this.video.load(); } catch { /* ignore */ }
     }
+    this.readyEmitted = false;
   }
 
   private cleanupWebCodecs(): void {
@@ -263,5 +299,16 @@ export class HLSTech extends AbstractTech {
     const cssH = video.clientHeight || 0;
     const screenH = window.innerHeight || 1080;
     return Math.max(cssH, screenH) || 1080;
+  }
+
+  private emitReadyOnce(): void {
+    if (this.readyEmitted) return;
+    this.readyEmitted = true;
+    this.bus.emit('ready');
+  }
+
+  private asLevelSwitchPayload(value: unknown): HlsLevelSwitchPayload {
+    if (typeof value !== 'object' || value === null) return {};
+    return value as HlsLevelSwitchPayload;
   }
 }

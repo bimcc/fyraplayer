@@ -8,14 +8,14 @@ Goal: use FyraPlayer as the low-latency playback engine, and feed its video outp
 - Optional: panoramaRenderer (for lower-latency WebGL texture path) or plain `<video>` + captureStream.
 
 ## Adapter
-- `src/integrations/psv/FyraPsvAdapter.ts` is a thin helper around FyraPlayer.
-- It is **not auto-registered**; you must import and register a PSV plugin yourself (or wrap this adapter into your own PSV plugin class).
-- Consider bundling a standalone entry (e.g., `dist/fyra-psv-plugin.js` UMD/ESM) for easy import.
+- PSV integration is owned by the external `@beeviz/fyrapano` package, not the `fyraplayer` package entrypoints.
+- FyraPlayer provides playback, events, and the `<video>` output; the PSV package owns viewer-specific plugin registration and rendering.
+- Do not import PSV helpers from `fyraplayer`; use the external integration package or build an app-local adapter.
 
 ## Quick start (PSV side)
 ```js
 import PhotoSphereViewer from '@photo-sphere-viewer/core';
-import { createFyraPsvPlugin } from 'fyraplayer'; // re-exported helper
+import { createFyraPsvPlugin } from '@beeviz/fyrapano';
 const FyraPsvPlugin = createFyraPsvPlugin(PhotoSphereViewer);
 PhotoSphereViewer.registerPlugin(FyraPsvPlugin);
 
@@ -42,9 +42,9 @@ const psv = new PhotoSphereViewer({
 ### UMD usage
 ```html
 <script src="photo-sphere-viewer.js"></script>
-<script src="fyraplayer.umd.js"></script>
+<script src="fyrapano.umd.js"></script>
 <script>
-  const FyraPsvPlugin = fyraplayer.createFyraPsvPlugin(PhotoSphereViewer);
+  const FyraPsvPlugin = fyrapano.createFyraPsvPlugin(PhotoSphereViewer);
   PhotoSphereViewer.registerPlugin(FyraPsvPlugin);
   // ... instantiate PSV with [FyraPsvPlugin, { video, sources, techOrder }]
 </script>

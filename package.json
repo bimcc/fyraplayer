@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Modern, extensible low-latency web player (WebRTC, LL-HLS, WS+WASM) with plugin/middleware architecture.",
   "type": "module",
+  "packageManager": "pnpm@11.1.2",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -35,6 +36,10 @@
       "import": "./dist/plugins/metrics.js",
       "types": "./dist/plugins/metrics.d.ts"
     },
+    "./plugins/performance": {
+      "import": "./dist/plugins/performance.js",
+      "types": "./dist/plugins/performance.d.ts"
+    },
     "./plugins/reconnect": {
       "import": "./dist/plugins/reconnect.js",
       "types": "./dist/plugins/reconnect.d.ts"
@@ -42,13 +47,21 @@
     "./plugins/storage": {
       "import": "./dist/plugins/storage.js",
       "types": "./dist/plugins/storage.d.ts"
+    },
+    "./techs/wsRaw/demuxer": {
+      "import": "./dist/techs/wsRaw/demuxer.js",
+      "types": "./dist/techs/wsRaw/demuxer.d.ts"
     }
   },
   "files": [
     "dist/**/*"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "check:public-api": "tsc -p tsconfig.public-api.json",
+    "check:exports": "pnpm build && node checks/export-contract.mjs",
+    "check:sources": "node checks/sources-contract.mjs",
     "bundle:examples": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm",
     "bundle:examples:watch": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm --watch",
     "dev": "concurrently \"pnpm bundle:examples:watch\" \"pnpm serve:examples\"",

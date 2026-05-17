@@ -703,6 +703,10 @@ export function createUiComponentsPlugin(opts?: UiComponentsOptions) {
       (document.querySelector('video') as HTMLVideoElement | null);
     if (!video) return;
     const host = target || video.parentElement || document.body;
+    const previousVideoControls = video.controls;
+    const hadControlsAttribute = video.hasAttribute?.('controls') ?? previousVideoControls;
+    const previousHostPosition = host.style.position;
+    const hadContainerClass = host.classList.contains('fyra-player-container');
 
     // Disable native controls
     video.controls = false;
@@ -734,5 +738,23 @@ export function createUiComponentsPlugin(opts?: UiComponentsOptions) {
     if (ctx.ui?.registerComponent) {
       ctx.ui.registerComponent('fyra-ui-shell', shell);
     }
+
+    return {
+      destroy: () => {
+        shell.remove();
+
+        video.controls = previousVideoControls;
+        if (hadControlsAttribute) {
+          video.setAttribute('controls', '');
+        } else {
+          video.removeAttribute('controls');
+        }
+
+        if (!hadContainerClass) {
+          host.classList.remove('fyra-player-container');
+        }
+        host.style.position = previousHostPosition || '';
+      }
+    };
   };
 }

@@ -8,11 +8,13 @@ type SimpleSource = {
   type: SourceType;
   url: string;
   lowLatency?: boolean;
-  webCodecs?: { enable?: boolean };
+  webCodecs?: { enable?: boolean; preferMp4?: boolean; allowH265?: boolean };
   gb?: {
     invite?: string;
     deviceId?: string;
     channelId?: string;
+    token?: string;
+    includeCredentials?: boolean;
     responseMapping?: {
       url?: string;
       callId?: string;
@@ -20,10 +22,8 @@ type SimpleSource = {
       streamInfo?: string;
       streamId?: string;
     };
-    format?: "annexb" | "ts" | "ps";
-    video?: "h264" | "h265";
-    audio?: "aac" | "pcma" | "pcmu" | "opus";
-    webTransport?: boolean;
+    format?: "flv" | "ts";
+    streamMode?: "" | "UDP" | "TCP-Active" | "TCP-Passive";
   };
 };
 
@@ -44,12 +44,13 @@ const lowLatencyToggle = document.getElementById("toggle-low-latency") as HTMLIn
 const overlay = document.getElementById("overlay") as HTMLDivElement | null;
 const overlayText = document.getElementById("overlay-text") as HTMLDivElement | null;
 const gbInviteInput = document.getElementById("gb-invite") as HTMLInputElement | null;
+const gbParseBtn = document.getElementById("gb-parse") as HTMLButtonElement | null;
 const gbDeviceInput = document.getElementById("gb-device") as HTMLInputElement | null;
 const gbChannelInput = document.getElementById("gb-channel") as HTMLInputElement | null;
+const gbTokenInput = document.getElementById("gb-token") as HTMLInputElement | null;
 const gbFormatSelect = document.getElementById("gb-format") as HTMLSelectElement | null;
-const gbVideoSelect = document.getElementById("gb-video") as HTMLSelectElement | null;
-const gbAudioSelect = document.getElementById("gb-audio") as HTMLSelectElement | null;
-const gbWtCheckbox = document.getElementById("gb-wt") as HTMLInputElement | null;
+const gbStreamModeSelect = document.getElementById("gb-stream-mode") as HTMLSelectElement | null;
+const gbCredsCheckbox = document.getElementById("gb-creds") as HTMLInputElement | null;
 const fileInput = document.getElementById("file-input") as HTMLInputElement;
 const openFileBtn = document.getElementById("btn-open-file") as HTMLButtonElement;
 
@@ -77,8 +78,8 @@ const presetSources: SimpleSource[] = [
   { label: "DASH bbb", type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd" },
   { label: "DASH sintel", type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd" },
   { label: "MP4 demo", type: "file", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4" },
-  { label: "TS 本地 (/testvideo/DJI_20250611085647_0001_V.TS)", type: "file", url: "/testvideo/DJI_20250611085647_0001_V.TS", webCodecs: { enable: true } },
-  { label: "MP4 本地 (/testvideo/Rec 0017.mp4)", type: "file", url: "/testvideo/Rec%200017.mp4", webCodecs: { enable: true } },
+  { label: "TS 本地 (/testvideo/DJI_20250611085647_0001_V.TS)", type: "file", url: "/testvideo/DJI_20250611085647_0001_V.TS", webCodecs: { enable: true, preferMp4: false } },
+  { label: "MP4 本地 (/testvideo/Rec 0017.mp4)", type: "file", url: "/testvideo/Rec%200017.mp4", webCodecs: { enable: true, preferMp4: true } },
   { label: "FLV demo (ws-raw)", type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv" },
   { label: "WebRTC (WHEP localhost:8889/test-webrtc/whep)", type: "webrtc", url: "http://localhost:8889/test-webrtc/whep" }
 ];
@@ -120,10 +121,13 @@ function syncUiWithSource(src: SimpleSource) {
     if (gbInviteInput) gbInviteInput.value = src.gb.invite || "";
     if (gbDeviceInput) gbDeviceInput.value = src.gb.deviceId || "";
     if (gbChannelInput) gbChannelInput.value = src.gb.channelId || "";
-    if (gbFormatSelect) gbFormatSelect.value = src.gb.format || "annexb";
-    if (gbVideoSelect) gbVideoSelect.value = src.gb.video || "h264";
-    if (gbAudioSelect) gbAudioSelect.value = src.gb.audio || "";
-    if (gbWtCheckbox) gbWtCheckbox.checked = !!src.gb.webTransport;
+    if (gbFormatSelect) gbFormatSelect.value = src.gb.format || "flv";
+    if (gbStreamModeSelect) gbStreamModeSelect.value = src.gb.streamMode || "";
+    if (gbTokenInput) gbTokenInput.value = src.gb.token || "";
+    if (gbCredsCheckbox) gbCredsCheckbox.checked = !!src.gb.includeCredentials;
+    if ((!src.gb.deviceId || !src.gb.channelId) && src.gb.invite) {
+      syncGbFieldsFromInvite();
+    }
   }
   if (lowLatencyToggle && typeof src.lowLatency === "boolean") {
     lowLatencyToggle.checked = src.lowLatency;
@@ -181,6 +185,53 @@ function applyLowLatencyToggle(src: SimpleSource): SimpleSource {
   return { ...src, lowLatency: lowLatencyToggle.checked };
 }
 
+function parseGbInviteUrl(inviteUrl: string): {
+  channelId?: string;
+  deviceId?: string;
+  byeUrl?: string;
+  ptzUrl?: string;
+} | null {
+  if (!inviteUrl) return null;
+
+  const replaceInvitePath = (url: string, suffix: "bye" | "ptz"): string => {
+    return url.replace(/\/invite(?=(?:\/)?(?:\?|$))/i, `/${suffix}`);
+  };
+
+  try {
+    const parsed = new URL(inviteUrl, window.location.origin);
+    const channelMatch = parsed.pathname.match(/\/api\/v1\/gb\/channels\/([^/]+)\/invite\/?$/i);
+    const channelId = channelMatch?.[1] ? decodeURIComponent(channelMatch[1]) : undefined;
+    const deviceId = parsed.searchParams.get("device_id") || parsed.searchParams.get("deviceId") || undefined;
+
+    const bye = new URL(parsed.toString());
+    bye.pathname = parsed.pathname.replace(/\/invite\/?$/i, "/bye");
+    const ptz = new URL(parsed.toString());
+    ptz.pathname = parsed.pathname.replace(/\/invite\/?$/i, "/ptz");
+
+    return {
+      channelId,
+      deviceId,
+      byeUrl: bye.pathname === parsed.pathname ? replaceInvitePath(parsed.toString(), "bye") : bye.toString(),
+      ptzUrl: ptz.pathname === parsed.pathname ? replaceInvitePath(parsed.toString(), "ptz") : ptz.toString()
+    };
+  } catch {
+    return {
+      byeUrl: replaceInvitePath(inviteUrl, "bye"),
+      ptzUrl: replaceInvitePath(inviteUrl, "ptz")
+    };
+  }
+}
+
+function syncGbFieldsFromInvite(): { deviceId?: string; channelId?: string } {
+  const invite = gbInviteInput?.value.trim() || "";
+  if (!invite) return {};
+  const parsed = parseGbInviteUrl(invite);
+  if (!parsed) return {};
+  if (gbDeviceInput && parsed.deviceId) gbDeviceInput.value = parsed.deviceId;
+  if (gbChannelInput && parsed.channelId) gbChannelInput.value = parsed.channelId;
+  return { deviceId: parsed.deviceId, channelId: parsed.channelId };
+}
+
 function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
   if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, preferTech: "hls" as const };
@@ -188,8 +239,12 @@ function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   if (pick === "ws-raw") return { type: "ws-raw" as const, url: src.url, codec: "h264" as const, transport: "flv" as const, preferTech: "ws-raw" as const };
   if (pick === "gb28181") {
     const gb = src.gb || {};
+    const invite = gb.invite || "";
+    const parsedInvite = parseGbInviteUrl(invite);
+    const deviceId = gb.deviceId || parsedInvite?.deviceId || "";
+    const channelId = gb.channelId || parsedInvite?.channelId || "";
     const responseMapping = {
-      url: gb.responseMapping?.url || "play_urls.ws_flv",
+      url: gb.responseMapping?.url || "play_urls.urls.ws_flv",
       callId: gb.responseMapping?.callId || "stream_id",
       streamId: gb.responseMapping?.streamId || "stream_id",
       ssrc: gb.responseMapping?.ssrc,
@@ -198,12 +253,22 @@ function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
     return {
       type: "gb28181" as const,
       url: src.url,
-      control: { invite: gb.invite || "", bye: gb.invite ? gb.invite.replace("invite", "bye") : "" },
-      gb: { deviceId: gb.deviceId || "", channelId: gb.channelId || "" },
+      control: {
+        invite,
+        bye: parsedInvite?.byeUrl || (invite ? invite.replace(/\/invite(?=(?:\/)?(?:\?|$))/i, "/bye") : ""),
+        ptz: parsedInvite?.ptzUrl || (invite ? invite.replace(/\/invite(?=(?:\/)?(?:\?|$))/i, "/ptz") : "")
+      },
+      controlRequest: {
+        headers: gb.token ? { Authorization: gb.token.startsWith("Bearer ") ? gb.token : `Bearer ${gb.token}` } : undefined,
+        credentials: gb.includeCredentials ? "include" : undefined
+      },
+      gb: {
+        deviceId,
+        channelId,
+        streamMode: gb.streamMode || undefined
+      },
       responseMapping,
-      format: gb.format || "annexb",
-      codecHints: { video: gb.video, audio: gb.audio },
-      webTransport: gb.webTransport
+      format: gb.format || "flv"
     };
   }
   if (pick === "webrtc-oven" || pick === "webrtc") {
@@ -253,6 +318,12 @@ function bindPlayerEvents(p: FyraPlayer) {
       setStatus("error", `fatal: ${reason}`);
     }
   });
+  p.on("qos", (evt: any) => {
+    if (evt?.code || evt?.type) {
+      const code = evt?.code || evt?.type || "qos";
+      appendLog(`qos[${code}]: ${JSON.stringify(evt)}`);
+    }
+  });
   p.on("buffer", () => setStatus("loading", "buffering..."));
   p.on("stats", ({ stats }) => {
     if (!stats) return;
@@ -277,7 +348,7 @@ function createPlayer(source: SimpleSource) {
     video,
     sources: [toPlayerSource(effectiveSource)],
     techOrder: ["gb28181", "webrtc", "ws-raw", "hls", "dash", "fmp4", "file"],
-    webCodecs: wcEnable ? { enable: true } : undefined,
+    webCodecs: wcEnable ? { ...(effectiveSource.webCodecs || {}), enable: true } : undefined,
     plugins: useSkin
       ? [
           createUiComponentsPlugin({
@@ -340,20 +411,34 @@ loadBtn.onclick = () => {
   safeRun("load", () => {
     const url = urlInput.value.trim();
     const type = typeSelect.value as SourceType;
-    if (!url) {
+    if (!url && type !== "gb28181") {
       alert("请输入 URL");
       throw new Error("missing url");
     }
     const src: SimpleSource = { label: `Custom ${type}`, type, url };
     if (type === "gb28181") {
+      const invite = gbInviteInput?.value.trim() || "";
+      if (!invite) {
+        alert("GB28181 请输入 Invite URL");
+        throw new Error("missing invite url");
+      }
+      const parsedInvite = parseGbInviteUrl(invite);
+      const deviceId = gbDeviceInput?.value.trim() || parsedInvite?.deviceId || "";
+      const channelId = gbChannelInput?.value.trim() || parsedInvite?.channelId || "";
+      if (!deviceId || !channelId) {
+        alert("GB28181 缺少 Device ID / Channel ID（可从 Invite URL 自动提取）");
+        throw new Error("missing gb ids");
+      }
+      if (gbDeviceInput) gbDeviceInput.value = deviceId;
+      if (gbChannelInput) gbChannelInput.value = channelId;
       src.gb = {
-        invite: gbInviteInput?.value.trim() || "",
-        deviceId: gbDeviceInput?.value.trim() || "",
-        channelId: gbChannelInput?.value.trim() || "",
-        format: (gbFormatSelect?.value as any) || "annexb",
-        video: (gbVideoSelect?.value as any) || "h264",
-        audio: (gbAudioSelect?.value as any) || undefined,
-        webTransport: !!gbWtCheckbox?.checked
+        invite,
+        deviceId,
+        channelId,
+        streamMode: (gbStreamModeSelect?.value as any) || undefined,
+        format: (gbFormatSelect?.value as any) || "flv",
+        token: gbTokenInput?.value.trim() || "",
+        includeCredentials: !!gbCredsCheckbox?.checked
       };
     }
     currentSrc = src;
@@ -372,6 +457,23 @@ pauseBtn.onclick = () => {
   }
   safeRun("pause", () => player?.pause());
 };
+
+gbInviteInput?.addEventListener("change", syncGbFieldsFromInvite);
+gbInviteInput?.addEventListener("blur", syncGbFieldsFromInvite);
+gbParseBtn?.addEventListener("click", () => {
+  const invite = gbInviteInput?.value.trim() || "";
+  if (!invite) {
+    alert("请先输入 Invite URL");
+    return;
+  }
+  const result = syncGbFieldsFromInvite();
+  if (!result.deviceId || !result.channelId) {
+    appendLog("GB invite parse failed: missing device_id/channel_id in URL");
+    alert("未能从 Invite URL 自动解析 Device ID / Channel ID，请手动填写");
+    return;
+  }
+  appendLog(`GB invite parsed: device=${result.deviceId}, channel=${result.channelId}`);
+});
 
 // 本地文件选择
 openFileBtn.onclick = () => fileInput.click();

@@ -1,5 +1,6 @@
 import { TechName, Source, BufferPolicy, MetricsOptions, ReconnectPolicy, Tech, DataChannelOptions } from '../types.js';
 import { EventBus } from './eventBus.js';
+import { enhanceNetworkEvent } from './networkEvents.js';
 
 interface TechEntry {
   name: TechName;
@@ -11,6 +12,8 @@ interface TechLoadError {
   source: Source;
   reason: unknown;
 }
+
+type TechWillLoadHook = (name: TechName, tech: Tech) => void;
 
 type SourceWithPreferTech = Source & {
   preferTech?: TechName;
@@ -37,7 +40,28 @@ export class TechManager {
   }
 
   register(name: TechName, impl: Tech): void {
+    if (this.techs.some((t) => t.name === name)) {
+      throw new Error(`Tech already registered: ${name}`);
+    }
     this.techs.push({ name, impl });
+  }
+
+  /**
+   * Replace an existing tech implementation or register it if missing.
+   * Active tech replacement is intentionally rejected because plugin
+   * registration is synchronous while active tech teardown is asynchronous.
+   */
+  replace(name: TechName, impl: Tech): void {
+    if (this.current?.name === name) {
+      throw new Error(`Cannot replace active tech: ${name}`);
+    }
+    const index = this.techs.findIndex((t) => t.name === name);
+    if (index >= 0) {
+      this.techs[index] = { name, impl };
+    } else {
+      this.techs.push({ name, impl });
+    }
+    this.failedTechs.delete(name);
   }
 
   /**
@@ -69,6 +93,10 @@ export class TechManager {
 
   getCurrentTech(): Tech | null {
     return this.current?.impl ?? null;
+  }
+
+  getTech(name: TechName): Tech | null {
+    return this.techs.find((tech) => tech.name === name)?.impl ?? null;
   }
 
   getCurrentTechName(): TechName | null {
@@ -111,6 +139,7 @@ export class TechManager {
       video: HTMLVideoElement;
       webCodecs?: import('../types.js').WebCodecsConfig;
       dataChannel?: DataChannelOptions;
+      onTechWillLoad?: TechWillLoadHook;
     }
   ): Promise<{ source: Source; tech: TechName } | null> {
     await this.destroyCurrent();
@@ -130,11 +159,11 @@ export class TechManager {
           const fbResult = await this.tryLoadSource(fallback, effectiveOrder, opts, errors);
           if (fbResult) {
             // Requirements 5.4: Emit fallback event
-            this.bus.emit('network', {
+            this.bus.emit('network', enhanceNetworkEvent({
               type: 'fallback',
               from: source.type,
               to: fallback.type
-            });
+            }));
             return fbResult;
           }
         }
@@ -167,6 +196,7 @@ export class TechManager {
       video: HTMLVideoElement;
       webCodecs?: import('../types.js').WebCodecsConfig;
       dataChannel?: DataChannelOptions;
+      onTechWillLoad?: TechWillLoadHook;
     },
     errors: TechLoadError[]
   ): Promise<{ source: Source; tech: TechName } | null> {
@@ -182,10 +212,19 @@ export class TechManager {
       if (!impl || !impl.canPlay(source)) continue;
       
       try {
-        await impl.load(source, opts);
         this.current = { name, impl };
+        opts.onTechWillLoad?.(name, impl);
+        await impl.load(source, opts);
         return { source, tech: name };
       } catch (err) {
+        if (this.current?.impl === impl) {
+          this.current = null;
+        }
+        try {
+          await impl.destroy();
+        } catch {
+          /* ignore cleanup errors while trying fallback techs */
+        }
         errors.push({ tech: name, source, reason: err });
         console.warn(`[techManager] load failed for ${name}`, err);
         // Mark tech as failed for this session

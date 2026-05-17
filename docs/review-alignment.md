@@ -32,7 +32,7 @@
 
 ### 2.5 性能与运行时行为
 - `Renderer` 在 `VideoFrame` 路径下虽然初始化了 WebGL，但实际仍走 `Canvas2D drawImage` 回退路径。
-- `fMP4` 的 `pendingBuffers` 队列缺少明确的背压上限控制。
+- `fMP4` 的 `pendingBuffers` 队列已补上有界背压和 quota cleanup/retry 策略，但真实浏览器流验证仍待项目专用 fMP4 源。
 - `WebRTCTech.getStats()` 采用“同步返回缓存 + 异步刷新”模式，首次/早期调用语义不直观。
 
 ---
@@ -214,3 +214,183 @@
 - Validation:
   - `pnpm -s build` passed
   - `pnpm -s test` passed (3 suites / 10 tests)
+
+## 14.1 GB28181 Boundary Correction (2026-05-17)
+
+- Supersedes the earlier browser-side GB media parsing direction in sections 12-14.
+- GB28181 is now treated as a server-side gateway responsibility: SIP/RTP/PS, PS demuxing, G.711 compatibility, and GB media conversion belong in backend gateway services.
+- Player-side `gb28181` remains a thin adapter for invite/control plus playback of standard FLV/TS URLs returned by the gateway.
+- Removed `src/techs/wsRaw/gbUtils.ts`, browser-side PS demuxer entry, and G.711 playback code from the active ws-raw path.
+- Long-term boundary is documented in `docs/gb28181.md` and tracked as `CR-010` in `docs/commercial-readiness-roadmap.md`.
+
+## 15. Commercial Readiness Review (2026-05-16)
+
+- Added long-term tracking document: `docs/commercial-readiness-roadmap.md`.
+- Current positioning: architecture direction is valid, but the project is not yet a commercial-grade general-purpose player SDK.
+- Immediate blockers:
+  - current workspace build/test is not reproducible;
+  - strict TypeScript build fails in this environment;
+  - public docs/API/implementation still have drift;
+  - ws-raw/WebCodecs remains an experimental commercial path unless proven by real-stream matrix and long-run stability tests.
+- Scope decision:
+  - DRM and subtitles/text tracks are not current P0/P1 work;
+  - keep them as deferred pluginized extensions so they do not distract from playback stability and release hygiene.
+- Verification attempted on 2026-05-16:
+  - `pnpm build` failed due to workspace/lockfile/node_modules state and non-interactive dependency repair refusal;
+  - `pnpm test -- --runInBand` failed for the same package management issue;
+  - `.\\node_modules\\.bin\\tsc.CMD -p tsconfig.json` failed on unresolved third-party modules and `tech-hls.ts` implicit `any`;
+  - `.\\node_modules\\.bin\\jest.CMD --runInBand` failed because `import-local` could not be resolved.
+
+## 16. Commercial Readiness Follow-up (2026-05-16)
+
+- Restored package-local build/test reproducibility for `fyraplayer` and recorded it in `docs/commercial-readiness-roadmap.md`.
+- Began `CR-003` API consistency work:
+  - `FyraPlayer.currentTime` now exists and is covered by a Jest regression test.
+  - `PlayerAPI` now exposes typed event overloads plus the existing ws-raw metadata helper methods.
+  - UI integration is documented as explicit plugin usage through `createUiComponentsPlugin()`, not `PlayerOptions.ui`.
+  - Added `pnpm check:public-api` to compile a package-style public API smoke file.
+- Updated long-term tracking:
+  - `docs/pluginization-map.md` marks `PL-001` done for the UI configuration decision.
+  - `docs/commercial-readiness-roadmap.md` marks `CR-003` done; `CR-012` remains active because UI lifecycle tests remain.
+- Validation:
+  - `pnpm build` passed.
+  - `pnpm test -- --runInBand` passed, 9 suites / 33 tests.
+  - `pnpm check:public-api` passed.
+
+## 17. Release Hygiene Follow-up (2026-05-17)
+
+- Closed `CR-004` release hygiene:
+  - `pnpm build` now cleans `dist/` before emitting, preventing stale ignored build artifacts from leaking into package releases.
+  - Added `pnpm check:exports` and `checks/export-contract.mjs` to verify all package export files exist after a clean build.
+  - Added explicit `fyraplayer/techs/wsRaw/demuxer` export for documented offline parsing usage.
+  - Updated `checks/public-api-smoke.ts` to compile the demuxer subpath import.
+  - Updated PSV docs to use external `@beeviz/fyrapano` integration rather than a nonexistent `fyraplayer` helper export.
+  - Removed `tests/` from `.gitignore` so test assets are not hidden from source-control review.
+- Validation:
+  - `pnpm check:public-api` passed.
+  - `pnpm check:exports` passed, verifying 20 package export files.
+
+## 18. UI Plugin Lifecycle Follow-up (2026-05-17)
+
+- Closed `CR-012` UI/plugin lifecycle work:
+  - `createUiComponentsPlugin()` now returns a plugin lifecycle object with `destroy()`.
+  - Destroy removes the injected `fyra-ui-shell`, restores video native controls state, removes plugin-added host class, and restores host inline positioning.
+  - Added `tests/ui-components.test.ts` to lock down teardown behavior without introducing a jsdom dependency.
+- Validation:
+  - `pnpm test -- tests/ui-components.test.ts --runInBand` passed.
+
+## 19. Playback Verification Matrix Follow-up (2026-05-17)
+
+- Began `CR-005` real playback verification work:
+  - Added `docs/playback-verification-matrix.md` as the browser/protocol evidence log.
+  - Matrix covers HLS, DASH, MP4, HTTP-FLV/ws-raw fallback, local MediaMTX WebRTC/HLS, GB28181, and fMP4.
+  - Added browser scope and promotion rules so unsupported or unverified combinations are explicit.
+  - Added scenario checklist for lifecycle, source switch, network interruption, and long-run live playback.
+  - Added `pnpm check:sources` with `checks/sources-contract.mjs` to validate `examples/sources.js`.
+- `CR-005` remains `doing` because no real browser playback runs have been recorded yet.
+- Validation:
+  - `pnpm check:sources` passed, 14 example sources verified.
+
+## 20. Source Resolver Middleware Follow-up (2026-05-17)
+
+- Closed `PL-002` under `CR-017` plugin boundary work:
+  - Added `src/plugins/engines/sourceResolver.ts`.
+  - Exported `createSourceResolverMiddleware()` and `engineUrlsToResolvedSources()` from `fyraplayer/plugins/engines` and `fyraplayer/plugins`.
+  - `auto` sources can now resolve through `EngineFactory` into a primary source plus ordered fallbacks.
+  - Resolver behavior covers engine `fallbackChain`, explicit `protocols`, `AutoSource.preferTech`, stable `ws-raw` MSE FLV defaults, URL deduplication, and explicit source fallbacks.
+- Added `tests/source-resolver.test.ts` for resolver ordering, deduplication, missing-engine behavior, config forwarding, fallback handling, and throw-on-unknown behavior.
+- Updated `docs/pluginization-map.md`, `docs/adapters.md`, `docs/api.md`, and `docs/commercial-readiness-roadmap.md` so code and tracking docs agree.
+- Validation:
+  - `pnpm exec jest tests/source-resolver.test.ts --runInBand` passed, 1 suite / 7 tests.
+  - `pnpm exec jest --runInBand` passed, 15 suites / 61 tests.
+  - `pnpm check:public-api` passed.
+  - `pnpm build` passed.
+  - `pnpm check:exports` passed, verifying 20 package export files.
+  - `pnpm check:sources` passed, 14 example sources verified.
+
+## 21. Third-party Tech Registration Follow-up (2026-05-17)
+
+- Closed `PL-005` and `CR-017` plugin boundary work:
+  - `PluginContext.techs.register()` now exposes a controlled plugin-owned Tech registration surface.
+  - Registration returns an idempotent `unregister()` handle for plugin lifecycle cleanup.
+  - Duplicate Tech names require `replace: true`; active-Tech replacement is rejected.
+  - `techOrder: 'prepend' | 'append' | false` controls selection order without exposing mutable Player internals.
+  - `CustomTechNameMap` and `CustomSourceMap` support TypeScript module augmentation for external protocols.
+  - Replaced built-in Techs are restored when the replacing plugin unregisters.
+- Added `tests/tech-registration-plugin.test.ts` and expanded `tests/techManager.test.ts`.
+- Updated `docs/pluginization-map.md`, `docs/api.md`, and `docs/commercial-readiness-roadmap.md`.
+- Validation:
+  - `pnpm exec jest tests/tech-registration-plugin.test.ts --runInBand` passed, 1 suite / 6 tests.
+  - `pnpm exec jest tests/techManager.test.ts tests/tech-registration-plugin.test.ts --runInBand` passed, 2 suites / 12 tests.
+  - `pnpm exec jest --runInBand` passed, 16 suites / 69 tests.
+  - `pnpm check:public-api` passed.
+  - `pnpm build` passed.
+  - `pnpm check:exports` passed, verifying 20 package export files.
+  - `pnpm check:sources` passed, 14 example sources verified.
+
+## 22. Network Event Code Follow-up (2026-05-17)
+
+- Began `CR-011` observability work:
+  - `PlayerNetworkEvent` now exposes stable `code` in addition to the backwards-compatible raw `type`.
+  - Added public `PlayerNetworkCode` and `PlayerNetworkSeverity` types.
+  - Centralized network normalization in `src/core/networkEvents.ts`.
+  - Player Tech forwarding, source fallback events, and Player reconnect events now share normalized `code`, `severity`, and `message` rules.
+  - Fatal network events now emit the root cause before reconnect/reconnect-exhausted follow-up events.
+- Added coverage in `tests/player.test.ts`, `tests/techManager.test.ts`, and `checks/public-api-smoke.ts`.
+- Updated `docs/api.md` and `docs/commercial-readiness-roadmap.md`.
+- Validation:
+  - `pnpm exec jest tests/player.test.ts tests/techManager.test.ts --runInBand` passed, 2 suites / 17 tests.
+  - `pnpm exec tsc -p tsconfig.json --noEmit` passed.
+  - `pnpm exec jest --runInBand` passed, 16 suites / 72 tests.
+  - `pnpm check:public-api` passed.
+  - `pnpm build` passed.
+  - `pnpm check:exports` passed, verifying 20 package export files.
+  - `pnpm check:sources` passed, 14 example sources verified.
+
+## 23. QoS Event Contract Follow-up (2026-05-17)
+
+- Continued `CR-011` observability work:
+  - Added public `PlayerStatsEvent`, `PlayerQosEvent`, `PlayerQosCode`, and `PlayerQosSeverity` types.
+  - Centralized QoS normalization in `src/core/qosEvents.ts`.
+  - Player Tech forwarding now normalizes `qos` events with stable `code`, `severity`, `message`, `tech`, and `ts` while preserving the raw Tech `type`.
+  - Kept `stats` as the existing `{ tech, stats }` contract and documented it explicitly.
+  - `createMetricsPlugin()` now types `onQos` as receiving `PlayerQosEvent | undefined`.
+- Added coverage in `tests/player.test.ts`, `tests/metrics-plugin.test.ts`, and `checks/public-api-smoke.ts`.
+- Updated `docs/api.md` and `docs/commercial-readiness-roadmap.md`.
+- Validation:
+  - `pnpm exec jest tests/player.test.ts tests/metrics-plugin.test.ts --runInBand` passed, 2 suites / 16 tests.
+  - `pnpm exec tsc -p tsconfig.json --noEmit` passed.
+  - `pnpm check:public-api` passed.
+  - `pnpm exec jest --runInBand` passed, 16 suites / 74 tests.
+  - `pnpm build` passed.
+  - `pnpm check:exports` passed, verifying 20 package export files.
+  - `pnpm check:sources` passed, 14 example sources verified.
+
+## 24. Observability Browser Evidence Follow-up (2026-05-17)
+
+- Closed `CR-011`:
+  - Demo now logs `qos` payloads so browser/manual runs expose `qos.code` alongside existing `network` logs.
+  - `examples/bundle.js` was rebuilt after the demo logging update.
+  - Browser evidence was recorded in `docs/playback-verification-matrix.md`.
+- Evidence from Chromium 148.0.7778.168 / Windows 10 on `http://127.0.0.1:4174/basic.html`:
+  - local MP4 WebCodecs configuration emitted `qos.code: "WEBCODECS_CONFIG"`;
+  - HLS warnings emitted `network.code: "HLS_WARNING"`;
+  - controlled WHEP-without-backend failure emitted `network.code: "WEBRTC_SIGNAL_ERROR"` and `RECONNECT_ATTEMPT`.
+- The WHEP record validates observability behavior only; MediaMTX/WebRTC playback validation remains deferred under `CR-006` / `CR-005`.
+- Validation:
+  - `pnpm bundle:examples` passed.
+
+## 25. Performance Budget Baseline Follow-up (2026-05-17)
+
+- Started `CR-013` without claiming final performance optimization:
+  - Added optional `createPerformanceMonitorPlugin()` under `src/plugins/performance.ts`.
+  - Added package subpath `fyraplayer/plugins/performance` and aggregate export from `fyraplayer/plugins`.
+  - Plugin consumes public `stats` events, normalizes `PerformanceSample`, evaluates budgets, reports `PerformanceViolation`, and can emit `qos` events with `code: 'PERFORMANCE_BUDGET'`.
+  - Added public `PERFORMANCE_BUDGET` QoS code.
+  - Corrected built-in HTML video stats so `fps` is derived from frame-count deltas instead of exposing cumulative `totalVideoFrames`.
+- Added `docs/performance-baseline.md` and updated API, support, pluginization, roadmap, README, and playback verification docs.
+- Remaining:
+  - Real long-run browser profiling, fMP4 live-stream evidence, and WebRTC/MediaMTX performance evidence are still pending before `CR-013` can close.
+- Validation:
+  - `pnpm exec jest tests/performance-plugin.test.ts tests/abstract-tech-stats.test.ts --runInBand` passed, 2 suites / 7 tests.
+  - `pnpm check:public-api` passed.

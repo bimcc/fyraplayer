@@ -14,7 +14,7 @@ FyraPlayer 采用「多技术栈（Tech）+ 统一事件与降级策略」的架
 
 ```
 WebSocket/WebTransport
-  -> Demux(FLV/TS/AnnexB/PS)
+  -> Demux(FLV/TS/AnnexB)
   -> JitterBuffer
   -> Decoder(WebCodecs 优先 / WASM 兜底)
   -> Renderer(WebGL/Canvas)
@@ -27,7 +27,7 @@ WebSocket/WebTransport
 - H.264：支持 Baseline/Main/High 等常见 profile，codec string 由 SPS 动态解析生成。
 - H.265：支持 H.265（hvc1/hev1），codec string 由 VPS/SPS 动态生成；需要浏览器硬解能力支持。
 - AV1 / VP9：可探测支持能力，用于判定是否可走 WebCodecs。
-- 音频：AAC/Opus 通过 AudioDecoder；G.711 通过内置 PCM 解码。
+- 音频：AAC/Opus 通过 AudioDecoder。
 
 ### 2.2 WASM 软解兜底
 
@@ -53,11 +53,10 @@ WebSocket/WebTransport
 
 - AAC（WebCodecs）
 - Opus（WebCodecs）
-- G.711 PCMA/PCMU（内置 PCM 解码）
 
 ### 3.3 容器/比特流
 
-- TS、FLV、AnnexB、PS（ws-raw 解复用）
+- TS、FLV、AnnexB（ws-raw 解复用）
 - fMP4（MSE）
 - MP4（原生 video.src）
 
@@ -86,4 +85,4 @@ WebSocket/WebTransport
 如需更详细的实现细节，可参考：
 
 - `docs/api.md`（API 与 Tech 说明）
-- `docs/gb28181.md`（GB28181 管线说明）
+- `docs/gb28181.md`（GB28181 网关适配边界）

@@ -1,5 +1,5 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, FMP4Source } from '../types.js';
+import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, FMP4Source, FMP4BufferPolicy } from '../types.js';
 
 interface ErrorWithName {
   name?: string;
@@ -9,6 +9,20 @@ interface VideoPlaybackQualityLike {
   totalVideoFrames?: number;
   droppedVideoFrames?: number;
 }
+
+interface PendingFmp4Segment {
+  data: ArrayBuffer;
+  bytes: number;
+  quotaRetries: number;
+}
+
+const DEFAULT_FMP4_BUFFER_POLICY: Required<FMP4BufferPolicy> = {
+  maxPendingSegments: 120,
+  maxPendingBytes: 64 * 1024 * 1024,
+  overflowStrategy: 'drop-oldest',
+  quotaCleanupKeepBehindMs: 12_000,
+  quotaRetryLimit: 2
+};
 
 /**
  * fMP4 Tech - handles fragmented MP4 streams without manifest (no .m3u8/.mpd)
@@ -23,7 +37,8 @@ export class FMP4Tech extends AbstractTech {
   private sourceBuffer: SourceBuffer | null = null;
   private ws: WebSocket | null = null;
   private abortController: AbortController | null = null;
-  private pendingBuffers: ArrayBuffer[] = [];
+  private pendingBuffers: PendingFmp4Segment[] = [];
+  private pendingBytes = 0;
   private isBufferUpdating = false;
   private mimeType = 'video/mp4; codecs="avc1.64001f,mp4a.40.2"';
 
@@ -146,7 +161,8 @@ export class FMP4Tech extends AbstractTech {
         }
         
         if (value) {
-          this.appendBuffer(value.buffer);
+          const chunk = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+          this.appendBuffer(chunk);
         }
       }
     } catch (err) {
@@ -195,12 +211,18 @@ export class FMP4Tech extends AbstractTech {
       return;
     }
     
-    this.pendingBuffers.push(data);
-    this.flushPendingBuffers();
+    if (this.enqueuePendingBuffer(data)) {
+      this.flushPendingBuffers();
+    }
   }
 
   private flushPendingBuffers(): void {
-    if (this.isBufferUpdating || !this.sourceBuffer || this.pendingBuffers.length === 0) {
+    if (
+      this.isBufferUpdating ||
+      !this.sourceBuffer ||
+      this.sourceBuffer.updating ||
+      this.pendingBuffers.length === 0
+    ) {
       return;
     }
     
@@ -208,37 +230,190 @@ export class FMP4Tech extends AbstractTech {
       return;
     }
     
+    const segment = this.dequeuePendingBuffer();
+    if (!segment) return;
+
     try {
-      const buffer = this.pendingBuffers.shift()!;
       this.isBufferUpdating = true;
-      this.sourceBuffer.appendBuffer(buffer);
+      this.sourceBuffer.appendBuffer(segment.data);
     } catch (err) {
       const error = err as ErrorWithName;
+      this.isBufferUpdating = false;
       if (error.name === 'QuotaExceededError') {
-        // Buffer full, try to remove old data
-        this.removeOldBufferData();
+        this.handleQuotaExceeded(segment, err);
       } else {
         this.bus.emit('error', { type: 'append-error', error: err });
       }
     }
   }
 
-  private removeOldBufferData(): void {
-    if (!this.sourceBuffer || !this.video || this.isBufferUpdating) {
+  private enqueuePendingBuffer(data: ArrayBuffer): boolean {
+    const segment: PendingFmp4Segment = {
+      data,
+      bytes: data.byteLength,
+      quotaRetries: 0
+    };
+    this.pendingBuffers.push(segment);
+    this.pendingBytes += segment.bytes;
+    return this.enforcePendingQueueLimits(segment);
+  }
+
+  private dequeuePendingBuffer(): PendingFmp4Segment | undefined {
+    const segment = this.pendingBuffers.shift();
+    if (segment) {
+      this.pendingBytes = Math.max(0, this.pendingBytes - segment.bytes);
+    }
+    return segment;
+  }
+
+  private requeuePendingBuffer(segment: PendingFmp4Segment): void {
+    this.pendingBuffers.unshift(segment);
+    this.pendingBytes += segment.bytes;
+  }
+
+  private getFmp4BufferPolicy(): Required<FMP4BufferPolicy> {
+    return {
+      ...DEFAULT_FMP4_BUFFER_POLICY,
+      quotaCleanupKeepBehindMs: this.buffer?.maxBufferMs ?? DEFAULT_FMP4_BUFFER_POLICY.quotaCleanupKeepBehindMs,
+      ...this.buffer?.fmp4
+    };
+  }
+
+  private enforcePendingQueueLimits(newestSegment: PendingFmp4Segment): boolean {
+    const policy = this.getFmp4BufferPolicy();
+    if (!this.isPendingQueueOverLimit(policy)) {
+      return true;
+    }
+
+    const dropped: PendingFmp4Segment[] = [];
+
+    if (policy.overflowStrategy === 'error') {
+      this.removeSpecificPendingSegment(newestSegment, dropped);
+      this.emitBackpressure(dropped, policy, 'error');
+      this.bus.emit('error', { type: 'fmp4-backpressure', pendingSegments: this.pendingBuffers.length, pendingBytes: this.pendingBytes });
+      return false;
+    }
+
+    while (this.isPendingQueueOverLimit(policy) && this.pendingBuffers.length > 0) {
+      const segment = policy.overflowStrategy === 'drop-newest'
+        ? this.pendingBuffers.pop()
+        : this.pendingBuffers.shift();
+      if (!segment) break;
+      this.pendingBytes = Math.max(0, this.pendingBytes - segment.bytes);
+      dropped.push(segment);
+    }
+
+    if (dropped.length > 0) {
+      this.emitBackpressure(dropped, policy, policy.overflowStrategy);
+    }
+
+    return this.pendingBuffers.includes(newestSegment);
+  }
+
+  private isPendingQueueOverLimit(policy: Required<FMP4BufferPolicy>): boolean {
+    return this.pendingBuffers.length > policy.maxPendingSegments || this.pendingBytes > policy.maxPendingBytes;
+  }
+
+  private removeSpecificPendingSegment(target: PendingFmp4Segment, dropped: PendingFmp4Segment[]): void {
+    const index = this.pendingBuffers.indexOf(target);
+    if (index < 0) return;
+    const [segment] = this.pendingBuffers.splice(index, 1);
+    if (!segment) return;
+    this.pendingBytes = Math.max(0, this.pendingBytes - segment.bytes);
+    dropped.push(segment);
+  }
+
+  private emitBackpressure(
+    dropped: PendingFmp4Segment[],
+    policy: Required<FMP4BufferPolicy>,
+    strategy: FMP4BufferPolicy['overflowStrategy'] | 'quota-retry-exhausted'
+  ): void {
+    const droppedBytes = dropped.reduce((total, segment) => total + segment.bytes, 0);
+    this.bus.emit('network', {
+      type: 'fmp4-backpressure',
+      severity: 'warning',
+      dropped: dropped.length,
+      droppedBytes,
+      pendingSegments: this.pendingBuffers.length,
+      pendingBytes: this.pendingBytes,
+      maxPendingSegments: policy.maxPendingSegments,
+      maxPendingBytes: policy.maxPendingBytes,
+      strategy
+    });
+    this.bus.emit('buffer', {
+      pendingSegments: this.pendingBuffers.length,
+      pendingBytes: this.pendingBytes,
+      dropped: dropped.length,
+      droppedBytes
+    });
+  }
+
+  private handleQuotaExceeded(segment: PendingFmp4Segment, error: unknown): void {
+    const policy = this.getFmp4BufferPolicy();
+    segment.quotaRetries += 1;
+
+    this.bus.emit('network', {
+      type: 'fmp4-quota-exceeded',
+      severity: 'warning',
+      pendingSegments: this.pendingBuffers.length,
+      pendingBytes: this.pendingBytes,
+      attempt: segment.quotaRetries,
+      maxRetries: policy.quotaRetryLimit
+    });
+
+    if (segment.quotaRetries <= policy.quotaRetryLimit) {
+      this.requeuePendingBuffer(segment);
+      if (this.removeOldBufferData(policy)) {
+        return;
+      }
+      this.dequeueSpecificPendingBuffer(segment);
+    }
+
+    if (policy.overflowStrategy === 'error') {
+      this.bus.emit('error', { type: 'quota-exceeded', error });
       return;
+    }
+
+    this.emitBackpressure([segment], policy, 'quota-retry-exhausted');
+    this.flushPendingBuffers();
+  }
+
+  private dequeueSpecificPendingBuffer(target: PendingFmp4Segment): void {
+    const index = this.pendingBuffers.indexOf(target);
+    if (index < 0) return;
+    const [segment] = this.pendingBuffers.splice(index, 1);
+    if (segment) {
+      this.pendingBytes = Math.max(0, this.pendingBytes - segment.bytes);
+    }
+  }
+
+  private removeOldBufferData(policy: Required<FMP4BufferPolicy>): boolean {
+    if (!this.sourceBuffer || !this.video || this.isBufferUpdating || this.sourceBuffer.updating) {
+      return false;
     }
     
     const currentTime = this.video.currentTime;
-    const removeEnd = Math.max(0, currentTime - 30); // Keep 30s of buffer behind
+    const keepBehindSeconds = Math.max(0, policy.quotaCleanupKeepBehindMs / 1000);
+    const removeEnd = Math.max(0, currentTime - keepBehindSeconds);
     
-    if (removeEnd > 0 && this.sourceBuffer.buffered.length > 0) {
-      try {
-        this.isBufferUpdating = true;
-        this.sourceBuffer.remove(0, removeEnd);
-      } catch (err) {
-        console.warn('[fmp4] Failed to remove old buffer data', err);
-        this.isBufferUpdating = false;
-      }
+    if (removeEnd <= 0 || this.sourceBuffer.buffered.length === 0) {
+      return false;
+    }
+
+    const removeStart = this.sourceBuffer.buffered.start(0);
+    const safeRemoveEnd = Math.min(removeEnd, this.sourceBuffer.buffered.end(this.sourceBuffer.buffered.length - 1));
+    if (safeRemoveEnd <= removeStart) {
+      return false;
+    }
+
+    try {
+      this.isBufferUpdating = true;
+      this.sourceBuffer.remove(removeStart, safeRemoveEnd);
+      return true;
+    } catch (err) {
+      console.warn('[fmp4] Failed to remove old buffer data', err);
+      this.isBufferUpdating = false;
+      return false;
     }
   }
 
@@ -258,6 +433,7 @@ export class FMP4Tech extends AbstractTech {
         getVideoPlaybackQuality?: () => VideoPlaybackQualityLike;
       };
       const quality = videoWithPlaybackQuality.getVideoPlaybackQuality?.();
+      const now = Date.now();
       const buffered = this.sourceBuffer?.buffered;
       let bufferLevel = 0;
       
@@ -272,12 +448,14 @@ export class FMP4Tech extends AbstractTech {
       }
       
       return {
-        ts: Date.now(),
-        fps: quality?.totalVideoFrames,
+        ts: now,
+        fps: this.calculatePlaybackFps(quality?.totalVideoFrames, now),
         width: this.video.videoWidth,
         height: this.video.videoHeight,
         droppedFrames: quality?.droppedVideoFrames,
-        bufferLevel
+        bufferLevel,
+        pendingSegments: this.pendingBuffers.length,
+        pendingBytes: this.pendingBytes
       };
     }
     return super.getStats();
@@ -288,6 +466,7 @@ export class FMP4Tech extends AbstractTech {
   }
 
   private cleanup(): void {
+    this.resetPlaybackFpsSampler();
     // Abort HTTP fetch
     if (this.abortController) {
       this.abortController.abort();
@@ -302,6 +481,7 @@ export class FMP4Tech extends AbstractTech {
     
     // Clear pending buffers
     this.pendingBuffers = [];
+    this.pendingBytes = 0;
     this.isBufferUpdating = false;
     
     // Clean up MediaSource

@@ -8,6 +8,8 @@ export abstract class AbstractTech implements Tech {
   protected reconnect?: ReconnectPolicy;
   protected metrics?: MetricsOptions;
   protected video: HTMLVideoElement | null = null;
+  private lastStatsFrameTs = 0;
+  private lastTotalVideoFrames: number | undefined;
 
   abstract canPlay(source: Source): boolean;
 
@@ -41,15 +43,41 @@ export abstract class AbstractTech implements Tech {
         getVideoPlaybackQuality?: () => { droppedVideoFrames?: number; totalVideoFrames?: number };
       };
       const quality = videoWithPlaybackQuality.getVideoPlaybackQuality?.();
+      const now = Date.now();
       return {
-        ts: Date.now(),
+        ts: now,
         width: this.video.videoWidth,
         height: this.video.videoHeight,
         droppedFrames: quality?.droppedVideoFrames,
-        fps: quality ? quality.totalVideoFrames : undefined
+        fps: this.calculatePlaybackFps(quality?.totalVideoFrames, now)
       };
     }
     return { ts: Date.now() };
+  }
+
+  protected calculatePlaybackFps(totalVideoFrames: number | undefined, now = Date.now()): number | undefined {
+    if (typeof totalVideoFrames !== 'number' || !Number.isFinite(totalVideoFrames)) {
+      return undefined;
+    }
+    if (
+      typeof this.lastTotalVideoFrames !== 'number' ||
+      this.lastStatsFrameTs <= 0 ||
+      totalVideoFrames < this.lastTotalVideoFrames
+    ) {
+      this.lastTotalVideoFrames = totalVideoFrames;
+      this.lastStatsFrameTs = now;
+      return undefined;
+    }
+    const elapsedMs = Math.max(1, now - this.lastStatsFrameTs);
+    const frameDelta = Math.max(0, totalVideoFrames - this.lastTotalVideoFrames);
+    this.lastTotalVideoFrames = totalVideoFrames;
+    this.lastStatsFrameTs = now;
+    return frameDelta / (elapsedMs / 1000);
+  }
+
+  protected resetPlaybackFpsSampler(): void {
+    this.lastStatsFrameTs = 0;
+    this.lastTotalVideoFrames = undefined;
   }
 
   async play(): Promise<void> {
@@ -76,6 +104,7 @@ export abstract class AbstractTech implements Tech {
 
   async destroy(): Promise<void> {
     // Clean up all event listeners to prevent memory leaks
+    this.resetPlaybackFpsSampler();
     this.bus.removeAllListeners();
   }
 }

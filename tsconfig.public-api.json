@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "rootDir": ".",
+    "paths": {
+      "fyraplayer": ["./src/index.ts"],
+      "fyraplayer/plugins": ["./src/plugins/index.ts"],
+      "fyraplayer/plugins/engines": ["./src/plugins/engines/index.ts"],
+      "fyraplayer/plugins/metadata": ["./src/plugins/metadata/index.ts"],
+      "fyraplayer/plugins/metrics": ["./src/plugins/metrics.ts"],
+      "fyraplayer/plugins/performance": ["./src/plugins/performance.ts"],
+      "fyraplayer/plugins/ui-components": ["./src/plugins/ui-components.ts"],
+      "fyraplayer/techs/wsRaw/demuxer": ["./src/techs/wsRaw/demuxer.ts"]
+    }
+  },
+  "include": ["src/**/*.d.ts", "checks/public-api-smoke.ts"]
+}

@@ -1,6 +1,6 @@
 import { AbstractTech } from './abstractTech.js';
 import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, DASHSource } from '../types.js';
-import dashjs from 'dashjs';
+import * as dashjs from 'dashjs';
 import { probeWebCodecs } from '../utils/webcodecs.js';
 
 type DashEventHandler = (event: unknown) => void;
@@ -16,6 +16,25 @@ interface DashMetricBandwidth {
   bandwidth?: number;
 }
 
+interface DashRepresentationLike {
+  absoluteIndex?: number;
+  index?: number;
+  id?: string;
+  bandwidth?: number;
+  width?: number | null;
+  height?: number | null;
+  codecs?: string;
+}
+
+interface DashQualityChangePayload {
+  mediaType?: string;
+  oldQuality?: number;
+  newQuality?: number;
+  oldRepresentation?: DashRepresentationLike | null;
+  newRepresentation?: DashRepresentationLike | null;
+  reason?: string;
+}
+
 /**
  * DASH Tech - handles .mpd streams
  * Uses dash.js for MSE-based playback
@@ -24,6 +43,10 @@ export class DASHTech extends AbstractTech {
   private dash?: dashjs.MediaPlayerClass;
   private dashErrorHandler?: DashEventHandler;
   private dashLevelHandler?: DashEventHandler;
+  private dashReadyHandler?: DashEventHandler;
+  private videoLoadedMetadataHandler?: () => void;
+  private videoCanPlayHandler?: () => void;
+  private readyEmitted = false;
 
   canPlay(source: Source): boolean {
     return source.type === 'dash';
@@ -50,7 +73,6 @@ export class DASHTech extends AbstractTech {
     }
     
     await this.setupDash(source, opts.video, opts.webCodecs);
-    this.bus.emit('ready');
   }
 
   private async setupDash(source: DASHSource, video: HTMLVideoElement, wc?: WebCodecsConfig): Promise<void> {
@@ -74,7 +96,7 @@ export class DASHTech extends AbstractTech {
       }
     });
     
-    this.setupDashEventHandlers();
+    this.setupDashEventHandlers(video);
     this.dash.initialize(video, source.url, false);
     
     // Check H.265 support for WebCodecs path
@@ -89,7 +111,7 @@ export class DASHTech extends AbstractTech {
     }
   }
 
-  private setupDashEventHandlers(): void {
+  private setupDashEventHandlers(video: HTMLVideoElement): void {
     if (!this.dash) return;
 
     const asDashErrorEvent = (value: unknown): DashErrorEventPayload => {
@@ -107,10 +129,32 @@ export class DASHTech extends AbstractTech {
       }
     };
     
-    this.dashLevelHandler = (eventPayload: unknown) => this.bus.emit('levelSwitch', eventPayload);
+    this.dashLevelHandler = (eventPayload: unknown) => {
+      const event = this.asQualityChangePayload(eventPayload);
+      const oldRepresentation = event.oldRepresentation ?? null;
+      const newRepresentation = event.newRepresentation ?? null;
+      this.bus.emit('levelSwitch', {
+        tech: 'dash',
+        mediaType: event.mediaType,
+        from: oldRepresentation?.absoluteIndex ?? oldRepresentation?.index ?? oldRepresentation?.id ?? event.oldQuality ?? null,
+        to: newRepresentation?.absoluteIndex ?? newRepresentation?.index ?? newRepresentation?.id ?? event.newQuality ?? null,
+        bitrateKbps: newRepresentation?.bandwidth ? Math.round(newRepresentation.bandwidth / 1000) : undefined,
+        width: typeof newRepresentation?.width === 'number' ? newRepresentation.width : undefined,
+        height: typeof newRepresentation?.height === 'number' ? newRepresentation.height : undefined,
+        codec: newRepresentation?.codecs,
+        reason: event.reason
+      });
+    };
+    this.dashReadyHandler = () => this.emitReadyOnce();
+    this.videoLoadedMetadataHandler = () => this.emitReadyOnce();
+    this.videoCanPlayHandler = () => this.emitReadyOnce();
     
-    this.dash.on('error', this.dashErrorHandler);
-    this.dash.on('qualityChangeRendered', this.dashLevelHandler);
+    this.dash.on(dashjs.MediaPlayer.events.ERROR, this.dashErrorHandler);
+    this.dash.on(dashjs.MediaPlayer.events.QUALITY_CHANGE_RENDERED, this.dashLevelHandler);
+    this.dash.on(dashjs.MediaPlayer.events.CAN_PLAY, this.dashReadyHandler);
+    this.dash.on(dashjs.MediaPlayer.events.PLAYBACK_METADATA_LOADED, this.dashReadyHandler);
+    video.addEventListener('loadedmetadata', this.videoLoadedMetadataHandler);
+    video.addEventListener('canplay', this.videoCanPlayHandler);
   }
 
   override getStats() {
@@ -119,6 +163,7 @@ export class DASHTech extends AbstractTech {
         getVideoPlaybackQuality?: () => { totalVideoFrames?: number };
       };
       const quality = videoWithPlaybackQuality.getVideoPlaybackQuality?.();
+      const now = Date.now();
       const metrics = this.dash.getDashMetrics();
       const currentSwitch = metrics?.getCurrentRepresentationSwitch('video') as
         | DashMetricBandwidth
@@ -130,8 +175,8 @@ export class DASHTech extends AbstractTech {
         currentSwitch?.bandwidth ||
         currentRequest?.bandwidth;
       return {
-        ts: Date.now(),
-        fps: quality?.totalVideoFrames,
+        ts: now,
+        fps: this.calculatePlaybackFps(quality?.totalVideoFrames, now),
         width: this.video.videoWidth,
         height: this.video.videoHeight,
         bitrateKbps: dashBitrate ? Math.round(dashBitrate / 1000) : undefined
@@ -145,16 +190,41 @@ export class DASHTech extends AbstractTech {
   }
 
   private cleanup(): void {
+    this.resetPlaybackFpsSampler();
     if (this.dash) {
-      if (this.dashErrorHandler) this.dash.off('error', this.dashErrorHandler);
-      if (this.dashLevelHandler) this.dash.off('qualityChangeRendered', this.dashLevelHandler);
+      if (this.dashErrorHandler) this.dash.off(dashjs.MediaPlayer.events.ERROR, this.dashErrorHandler);
+      if (this.dashLevelHandler) this.dash.off(dashjs.MediaPlayer.events.QUALITY_CHANGE_RENDERED, this.dashLevelHandler);
+      if (this.dashReadyHandler) {
+        this.dash.off(dashjs.MediaPlayer.events.CAN_PLAY, this.dashReadyHandler);
+        this.dash.off(dashjs.MediaPlayer.events.PLAYBACK_METADATA_LOADED, this.dashReadyHandler);
+      }
       this.dash.reset();
       this.dash = undefined;
     }
     if (this.video) {
+      if (this.videoLoadedMetadataHandler) {
+        this.video.removeEventListener('loadedmetadata', this.videoLoadedMetadataHandler);
+      }
+      if (this.videoCanPlayHandler) {
+        this.video.removeEventListener('canplay', this.videoCanPlayHandler);
+      }
       this.video.src = '';
       this.video.srcObject = null;
       try { this.video.load(); } catch { /* ignore */ }
     }
+    this.videoLoadedMetadataHandler = undefined;
+    this.videoCanPlayHandler = undefined;
+    this.readyEmitted = false;
+  }
+
+  private emitReadyOnce(): void {
+    if (this.readyEmitted) return;
+    this.readyEmitted = true;
+    this.bus.emit('ready');
+  }
+
+  private asQualityChangePayload(value: unknown): DashQualityChangePayload {
+    if (typeof value !== 'object' || value === null) return {};
+    return value as DashQualityChangePayload;
   }
 }

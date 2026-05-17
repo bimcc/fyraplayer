@@ -37,5 +37,5 @@ export * from './utils/formatDetector.js';
 export * from './render/canvasFrameBuffer.js';
 export * from './render/baseTarget.js';
 
-// UI (default, can be disabled via ui: false)
+// Optional UI plugin. Enable with createUiComponentsPlugin().
 export * from './ui/index.js';

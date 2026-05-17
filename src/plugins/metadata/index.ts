@@ -1,4 +1,9 @@
 /**
  * Metadata Plugin (KLV/MISB bridge)
  */
-export { KlvBridge, type KlvBridgeOptions } from './KlvBridge.js';
+export {
+  KlvBridge,
+  createMetadataPlugin,
+  type KlvBridgeOptions,
+  type MetadataPluginOptions
+} from './KlvBridge.js';

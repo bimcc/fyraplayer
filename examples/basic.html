@@ -201,6 +201,14 @@
         margin-left: 6px;
         font-size: 13px;
       }
+      .gb-invite-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .gb-invite-row input {
+        flex: 1;
+      }
       
       /* Footer Info */
       .info-bar {
@@ -288,7 +296,10 @@
           <div class="gb-grid">
             <div class="gb-field">
               <label>Invite URL</label>
-              <input id="gb-invite" type="text" placeholder="https://..." />
+              <div class="gb-invite-row">
+                <input id="gb-invite" type="text" placeholder="https://..." />
+                <button id="gb-parse" type="button">解析</button>
+              </div>
             </div>
             <div class="gb-field">
               <label>Device ID</label>
@@ -299,33 +310,28 @@
               <input id="gb-channel" type="text" placeholder="34020000001320000001" />
             </div>
             <div class="gb-field">
+              <label>Auth Token (optional)</label>
+              <input id="gb-token" type="text" placeholder="Bearer xxx 或仅 token" />
+            </div>
+            <div class="gb-field">
               <label>Format</label>
               <select id="gb-format">
-                <option value="annexb">AnnexB</option>
+                <option value="flv" selected>FLV</option>
                 <option value="ts">TS</option>
-                <option value="ps">PS</option>
               </select>
             </div>
             <div class="gb-field">
-              <label>Video</label>
-              <select id="gb-video">
-                <option value="h264">H.264</option>
-                <option value="h265">H.265</option>
-              </select>
-            </div>
-            <div class="gb-field">
-              <label>Audio</label>
-              <select id="gb-audio">
-                <option value="">自动</option>
-                <option value="aac">AAC</option>
-                <option value="pcma">PCMA</option>
-                <option value="pcmu">PCMU</option>
-                <option value="opus">Opus</option>
+              <label>Stream Mode</label>
+              <select id="gb-stream-mode">
+                <option value="" selected>Default</option>
+                <option value="UDP">UDP</option>
+                <option value="TCP-Active">TCP-Active</option>
+                <option value="TCP-Passive">TCP-Passive</option>
               </select>
             </div>
             <div class="gb-field checkbox">
-              <input id="gb-wt" type="checkbox" />
-              <label>WebTransport</label>
+              <input id="gb-creds" type="checkbox" />
+              <label>Include Credentials</label>
             </div>
           </div>
         </div>
