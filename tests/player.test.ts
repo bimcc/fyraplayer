@@ -14,13 +14,20 @@ function createVideoStub(): HTMLVideoElement {
     play: async () => {},
     pause: () => {},
     paused: false,
-    currentTime: 0
+    currentTime: 0,
+    readyState: 0,
+    error: null
   } as unknown as HTMLVideoElement;
 }
 
 describe('FyraPlayer P0/P1 regressions', () => {
   beforeEach(() => {
     resetMockTechInstances();
+    jest.useRealTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   test('applies request + signal middleware returned url to final load source', async () => {
@@ -353,5 +360,115 @@ describe('FyraPlayer P0/P1 regressions', () => {
     expect(secondPlay).toHaveBeenCalledTimes(1);
 
     await second.destroy();
+  });
+
+  test('ready clears a pending reconnect timer so recovered playback is not reloaded later', async () => {
+    jest.useFakeTimers();
+    const player = new FyraPlayer({
+      video: createVideoStub(),
+      sources: [{ type: 'hls', url: 'https://origin/live.m3u8' }],
+      techOrder: ['hls'],
+      reconnect: { enabled: true, maxRetries: 3, baseDelayMs: 1000, maxDelayMs: 1000, jitter: 0 }
+    });
+
+    const network: any[] = [];
+    player.on('network', (event) => network.push(event));
+
+    await player.init();
+    const hlsTech = mockTechInstances.hls[0];
+
+    hlsTech.emit('network', { type: 'hls-fatal', fatal: true });
+    expect(network).toEqual([
+      expect.objectContaining({ type: 'hls-fatal', severity: 'fatal' }),
+      expect.objectContaining({ type: 'reconnect', attempt: 1 })
+    ]);
+
+    hlsTech.emit('ready');
+    expect(player.getState()).toBe('ready');
+
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(hlsTech.loadCalls).toBe(1);
+    expect(hlsTech.destroyCalls).toBe(0);
+
+    await player.destroy();
+  });
+
+  test('fatal network reconnect retries the same tech instead of skipping it as failed', async () => {
+    jest.useFakeTimers();
+    const player = new FyraPlayer({
+      video: createVideoStub(),
+      sources: [{ type: 'hls', url: 'https://origin/live.m3u8' }],
+      techOrder: ['hls'],
+      reconnect: { enabled: true, maxRetries: 2, baseDelayMs: 100, maxDelayMs: 100, jitter: 0 }
+    });
+
+    await player.init();
+    const firstHlsTech = mockTechInstances.hls[0];
+
+    firstHlsTech.emit('network', { type: 'hls-fatal', fatal: true });
+    await jest.advanceTimersByTimeAsync(100);
+
+    expect(firstHlsTech.destroyCalls).toBe(1);
+    expect(mockTechInstances.hls).toHaveLength(1);
+    expect(mockTechInstances.hls[0].loadCalls).toBe(2);
+    expect(player.getState()).toBe('loading');
+
+    await player.destroy();
+  });
+
+  test('pending reconnect is skipped when the same playback recovers and advances before the timer fires', async () => {
+    jest.useFakeTimers();
+    const video = createVideoStub();
+    video.currentTime = 10;
+    Object.defineProperty(video, 'readyState', { value: 4, writable: true });
+    Object.defineProperty(video, 'paused', { value: false, writable: true });
+
+    const player = new FyraPlayer({
+      video,
+      sources: [{ type: 'hls', url: 'https://origin/live.m3u8' }],
+      techOrder: ['hls'],
+      reconnect: { enabled: true, maxRetries: 2, baseDelayMs: 100, maxDelayMs: 100, jitter: 0 }
+    });
+
+    await player.init();
+    const hlsTech = mockTechInstances.hls[0];
+
+    hlsTech.emit('network', { type: 'hls-fatal', fatal: true });
+    video.currentTime = 10.6;
+    await jest.advanceTimersByTimeAsync(100);
+
+    expect(hlsTech.loadCalls).toBe(1);
+    expect(hlsTech.destroyCalls).toBe(0);
+    expect(player.getState()).toBe('playing');
+
+    await player.destroy();
+  });
+
+  test('switchSource cancels a pending reconnect from the previous source', async () => {
+    jest.useFakeTimers();
+    const player = new FyraPlayer({
+      video: createVideoStub(),
+      sources: [
+        { type: 'hls', url: 'https://origin/live.m3u8' },
+        { type: 'dash', url: 'https://origin/live.mpd' }
+      ],
+      techOrder: ['hls', 'dash'],
+      reconnect: { enabled: true, maxRetries: 2, baseDelayMs: 100, maxDelayMs: 100, jitter: 0 }
+    });
+
+    await player.init();
+    const hlsTech = mockTechInstances.hls[0];
+
+    hlsTech.emit('network', { type: 'hls-fatal', fatal: true });
+    await player.switchSource(1);
+    await jest.advanceTimersByTimeAsync(100);
+
+    expect(mockTechInstances.dash).toHaveLength(1);
+    expect(mockTechInstances.dash[0].loadCalls).toBe(1);
+    expect(mockTechInstances.dash[0].destroyCalls).toBe(0);
+    expect(player.getCurrentSource()?.type).toBe('dash');
+
+    await player.destroy();
   });
 });

@@ -18,7 +18,7 @@ These scenarios have code, tests, and repeatable evidence.
 | DASH VOD | Verified | Chrome/Chromium browser evidence exists; `ready`, `play`, `stats`, and normalized `levelSwitch` payloads are documented. |
 | MP4 file playback | Verified | Browser native playback path is stable enough for the current baseline. |
 | HTTP-FLV / ws-raw default path | Verified | The commercial/default path is `pipeline: 'mse'`; it uses mpegts.js + browser MSE. |
-| Local MediaMTX HLS | Verified in Chrome | OBS RTMP -> MediaMTX HLS -> FyraPlayer/hls.js is verified on Chrome with `ready`, `play`, `stats`, 1280x720, and about 30 fps. HLS teardown now stops hls.js loading and clears the media element before reload. |
+| Local MediaMTX HLS | Verified in Chrome, stability follow-up active | OBS RTMP -> MediaMTX HLS -> FyraPlayer/hls.js is verified on Chrome with `ready`, `play`, `stats`, 1280x720, and about 30 fps. HLS teardown now stops hls.js loading and clears the media element before reload. Normal HLS explicitly disables hls.js low-latency edge mode and uses buffered live config; this is covered by unit tests after the user-reported short audio loop symptom. Real long-run retest remains pending. |
 | Local MediaMTX WebRTC WHEP | Verified in Chrome, conditional overall | OBS RTMP -> MediaMTX WHEP -> FyraPlayer WebRTC is verified on Chrome with ICE connected, `ready=1`, stats, 1280x720, RTT/packet-loss metrics, and clean destroy/recreate. Player-side forced mute was removed. Current OBS RTMP -> MediaMTX WHEP audio can still be silent when the browser receives a muted WebRTC audio track; treat that as a source/server codec path issue and prefer an Opus-capable MediaMTX WebRTC ingest path for audio validation. Edge, interruption, and long-run evidence remain pending. |
 | Playback lifecycle | Verified | `pause -> play`, `seek`, `switchSource`, and `destroy -> recreate` are covered by unit and Chromium evidence. |
 | Observability | Verified | Stable `network.code`, `qos.code`, `stats`, and `levelSwitch` payloads are documented and tested. |
@@ -49,6 +49,7 @@ This is the current commercial baseline. Do not expand the promise beyond this s
 - Long-run memory and listener growth are not yet verified across all browsers and protocols.
 - Performance budgets are implemented as warnings and QA signals; they are not yet product-wide optimization proof.
 - MediaMTX WebRTC audio validation depends on the ingest/transcoding path. With OBS RTMP publishing, HLS audio may work while WebRTC audio remains muted because browser WebRTC audio expects codecs such as Opus rather than AAC.
+- Local MediaMTX HLS should use `lowLatency: false` for the normal `/index.m3u8` preset unless LL-HLS is intentionally being tested. Low-latency mode is still supported, but it should be an explicit source decision because aggressive edge chasing can destabilize audio on normal live streams.
 - Unsupported or unverified combinations should be called out explicitly in product docs.
 
 ---

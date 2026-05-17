@@ -49323,6 +49323,27 @@ async function probeWebCodecs() {
 }
 
 // src/techs/hlsConfig.ts
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+function buildHlsPlaybackConfig(source, buffer) {
+  if (source.lowLatency) {
+    return buildLowLatencyConfig(source, buffer);
+  }
+  const maxBufferLength = clamp((buffer?.maxBufferMs ?? 12e3) / 1e3, 6, 30);
+  return {
+    lowLatencyMode: false,
+    progressive: false,
+    liveSyncMode: "buffered",
+    liveSyncDurationCount: 3,
+    liveMaxLatencyDurationCount: 6,
+    maxBufferLength,
+    maxMaxBufferLength: Math.max(30, maxBufferLength),
+    backBufferLength: 30,
+    maxAudioFramesDrift: 5,
+    nudgeOnVideoHole: false
+  };
+}
 function buildLowLatencyConfig(source, buffer) {
   if (!source.lowLatency)
     return {};
@@ -49579,8 +49600,7 @@ var HLSTech = class extends AbstractTech {
       debug: false,
       capLevelToPlayerSize: true,
       enableWorker: true,
-      // Only add low-latency config if explicitly requested
-      ...source.lowLatency ? buildLowLatencyConfig(source, this.buffer) : {}
+      ...buildHlsPlaybackConfig(source, this.buffer)
     };
     if (Hls.isSupported()) {
       console.log("[hls] Using hls.js (MSE)");
@@ -72873,6 +72893,7 @@ function resolveVideoElement(el) {
 }
 
 // src/player.ts
+var MEDIA_HAVE_CURRENT_DATA = 2;
 var FyraPlayer = class {
   constructor(opts) {
     this.bus = new EventBus();
@@ -72884,6 +72905,7 @@ var FyraPlayer = class {
     this.statsTimer = null;
     this.reconnectAttempts = 0;
     this.reconnectTimer = null;
+    this.reconnectHealthSnapshot = null;
     this.techEventHandlers = /* @__PURE__ */ new Map();
     this.options = opts;
     this.techOrder = opts.techOrder ?? DEFAULT_TECH_ORDER;
@@ -72948,6 +72970,7 @@ var FyraPlayer = class {
     }
     this.currentSourceIndex = index;
     this.reconnectAttempts = 0;
+    this.clearReconnectTimer();
     this.techManager.resetFailedTechs();
     this.detachTechEvents();
     await this.techManager.destroyCurrent();
@@ -72998,12 +73021,16 @@ var FyraPlayer = class {
       await tech.seek(time);
     }
   }
+  clearReconnectTimer() {
+    if (!this.reconnectTimer)
+      return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectHealthSnapshot = null;
+  }
   async destroy() {
     this.stopStatsTimer();
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
     this.detachTechEvents();
     await this.techManager.destroyCurrent();
     try {
@@ -73186,6 +73213,7 @@ var FyraPlayer = class {
         if (event === "ready") {
           this.state = "ready";
           this.reconnectAttempts = 0;
+          this.clearReconnectTimer();
           this.techManager.resetFailedTechs();
           if (this.options.autoplay) {
             this.play().catch(() => {
@@ -73230,9 +73258,6 @@ var FyraPlayer = class {
       const enhancedEvt = enhanceNetworkEvent(evt);
       this.bus.emit("network", enhancedEvt);
       if (isFatalNetworkEvent(evt)) {
-        const currentTech = this.techManager.getCurrentTechName();
-        if (currentTech)
-          this.techManager.markTechFailed(currentTech);
         void this.handleReconnect();
       }
     };
@@ -73296,15 +73321,46 @@ var FyraPlayer = class {
       attempt: this.reconnectAttempts,
       maxRetries
     }));
+    this.reconnectHealthSnapshot = {
+      sourceIndex: this.currentSourceIndex,
+      techName: this.techManager.getCurrentTechName(),
+      currentTime: this.currentTime,
+      readyState: this.videoEl.readyState
+    };
     const delay = Math.min((reconnect.baseDelayMs ?? 1e3) * Math.pow(2, this.reconnectAttempts - 1), reconnect.maxDelayMs ?? 8e3) * (1 + (reconnect.jitter ?? 0));
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       try {
+        if (this.isPlaybackHealthySinceReconnectScheduled()) {
+          this.reconnectHealthSnapshot = null;
+          this.reconnectAttempts = 0;
+          this.techManager.resetFailedTechs();
+          this.state = this.videoEl.paused ? "ready" : "playing";
+          return;
+        }
+        this.reconnectHealthSnapshot = null;
+        this.techManager.resetFailedTechs();
         await this.loadCurrent();
       } catch (e2) {
         this.bus.emit("error", e2);
       }
     }, delay);
+  }
+  isPlaybackHealthySinceReconnectScheduled() {
+    const snapshot = this.reconnectHealthSnapshot;
+    if (!snapshot)
+      return false;
+    if (snapshot.sourceIndex !== this.currentSourceIndex)
+      return false;
+    if (snapshot.techName !== this.techManager.getCurrentTechName())
+      return false;
+    if (this.videoEl.readyState < MEDIA_HAVE_CURRENT_DATA)
+      return false;
+    if (this.videoEl.error)
+      return false;
+    const advanced = this.currentTime > snapshot.currentTime + 0.25;
+    const becameReady = snapshot.readyState < MEDIA_HAVE_CURRENT_DATA && this.videoEl.readyState >= MEDIA_HAVE_CURRENT_DATA;
+    return advanced || becameReady;
   }
   // ============================================================================
   // Metadata Extraction API (for ws-raw tech with detectOnly mode)

@@ -5,7 +5,7 @@ import { WebCodecsDecoder } from './wsRaw/webcodecsDecoder.js';
 import { Renderer } from './wsRaw/renderer.js';
 import { Demuxer } from './wsRaw/demuxer.js';
 import { probeWebCodecs } from '../utils/webcodecs.js';
-import { buildLowLatencyConfig } from './hlsConfig.js';
+import { buildHlsPlaybackConfig, buildLowLatencyConfig } from './hlsConfig.js';
 import { decideWebCodecsCodec } from '../utils/decodeDecision.js';
 
 type HlsEventHandler = (...args: unknown[]) => void;
@@ -86,14 +86,13 @@ export class HLSTech extends AbstractTech {
       }
     }
     
-    // Build config - keep it simple like OvenPlayer
-    // Low-latency settings only when explicitly requested
+    // Build config - keep LL-HLS explicit and force normal live HLS into a
+    // buffered mode instead of inheriting hls.js lowLatencyMode defaults.
     const config: Partial<HlsConfig> = {
       debug: false,
       capLevelToPlayerSize: true,
       enableWorker: true,
-      // Only add low-latency config if explicitly requested
-      ...(source.lowLatency ? buildLowLatencyConfig(source, this.buffer) : {})
+      ...buildHlsPlaybackConfig(source, this.buffer)
     };
     
     // Priority: hls.js (MSE) > native HLS (Safari/iOS only)

@@ -80,8 +80,8 @@ Status values:
 | CR-003 | P0 | done | API Consistency | Align docs and public API for `currentTime`, UI options, events, and exports | README/docs examples compile against package exports |
 | CR-004 | P0 | done | Release Hygiene | Define package entrypoints and bundle contract | `exports`, `dist`, examples, and docs agree |
 | CR-005 | P1 | doing | Test Matrix | Add browser/manual verification matrix for core protocols | Matrix covers Chrome/Edge/Safari where applicable, with stream URLs and expected events |
-| CR-006 | P1 | doing | WebRTC | Harden session lifecycle, ready/error semantics, reconnect and stats | Chrome + local MediaMTX WHEP startup/stats/destroy-recreate are verified; disconnect/reconnect, Edge, and long-run cases remain pending |
-| CR-007 | P1 | done | HLS/DASH | Normalize ready/error/level/stats semantics | `ready` means playable or explicitly documented; error recovery behavior is tested |
+| CR-006 | P1 | doing | WebRTC/Reconnect | Harden session lifecycle, ready/error semantics, reconnect and stats | Chrome + local MediaMTX WHEP startup/stats/destroy-recreate are verified; Player reconnect same-Tech retry and pending timer clearing are unit-covered; real disconnect/reconnect, Edge, and long-run cases remain pending |
+| CR-007 | P1 | done | HLS/DASH | Normalize ready/error/level/stats semantics and HLS live config boundaries | `ready` means playable or explicitly documented; error recovery behavior is tested; normal HLS is explicitly buffered while LL-HLS remains opt-in |
 | CR-008 | P1 | doing | fMP4 | Add buffer queue backpressure and quota policy | `pendingBuffers` has bounded memory behavior under slow/blocked SourceBuffer |
 | CR-009 | P1 | done | ws-raw | Decide commercial path for experimental pipeline vs MSE fallback | Default behavior and experimental contract are documented and tested |
 | CR-010 | P1 | done | GB28181 | Define server-gateway adapter boundary for invite/bye/ptz/query and standard FLV/TS playback URLs | Unit adapter contract is covered; real backend/device verification remains tracked in `CR-005` |
@@ -826,6 +826,38 @@ Remaining:
 
 - Re-test MediaMTX WHEP audio using an Opus-capable publish path, such as MediaMTX's OBS RTSP/libopus workflow or another WebRTC/WHIP-compatible ingest path.
 - Continue `CR-006` interruption/reconnect and `CR-013` long-run profiling evidence.
+
+---
+
+### 2026-05-18 MediaMTX HLS Audio Loop And Reconnect Regression Pass
+
+Summary:
+
+- Investigated the user-reported symptom where MediaMTX HLS video kept moving forward while audio repeated in roughly a one-second window.
+- Confirmed the important configuration risk: hls.js 1.6.x defaults to `lowLatencyMode: true` and `liveSyncMode: 'edge'`, while the MediaMTX local preset is a normal HLS source with `lowLatency: false`.
+- Added `buildHlsPlaybackConfig()` so `HLSTech` always builds an explicit playback config:
+  - normal HLS uses `lowLatencyMode: false`, `liveSyncMode: 'buffered'`, `liveSyncDurationCount: 3`, `liveMaxLatencyDurationCount: 6`, bounded live buffer, and audio drift tolerance;
+  - LL-HLS remains opt-in through `source.lowLatency: true` and still uses the existing low-latency bounds.
+- Hardened Player reconnect lifecycle:
+  - fatal network events no longer mark the active Tech as failed before retry, so transient disconnects can reload the same protocol;
+  - failed Tech tracking is reset immediately before reconnect reload;
+  - a pending reconnect timer is cleared when the Tech emits `ready`, preventing recovered playback from being reloaded later by a stale timer;
+  - if same-source playback becomes healthy and media time advances before the timer fires, the pending reconnect is skipped instead of forcing a reload;
+  - switching source also cancels any pending reconnect from the previous source.
+- Added regression coverage for both HLS config modes and Player reconnect behavior.
+- Ran a short Chrome smoke against the local MediaMTX HLS stream and verified the runtime hls.js config is buffered live, not low-latency edge mode.
+
+Validation:
+
+- `cmd /c pnpm exec jest tests/hls-config.test.ts tests/player.test.ts --runInBand`: passed.
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- Chrome smoke on `http://127.0.0.1:4185/basic.html`: MediaMTX HLS runtime config had `lowLatencyMode=false`, `liveSyncMode='buffered'`, `targetLatency` around 9 seconds, one `video`, zero extra `audio`, and growing decoded audio bytes.
+
+Remaining:
+
+- Re-run local MediaMTX HLS in Chrome with the user stream to confirm the audio loop is gone over a longer watch window.
+- Run a controlled MediaMTX interruption test: stop OBS or MediaMTX, observe `RECONNECT_ATTEMPT`, restart publishing, and verify the same Tech recovers without stale reloads.
+- Edge and long-run evidence still remain under `CR-005`, `CR-006`, and `CR-013`.
 
 ---
 

@@ -9,6 +9,7 @@ export class MockTechBase {
   public pauseCalls = 0;
   public seekCalls = 0;
   public destroyCalls = 0;
+  public loadCalls = 0;
   public lastSeekTime: number | null = null;
   private handlers = new Map<string, Set<Handler>>();
 
@@ -19,6 +20,7 @@ export class MockTechBase {
   }
 
   async load(source: Source): Promise<void> {
+    this.loadCalls += 1;
     this.lastLoadedSource = source;
     if (this.emitReadyDuringLoad) {
       this.emit('ready');

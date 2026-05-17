@@ -52,6 +52,11 @@ MediaMTX codec note:
 - Browser WebRTC audio should be validated with an ingest path that provides Opus-compatible audio to WebRTC. OBS RTMP commonly publishes AAC audio, which can work through HLS while leaving the browser WebRTC audio track present but muted. MediaMTX documents an OBS WebRTC-readable publishing path through RTSP with H.264 settings and `libopus` audio.
 - If FyraPlayer emits `network.code: 'WEBRTC_AUDIO_MUTED'`, first check the MediaMTX/OBS codec path before treating it as a player volume defect.
 
+MediaMTX HLS note:
+
+- Use `lowLatency: false` for the normal HLS URL unless the run is explicitly testing LL-HLS. FyraPlayer forces normal HLS into hls.js buffered live mode (`lowLatencyMode: false`, `liveSyncMode: 'buffered'`) because hls.js 1.6.x defaults to low-latency edge chasing. This avoids treating a normal live stream with separate audio renditions like an LL-HLS stream.
+- If audio repeats in a short loop while video moves forward, first verify the runtime hls.js config before tuning server settings. In the demo console, `window.fyraPlayer` exposes the active player; the important evidence is that active HLS config is not in low-latency mode for the normal MediaMTX HLS preset.
+
 ---
 
 ## 2. Automatic Checks
@@ -99,7 +104,7 @@ Use exact browser versions in the run log.
 | MP4 file | `https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4` | Chrome, Edge, Safari, Firefox | `ready`, `play`, `ended` when allowed to finish | Starts playback and seeking works | Chrome pass; Edge/Safari/Firefox pending |
 | HTTP-FLV / ws-raw fallback | `https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv` | Chrome, Edge | `ready`, `play`, `stats`; no fatal `network` | MSE fallback starts playback; no unbounded error loop | Chrome pass; Edge pending |
 | WebRTC WHEP local | `http://127.0.0.1:8889/live/test/whep` | Chrome, Edge | `ready`, `play`, `network`, `stats` | Starts under MediaMTX with a published stream; destroy/recreate is clean; disconnect/reconnect behavior recorded separately | Chrome pass; Edge and interruption pending |
-| HLS local MediaMTX | `http://127.0.0.1:8888/live/test/index.m3u8` | Chrome, Edge, Safari | `ready`, `play`, `stats` | Starts under MediaMTX with a published stream | Chrome pass; Edge/Safari pending |
+| HLS local MediaMTX | `http://127.0.0.1:8888/live/test/index.m3u8` | Chrome, Edge, Safari | `ready`, `play`, `stats` | Starts under MediaMTX with a published stream; normal HLS uses buffered hls.js live config unless `lowLatency: true` is explicitly selected | Chrome pass; Edge/Safari pending |
 | GB28181 gateway adapter | Project-specific invite/control endpoint returning FLV/TS/HLS/WebRTC/fMP4 | Chrome, Edge | `network`, `ready`, control responses | Backend invite returns a browser-playable URL and bye/ptz/query/keepalive behavior is recorded | unit adapter pass; real gateway pending |
 | fMP4 direct | Project-specific HTTP/WS fMP4 source | Chrome, Edge | `ready`, `play`, `stats`, no quota errors | Buffer remains bounded for a 10 minute run | unit backpressure pass; real stream pending |
 
@@ -116,7 +121,7 @@ Run these for each stable protocol before promotion:
 | seek for VOD | `currentTime` changes and playback resumes | Chrome browser pass for HLS VOD; unit pass for active Tech delegation |
 | switchSource | Previous tech is destroyed; new source reaches ready/play | Chrome browser pass for HLS -> DASH; unit pass for old Tech event isolation |
 | destroy -> recreate | DOM/event listeners do not duplicate; UI plugin cleans up | Chrome browser pass for DASH destroy -> HLS recreate and MediaMTX WHEP destroy -> recreate; UI cleanup unit pass |
-| network interruption | Fatal event shape is recorded; reconnect/fallback behavior is deterministic | pending |
+| network interruption | Fatal event shape is recorded; reconnect/fallback behavior is deterministic | unit pass for pending-timer clearing and same-Tech retry; real MediaMTX interruption pending |
 | 30 minute live run | Memory and listener count do not grow unbounded | pending |
 
 ---
@@ -152,6 +157,8 @@ Append new rows; do not overwrite historical failures.
 | 2026-05-17 | Codex | Jest unit test / Windows | WebRTC Tech stats + cleanup | MediaMTX validation regression coverage | pass | `pnpm exec jest tests/webrtc-tech-stats.test.ts --runInBand`; verified RTC stats fall back to video element dimensions, `ready` de-duplication, and cleanup of video callbacks/srcObject on destroy. |
 | 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX HLS local `http://127.0.0.1:8888/live/test/index.m3u8` | repeated HLS reload after user-reported duplicated audio | pass | After HLS cleanup hardening and demo command serialization, three repeated loads stayed at `videoCount=1`, `audioCount=0`, `fyra-ui-shell=1`, `state='playing'`, `muted=false`, `readyState=4`, `1280x720`; no front-end duplicate media element or UI shell accumulation was observed. |
 | 2026-05-17 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX WebRTC WHEP local `http://127.0.0.1:8889/live/test/whep` | WebRTC audio no-sound investigation | partial | Player-side forced mute and extra `AudioContext` output path were removed. Browser state showed `video.muted=false`, one `video`, zero `audio`, and one WebRTC audio track, but the track was `muted=true` and `webkitAudioDecodedByteCount=0`; this points to source/server codec delivery rather than player volume. Added `WEBRTC_AUDIO_MUTED` diagnostic for this state. |
+| 2026-05-18 | Codex | Jest + TypeScript / Windows | MediaMTX HLS config + Player reconnect lifecycle | user-reported HLS audio loop and reconnect instability regression | pass | Added `tests/hls-config.test.ts` and Player regressions. Normal HLS now explicitly uses `lowLatencyMode: false`, `liveSyncMode: 'buffered'`, `liveSyncDurationCount: 3`, `liveMaxLatencyDurationCount: 6`, bounded buffer, and audio drift tolerance. Fatal network reconnect no longer marks the active Tech as failed, resets failed Techs before retry, clears a pending reconnect timer on `ready`, skips stale reload when same-source playback is healthy and time advances, and cancels old pending reconnect when switching source. `cmd /c pnpm exec jest tests/hls-config.test.ts tests/player.test.ts --runInBand` passed; TypeScript validation passed. Real MediaMTX long-run/interruption retest remains pending. |
+| 2026-05-18 | Codex | Chrome 148.0.0.0 / Windows 10 | MediaMTX HLS local `http://127.0.0.1:8888/live/test/index.m3u8` | runtime HLS config smoke after audio-loop fix | partial | Vite demo on `http://127.0.0.1:4185/basic.html`; active source `lowLatency=false`, current Tech `hls`, hls.js runtime config was `lowLatencyMode=false`, `liveSyncMode='buffered'`, `liveSyncDurationCount=3`, `liveMaxLatencyDurationCount=6`, `maxBufferLength=12`, `backBufferLength=30`, `maxAudioFramesDrift=5`; playback stayed `playing` after a short run, `readyState=4`, `1280x720`, one `video`, zero extra `audio`, one UI shell, `webkitAudioDecodedByteCount` increased, and dropped frames stayed 0. hls.js still surfaced non-fatal `levelLoadTimeOut` / `audioTrackLoadTimeOut` warnings against MediaMTX LL-HLS-style sub-playlists; listening/long-run confirmation remains with the user. |
 
 ---
 

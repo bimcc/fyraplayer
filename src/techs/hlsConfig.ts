@@ -17,6 +17,46 @@ export interface LowLatencyHlsConfig {
   backBufferLength?: number;
 }
 
+export interface HlsPlaybackConfig extends LowLatencyHlsConfig {
+  progressive?: boolean;
+  liveSyncMode?: 'edge' | 'buffered';
+  maxAudioFramesDrift?: number;
+  nudgeOnVideoHole?: boolean;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+/**
+ * Build the hls.js playback config used by HLSTech.
+ *
+ * hls.js defaults to lowLatencyMode=true. That is useful for LL-HLS, but it is
+ * too aggressive for normal live playback and for MediaMTX streams with
+ * separate audio renditions. Non-LL sources are explicitly moved to a buffered
+ * live mode so audio/video remain stable before chasing latency.
+ */
+export function buildHlsPlaybackConfig(source: HLSSource, buffer?: BufferPolicy): HlsPlaybackConfig {
+  if (source.lowLatency) {
+    return buildLowLatencyConfig(source, buffer);
+  }
+
+  const maxBufferLength = clamp((buffer?.maxBufferMs ?? 12000) / 1000, 6, 30);
+
+  return {
+    lowLatencyMode: false,
+    progressive: false,
+    liveSyncMode: 'buffered',
+    liveSyncDurationCount: 3,
+    liveMaxLatencyDurationCount: 6,
+    maxBufferLength,
+    maxMaxBufferLength: Math.max(30, maxBufferLength),
+    backBufferLength: 30,
+    maxAudioFramesDrift: 5,
+    nudgeOnVideoHole: false
+  };
+}
+
 /**
  * Low-latency HLS configuration builder
  * Requirements 3.1, 3.2, 3.3, 3.4: Configure hls.js for optimal low-latency playback

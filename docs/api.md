@@ -447,6 +447,12 @@ RTSP output with `libopus`.
 
 ### tech-hls
 
+Normal HLS explicitly uses hls.js buffered live mode. Because hls.js 1.6.x
+defaults to low-latency edge chasing, FyraPlayer sets `lowLatencyMode: false`
+and `liveSyncMode: 'buffered'` unless the source declares `lowLatency: true`.
+Use this default for MediaMTX `/index.m3u8` live playback unless LL-HLS is the
+explicit test target.
+
 HLS/LL-HLS 自适应码率播放：
 
 - 基于 hls.js

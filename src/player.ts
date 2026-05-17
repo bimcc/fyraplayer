@@ -34,6 +34,7 @@ import { resolveVideoElement } from './utils/video.js';
 import { probeWebCodecs, WebCodecsSupport } from './utils/webcodecs.js';
 
 type EventHandler = (...args: unknown[]) => void;
+const MEDIA_HAVE_CURRENT_DATA = 2;
 
 export class FyraPlayer implements PlayerAPI {
   private readonly options: PlayerOptions;
@@ -50,6 +51,7 @@ export class FyraPlayer implements PlayerAPI {
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectHealthSnapshot: { sourceIndex: number; techName: TechName | null; currentTime: number; readyState: number } | null = null;
   private dataChannelOpts: DataChannelOptions | undefined;
   private techEventHandlers: Map<EngineEvent, EventHandler> = new Map();
 
@@ -138,6 +140,7 @@ export class FyraPlayer implements PlayerAPI {
     }
     this.currentSourceIndex = index;
     this.reconnectAttempts = 0;
+    this.clearReconnectTimer();
     this.techManager.resetFailedTechs();
     this.detachTechEvents();
     await this.techManager.destroyCurrent();
@@ -190,12 +193,16 @@ export class FyraPlayer implements PlayerAPI {
     }
   }
 
+  private clearReconnectTimer(): void {
+    if (!this.reconnectTimer) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectHealthSnapshot = null;
+  }
+
   async destroy(): Promise<void> {
     this.stopStatsTimer();
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
     this.detachTechEvents();
     await this.techManager.destroyCurrent();
     try {
@@ -405,6 +412,7 @@ export class FyraPlayer implements PlayerAPI {
         if (event === 'ready') {
           this.state = 'ready';
           this.reconnectAttempts = 0;
+          this.clearReconnectTimer();
           this.techManager.resetFailedTechs();
           if (this.options.autoplay) {
             this.play().catch(() => {
@@ -451,8 +459,6 @@ export class FyraPlayer implements PlayerAPI {
       // 仅在明确 fatal/断线事件时触发重连，避免正常抖动导致重置
       // Only treat explicitly fatal or hard failures as fatal. Transient 'disconnected' should not trigger fallback.
       if (isFatalNetworkEvent(evt)) {
-        const currentTech = this.techManager.getCurrentTechName();
-        if (currentTech) this.techManager.markTechFailed(currentTech);
         void this.handleReconnect();
       }
     };
@@ -520,6 +526,12 @@ export class FyraPlayer implements PlayerAPI {
       attempt: this.reconnectAttempts,
       maxRetries
     }));
+    this.reconnectHealthSnapshot = {
+      sourceIndex: this.currentSourceIndex,
+      techName: this.techManager.getCurrentTechName(),
+      currentTime: this.currentTime,
+      readyState: this.videoEl.readyState
+    };
     
     const delay =
       Math.min((reconnect.baseDelayMs ?? 1000) * Math.pow(2, this.reconnectAttempts - 1), reconnect.maxDelayMs ?? 8000) *
@@ -527,11 +539,32 @@ export class FyraPlayer implements PlayerAPI {
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       try {
+        if (this.isPlaybackHealthySinceReconnectScheduled()) {
+          this.reconnectHealthSnapshot = null;
+          this.reconnectAttempts = 0;
+          this.techManager.resetFailedTechs();
+          this.state = this.videoEl.paused ? 'ready' : 'playing';
+          return;
+        }
+        this.reconnectHealthSnapshot = null;
+        this.techManager.resetFailedTechs();
         await this.loadCurrent();
       } catch (e) {
         this.bus.emit('error', e);
       }
     }, delay);
+  }
+
+  private isPlaybackHealthySinceReconnectScheduled(): boolean {
+    const snapshot = this.reconnectHealthSnapshot;
+    if (!snapshot) return false;
+    if (snapshot.sourceIndex !== this.currentSourceIndex) return false;
+    if (snapshot.techName !== this.techManager.getCurrentTechName()) return false;
+    if (this.videoEl.readyState < MEDIA_HAVE_CURRENT_DATA) return false;
+    if (this.videoEl.error) return false;
+    const advanced = this.currentTime > snapshot.currentTime + 0.25;
+    const becameReady = snapshot.readyState < MEDIA_HAVE_CURRENT_DATA && this.videoEl.readyState >= MEDIA_HAVE_CURRENT_DATA;
+    return advanced || becameReady;
   }
 
   // ============================================================================
