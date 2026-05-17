@@ -26,6 +26,8 @@ import {
   type PerformanceSample,
   type PerformanceViolation,
 } from 'fyraplayer/plugins/performance';
+import { createReconnectPlugin, reconnectPlugin, type ReconnectPluginOptions } from 'fyraplayer/plugins/reconnect';
+import { createStoragePlugin, storagePlugin, type StoragePluginOptions } from 'fyraplayer/plugins/storage';
 import { createUiComponentsPlugin } from 'fyraplayer/plugins/ui-components';
 import {
   createSourceResolverMiddleware,
@@ -38,8 +40,12 @@ import {
   createSourceResolverMiddleware as createSourceResolverMiddlewareFromPlugins,
   engineUrlsToResolvedSources as engineUrlsToResolvedSourcesFromPlugins,
   createPerformanceMonitorPlugin as createPerformanceMonitorPluginFromPlugins,
+  createReconnectPlugin as createReconnectPluginFromPlugins,
+  createStoragePlugin as createStoragePluginFromPlugins,
   type PerformanceMonitorOptions as PerformanceMonitorOptionsFromPlugins,
+  type ReconnectPluginOptions as ReconnectPluginOptionsFromPlugins,
   type SourceResolverMiddlewareOptions as SourceResolverMiddlewareOptionsFromPlugins,
+  type StoragePluginOptions as StoragePluginOptionsFromPlugins,
 } from 'fyraplayer/plugins';
 import { Demuxer, type DemuxerCallbacks } from 'fyraplayer/techs/wsRaw/demuxer';
 
@@ -265,3 +271,23 @@ const performanceOptions: PerformanceMonitorOptions = {
 createPerformanceMonitorPlugin(performanceOptions);
 const performanceOptionsFromPlugins: PerformanceMonitorOptionsFromPlugins = performanceOptions;
 createPerformanceMonitorPluginFromPlugins(performanceOptionsFromPlugins);
+
+const storageOptions: StoragePluginOptions = {
+  key: 'fyra:lastSource',
+  restoreSource: true,
+};
+createStoragePlugin(storageOptions);
+const storageOptionsFromPlugins: StoragePluginOptionsFromPlugins = storageOptions;
+createStoragePluginFromPlugins(storageOptionsFromPlugins);
+storagePlugin;
+
+const reconnectOptions: ReconnectPluginOptions = {
+  logNetwork: false,
+  logError: false,
+  onNetwork: (event) => event?.toString(),
+  onError: (error) => error?.toString(),
+};
+createReconnectPlugin(reconnectOptions);
+const reconnectOptionsFromPlugins: ReconnectPluginOptionsFromPlugins = reconnectOptions;
+createReconnectPluginFromPlugins(reconnectOptionsFromPlugins);
+reconnectPlugin;

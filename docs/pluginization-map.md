@@ -37,10 +37,10 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 | Capability | Current Form | Location | Notes |
 |---|---|---|---|
 | UI controls | `createUiComponentsPlugin()` | `src/ui/shell.ts`, `src/plugins/ui-components.ts` | Explicit plugin entry; `PlayerOptions.ui` is not an active configuration surface |
-| Storage | `storagePlugin` | `src/plugins/storage.ts` | Persists last source index; should add cleanup later |
+| Storage | `storagePlugin`, `createStoragePlugin()` | `src/plugins/storage.ts` | Persists last source index with lifecycle cleanup and bounded restore |
 | Metrics | `metricsPlugin`, `createMetricsPlugin()` | `src/plugins/metrics.ts` | Reporter-based plugin factory; default export remains console/debug compatible |
 | Performance monitor | `createPerformanceMonitorPlugin()` | `src/plugins/performance.ts` | Optional budget/sampling plugin; emits `PERFORMANCE_BUDGET` QoS warnings without changing playback |
-| Reconnect logs | `reconnectPlugin` | `src/plugins/reconnect.ts` | Currently observability/logging, not reconnect policy owner |
+| Reconnect logs | `reconnectPlugin`, `createReconnectPlugin()` | `src/plugins/reconnect.ts` | Optional diagnostics callbacks/logging with lifecycle cleanup; not reconnect policy owner |
 | Source resolver | `createSourceResolverMiddleware()` | `src/plugins/engines/sourceResolver.ts` | Converts `auto` sources through `EngineFactory` into primary/fallback `Source` objects |
 | Metadata parser | `createMetadataPlugin()` | `src/plugins/metadata/KlvBridge.ts` | Optional parser bridge for KLV/SEI/private-data business semantics |
 | Third-party Techs | `PluginContext.techs.register()` | `src/types.ts`, `src/player.ts`, `src/core/techManager.ts` | Controlled plugin API for custom Tech registration, replacement, tech-order insertion, and teardown |
@@ -122,6 +122,7 @@ Do not expose mutable internal player state directly. Add narrow APIs only when 
 | PL-005 | P2 | done: add controlled third-party Tech registration API | External Techs do not need to patch `FyraPlayer` constructor |
 | PL-006 | P3 | Keep DRM and subtitles as plugin placeholders | No core implementation until playback baseline is stable |
 | PL-007 | P2 | done: add optional performance budget monitor | Consumers can track FPS/latency/backpressure budgets without core playback coupling |
+| PL-008 | P1 | done: add lifecycle-safe storage/reconnect plugin factories | Built-in utility plugins detach listeners on destroy |
 
 ---
 

@@ -394,3 +394,21 @@
 - Validation:
   - `pnpm exec jest tests/performance-plugin.test.ts tests/abstract-tech-stats.test.ts --runInBand` passed, 2 suites / 7 tests.
   - `pnpm check:public-api` passed.
+
+## 26. Utility Plugin Lifecycle Follow-up (2026-05-17)
+
+- Continued lifecycle reliability work:
+  - `createStoragePlugin()` now exposes explicit storage key/restore options, validates restored source indexes, and unregisters its `play` listener on destroy.
+  - `storagePlugin` remains as a backwards-compatible default plugin.
+  - `createReconnectPlugin()` now exposes callback/logging options and unregisters `network` / `error` listeners on destroy.
+  - `reconnectPlugin` remains as a backwards-compatible default plugin.
+  - Both factories are available from package subpaths and the aggregate `fyraplayer/plugins` entry.
+- Updated `docs/pluginization-map.md`, `docs/api.md`, `docs/supported-scenarios.md`, and `docs/commercial-readiness-roadmap.md`.
+- Validation:
+  - `pnpm exec jest tests/storage-reconnect-plugin.test.ts --runInBand` passed, 1 suite / 5 tests.
+  - `pnpm check:public-api` passed.
+  - `pnpm exec jest --runInBand` passed, 19 suites / 89 tests.
+  - `pnpm build` passed.
+  - `pnpm check:exports` passed, verifying 22 package export files.
+  - `pnpm check:sources` passed, 14 example sources verified.
+  - `git diff --check` passed.

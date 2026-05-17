@@ -729,6 +729,34 @@ Remaining:
 
 ---
 
+### 2026-05-17 Utility Plugin Lifecycle Pass
+
+Summary:
+
+- Continued core reliability work that does not depend on external stream backends.
+- Added `createStoragePlugin()` with explicit key/restore options, valid-index restore checks, and lifecycle cleanup for the `play` listener.
+- Kept `storagePlugin` as the backwards-compatible default export.
+- Added `createReconnectPlugin()` with optional callbacks/logging controls and lifecycle cleanup for `network` / `error` listeners.
+- Kept `reconnectPlugin` as the backwards-compatible default export.
+- Exported both factories from their subpaths and from `fyraplayer/plugins`.
+- Updated API, support, and pluginization docs.
+
+Validation:
+
+- `pnpm exec jest tests/storage-reconnect-plugin.test.ts --runInBand`: passed, 1 suite / 5 tests.
+- `pnpm check:public-api`: passed.
+- `pnpm exec jest --runInBand`: passed, 19 suites / 89 tests.
+- `pnpm build`: passed.
+- `pnpm check:exports`: passed, verified 22 package export files.
+- `pnpm check:sources`: passed, 14 example sources verified.
+- `git diff --check`: passed.
+
+Remaining:
+
+- Long-run browser evidence is still needed to prove no memory/listener growth across repeated create/destroy cycles.
+
+---
+
 ## 8. How To Update This Document
 
 When work is done:

@@ -11,6 +11,8 @@
       "fyraplayer/plugins/metadata": ["./src/plugins/metadata/index.ts"],
       "fyraplayer/plugins/metrics": ["./src/plugins/metrics.ts"],
       "fyraplayer/plugins/performance": ["./src/plugins/performance.ts"],
+      "fyraplayer/plugins/reconnect": ["./src/plugins/reconnect.ts"],
+      "fyraplayer/plugins/storage": ["./src/plugins/storage.ts"],
       "fyraplayer/plugins/ui-components": ["./src/plugins/ui-components.ts"],
       "fyraplayer/techs/wsRaw/demuxer": ["./src/techs/wsRaw/demuxer.ts"]
     }

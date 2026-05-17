@@ -21,7 +21,7 @@ These scenarios have code, tests, and repeatable evidence.
 | Playback lifecycle | Verified | `pause -> play`, `seek`, `switchSource`, and `destroy -> recreate` are covered by unit and Chromium evidence. |
 | Observability | Verified | Stable `network.code`, `qos.code`, `stats`, and `levelSwitch` payloads are documented and tested. |
 | Performance budget monitoring | Verified contract | Optional plugin samples `stats`, reports budget violations, and emits `PERFORMANCE_BUDGET` QoS warnings; real long-run profiling is still pending. |
-| UI/plugin lifecycle | Verified | UI is plugin-only; plugin destroy and third-party Tech registration are covered. |
+| UI/plugin lifecycle | Verified | UI is plugin-only; UI, storage, reconnect, metrics, performance, metadata, and third-party Tech plugin cleanup are covered. |
 
 This is the current commercial baseline. Do not expand the promise beyond this set without a new evidence record.
 

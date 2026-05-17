@@ -740,6 +740,37 @@ unless `evaluationMode: 'always'` is configured.
 Use [docs/performance-baseline.md](./performance-baseline.md) for the current
 default budgets and remaining profiling evidence.
 
+## Storage And Reconnect Plugins
+
+Utility plugins are optional and lifecycle-safe:
+
+```typescript
+import { createStoragePlugin } from 'fyraplayer/plugins/storage';
+import { createReconnectPlugin } from 'fyraplayer/plugins/reconnect';
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'hls', url: 'https://example.com/stream.m3u8' }],
+  plugins: [
+    createStoragePlugin({
+      key: 'fyra:lastSource',
+      restoreSource: true
+    }),
+    createReconnectPlugin({
+      logNetwork: false,
+      logError: false,
+      onNetwork: (event) => reportNetwork(event),
+      onError: (error) => reportError(error)
+    })
+  ]
+});
+```
+
+`storagePlugin` and `reconnectPlugin` remain backwards-compatible default plugin
+exports. Prefer the factory functions for production integrations so callbacks,
+logging, and storage keys are explicit. Both factories return plugin lifecycles
+that detach listeners during Player destroy/plugin unregister.
+
 ## 格式检测工具
 
 FyraPlayer 提供格式检测工具，可根据 URL、Content-Type 或文件头自动识别格式：

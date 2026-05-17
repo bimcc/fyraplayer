@@ -40,6 +40,20 @@ export {
   type PerformanceViolationCode,
 } from './performance.js';
 
+// Storage preference plugin
+export {
+  createStoragePlugin,
+  storagePlugin,
+  type StoragePluginOptions,
+} from './storage.js';
+
+// Reconnect diagnostics plugin
+export {
+  createReconnectPlugin,
+  reconnectPlugin,
+  type ReconnectPluginOptions,
+} from './reconnect.js';
+
 // Engine adapters (URL conversion for streaming servers)
 export {
   EngineFactory,
