@@ -265,6 +265,12 @@ export const UI_SHELL_STYLES = `
   select:hover {
     background: rgba(255,255,255,0.2);
   }
+
+  select option,
+  select optgroup {
+    color: #111827;
+    background: #fff;
+  }
   
   .icon { 
     width: 20px; 

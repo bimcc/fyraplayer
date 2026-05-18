@@ -92,7 +92,7 @@ Status values:
 | CR-015 | P3 | deferred | DRM | Keep DRM as plugin placeholder and Tech adapter design | EME integration can be added without changing core player shape |
 | CR-016 | P3 | deferred | Subtitles | Keep subtitles/text-tracks as plugin placeholder | HLS/DASH/native text tracks can be exposed later without blocking core work |
 | CR-017 | P1 | done | Plugins | Align plugin boundaries with `docs/pluginization-map.md` | Core/plugin split is documented before new feature work expands |
-| CR-018 | P1 | doing | Quality/ABR | Expose HLS/DASH quality state and manual/auto selection through public API and UI | `getQualityState()` / `setQualityLevel()` are typed, tested, documented, and wired into the optional UI selector |
+| CR-018 | P1 | done | Quality/ABR | Expose HLS/DASH quality state and manual/auto selection through public API and UI | `getQualityState()` / `setQualityLevel()` are typed, tested, documented, wired into the optional UI selector, and browser-verified on multi-rendition HLS/DASH |
 
 ---
 
@@ -883,6 +883,8 @@ Summary:
   - setting `'auto'` restores DASH ABR; numeric/string selection disables video ABR and selects a representation by id/index.
 - Updated the optional UI plugin so the quality selector prefers Tech-level ABR controls. It falls back to multi-source switching only when the active Tech does not expose adaptive quality levels.
 - Added Player-level and HLS/DASH Tech-level regression coverage, and updated the public API smoke contract.
+- Fixed the optional UI selector popup contrast by giving native `option` / `optgroup` rows explicit dark text on a white background while keeping the collapsed selector white on the dark control bar.
+- Added Chrome browser evidence for real multi-rendition HLS and DASH manual quality selection plus restoring Auto.
 
 Validation:
 
@@ -894,11 +896,13 @@ Validation:
 - `cmd /c pnpm check:exports`: passed, verified 22 package export files.
 - `cmd /c pnpm check:sources`: passed, verified 17 example sources.
 - `git diff --check`: passed.
+- Chrome browser run on `http://127.0.0.1:4187/basic.html`: UI quality selector popup `option` style had `color=rgb(17, 24, 39)` and `background=rgb(255, 255, 255)`.
+- Chrome browser run on DASH BBB: 6 quality options exposed, manual switch to level 5 set `auto=false/current=5`, restoring Auto set `auto=true`.
+- Chrome browser run on Mux HLS: 5 quality options exposed, manual switch to 1080p set `auto=false/current=4`, restoring Auto set `auto=true`.
 
-Remaining:
+Result:
 
-- Browser evidence for real multi-rendition HLS/DASH quality switching is still needed before marking `CR-018` done.
-- WebRTC/OME-style playlist quality, quality persistence, and business-specific quality policies should remain pluginized/future work unless a project requires them.
+- `CR-018` is done for HLS/DASH. WebRTC/OME-style playlist quality, quality persistence, and business-specific quality policies remain pluginized/future work unless a project requires them.
 
 ---
 
