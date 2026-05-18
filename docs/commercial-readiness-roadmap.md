@@ -829,15 +829,17 @@ Remaining:
 
 ---
 
-### 2026-05-18 MediaMTX HLS Audio Loop And Reconnect Regression Pass
+### 2026-05-18 MediaMTX HLS Stability Boundary And Reconnect Pass
 
 Summary:
 
-- Investigated the user-reported symptom where MediaMTX HLS video kept moving forward while audio repeated in roughly a one-second window.
-- Confirmed the important configuration risk: hls.js 1.6.x defaults to `lowLatencyMode: true` and `liveSyncMode: 'edge'`, while the MediaMTX local preset is a normal HLS source with `lowLatency: false`.
+- Investigated the user-reported symptom where MediaMTX HLS video kept moving forward while audio repeated/layered.
+- Follow-up root cause correction: the repeated/layered audio was confirmed as OBS desktop-audio capture feedback. Do not keep treating this symptom as a FyraPlayer, MediaMTX, or hls.js audio defect.
+- Confirmed a separate configuration risk that remains valid: hls.js 1.6.x defaults to `lowLatencyMode: true` and `liveSyncMode: 'edge'`, while the MediaMTX normal HLS preset is a source with `lowLatency: false`.
 - Added `buildHlsPlaybackConfig()` so `HLSTech` always builds an explicit playback config:
-  - normal HLS uses `lowLatencyMode: false`, `liveSyncMode: 'buffered'`, `liveSyncDurationCount: 3`, `liveMaxLatencyDurationCount: 6`, bounded live buffer, and audio drift tolerance;
+  - normal HLS uses `lowLatencyMode: false`, `liveSyncMode: 'buffered'`, `liveSyncDurationCount: 3`, `liveMaxLatencyDurationCount: 6`, and bounded live buffer;
   - LL-HLS remains opt-in through `source.lowLatency: true` and still uses the existing low-latency bounds.
+- Removed player-side hls.js audio remux/gap overrides from this pass, since they were tied to the now-corrected OBS feedback hypothesis. hls.js defaults are retained for audio drift and gap handling.
 - Hardened Player reconnect lifecycle:
   - fatal network events no longer mark the active Tech as failed before retry, so transient disconnects can reload the same protocol;
   - failed Tech tracking is reset immediately before reconnect reload;
@@ -846,16 +848,19 @@ Summary:
   - switching source also cancels any pending reconnect from the previous source.
 - Added regression coverage for both HLS config modes and Player reconnect behavior.
 - Ran a short Chrome smoke against the local MediaMTX HLS stream and verified the runtime hls.js config is buffered live, not low-latency edge mode.
+- Added an explicit MediaMTX LL-HLS demo preset and source entry so low-latency behavior can be selected and tested separately from normal HLS.
 
 Validation:
 
 - `cmd /c pnpm exec jest tests/hls-config.test.ts tests/player.test.ts --runInBand`: passed.
 - `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
-- Chrome smoke on `http://127.0.0.1:4185/basic.html`: MediaMTX HLS runtime config had `lowLatencyMode=false`, `liveSyncMode='buffered'`, `targetLatency` around 9 seconds, one `video`, zero extra `audio`, and growing decoded audio bytes.
+- Chrome smoke on `http://127.0.0.1:4185/basic.html`: MediaMTX normal HLS runtime config had `lowLatencyMode=false`, `liveSyncMode='buffered'`, `targetLatency` around 6 seconds, one `video`, zero extra `audio`, and decoded audio bytes increased from `167758` to `188130`.
+- Chrome smoke on the explicit MediaMTX LL-HLS preset: runtime config had `lowLatencyMode=true`, `liveSyncMode='edge'`, `liveSyncDurationCount=1`, `liveMaxLatencyDurationCount=3`, `maxBufferLength=4`, `backBufferLength=0`, reached `playing`, and decoded audio bytes increased from `156062` to `174281`. Browser playback was muted/stopped after the check to avoid OBS desktop-audio feedback.
+- Full validation after the final update passed: `cmd /c pnpm check:public-api`, `cmd /c pnpm exec jest --runInBand`, `cmd /c pnpm build`, `cmd /c pnpm bundle:examples`, `cmd /c pnpm check:exports`, `cmd /c pnpm check:sources`, and `git diff --check`.
 
 Remaining:
 
-- Re-run local MediaMTX HLS in Chrome with the user stream to confirm the audio loop is gone over a longer watch window.
+- For any future repeated/layered audio report, check OBS first: disable/mute `Desktop Audio` or browser `Application Audio Capture`, keep one intended audio source, set monitoring to `Monitor Off`, and avoid playing an audible preview on the same desktop session OBS captures.
 - Run a controlled MediaMTX interruption test: stop OBS or MediaMTX, observe `RECONNECT_ATTEMPT`, restart publishing, and verify the same Tech recovers without stale reloads.
 - Edge and long-run evidence still remain under `CR-005`, `CR-006`, and `CR-013`.
 

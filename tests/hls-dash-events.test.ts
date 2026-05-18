@@ -68,6 +68,7 @@ class FakeHls {
   public handlers = new Map<string, Handler>();
   public autoLevelCapping = -1;
   public recovered = 0;
+  public startLoadCalls = 0;
   public stopLoadCalls = 0;
   public detachMediaCalls = 0;
   public destroyCalls = 0;
@@ -98,6 +99,10 @@ class FakeHls {
 
   recoverMediaError(): void {
     this.recovered += 1;
+  }
+
+  startLoad(): void {
+    this.startLoadCalls += 1;
   }
 }
 
@@ -185,7 +190,33 @@ describe('HLS and DASH event semantics', () => {
     ]);
   });
 
-  test('HLS maps fatal errors to error and fatal network event with recovery attempt', () => {
+  test('HLS maps fatal media errors to error and media recovery attempt', () => {
+    const tech = new HLSTech();
+    const fakeHls = new FakeHls();
+    (tech as unknown as { hls: FakeHls }).hls = fakeHls;
+    (tech as unknown as { setupHlsEventHandlers(video: HTMLVideoElement): void }).setupHlsEventHandlers(createVideoStub());
+
+    const errors: unknown[] = [];
+    const network: unknown[] = [];
+    tech.on('error', (event) => errors.push(event));
+    tech.on('network', (event) => network.push(event));
+
+    const fatalPayload = {
+      type: HLS_ERROR_TYPES.MEDIA_ERROR,
+      details: HLS_ERROR_DETAILS.MANIFEST_LOAD_ERROR,
+      fatal: true
+    };
+    fakeHls.handlers.get(HLS_EVENTS.ERROR)?.('hlsError', fatalPayload);
+
+    expect(errors).toEqual([fatalPayload]);
+    expect(network).toEqual([
+      { type: 'hls-fatal', details: HLS_ERROR_DETAILS.MANIFEST_LOAD_ERROR, fatal: true }
+    ]);
+    expect(fakeHls.recovered).toBe(1);
+    expect(fakeHls.startLoadCalls).toBe(0);
+  });
+
+  test('HLS maps fatal network errors to error and load restart attempt', () => {
     const tech = new HLSTech();
     const fakeHls = new FakeHls();
     (tech as unknown as { hls: FakeHls }).hls = fakeHls;
@@ -207,7 +238,8 @@ describe('HLS and DASH event semantics', () => {
     expect(network).toEqual([
       { type: 'hls-fatal', details: HLS_ERROR_DETAILS.MANIFEST_LOAD_ERROR, fatal: true }
     ]);
-    expect(fakeHls.recovered).toBe(1);
+    expect(fakeHls.recovered).toBe(0);
+    expect(fakeHls.startLoadCalls).toBe(1);
   });
 
   test('HLS emits stable levelSwitch and ready payloads', () => {

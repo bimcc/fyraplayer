@@ -77,6 +77,7 @@ if (!Array.from(typeSelect.options).some((o) => o.value === "webrtc-oven")) {
 const presetSources: SimpleSource[] = [
   { label: "HLS demo", type: "hls", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8" },
   { label: "MediaMTX HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false },
+  { label: "MediaMTX LL-HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: true },
   { label: "MediaMTX WebRTC WHEP local (live/test)", type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep" },
   { label: "DASH bbb", type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd" },
   { label: "DASH sintel", type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd" },

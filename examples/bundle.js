@@ -49339,9 +49339,7 @@ function buildHlsPlaybackConfig(source, buffer) {
     liveMaxLatencyDurationCount: 6,
     maxBufferLength,
     maxMaxBufferLength: Math.max(30, maxBufferLength),
-    backBufferLength: 30,
-    maxAudioFramesDrift: 5,
-    nudgeOnVideoHole: false
+    backBufferLength: 30
   };
 }
 function buildLowLatencyConfig(source, buffer) {
@@ -49355,7 +49353,7 @@ function buildLowLatencyConfig(source, buffer) {
   const liveMaxLatencyDurationCount = 3;
   let maxBufferLength = 4;
   if (buffer?.maxBufferMs) {
-    maxBufferLength = Math.min(4, buffer.maxBufferMs / 1e3);
+    maxBufferLength = clamp(buffer.maxBufferMs / 1e3, 1, 4);
   }
   return {
     // Requirements 3.1: Enable low-latency mode
@@ -49637,7 +49635,11 @@ var HLSTech = class extends AbstractTech {
       if (data?.fatal) {
         this.bus.emit("error", data);
         this.bus.emit("network", { type: "hls-fatal", details: data.details, fatal: true });
-        this.hls?.recoverMediaError?.();
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          this.hls?.recoverMediaError?.();
+        } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          this.hls?.startLoad?.();
+        }
         return;
       }
       this.bus.emit("network", {
@@ -75030,6 +75032,7 @@ var sources_default = [
   { type: "hls", url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", preferTech: "hls" },
   { type: "hls", url: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8", preferTech: "hls" },
   { type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false, preferTech: "hls" },
+  { type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: true, preferTech: "hls" },
   { type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep", preferTech: "webrtc" },
   // === DASH 测试流 ===
   { type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd", preferTech: "dash" },
@@ -75093,6 +75096,7 @@ if (!Array.from(typeSelect.options).some((o2) => o2.value === "webrtc-oven")) {
 var presetSources = [
   { label: "HLS demo", type: "hls", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8" },
   { label: "MediaMTX HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false },
+  { label: "MediaMTX LL-HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: true },
   { label: "MediaMTX WebRTC WHEP local (live/test)", type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep" },
   { label: "DASH bbb", type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd" },
   { label: "DASH sintel", type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd" },

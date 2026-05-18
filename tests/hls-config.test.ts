@@ -15,10 +15,10 @@ describe('HLS playback config', () => {
       liveMaxLatencyDurationCount: 6,
       maxBufferLength: 12,
       maxMaxBufferLength: 30,
-      backBufferLength: 30,
-      maxAudioFramesDrift: 5,
-      nudgeOnVideoHole: false
+      backBufferLength: 30
     });
+    expect(config).not.toHaveProperty('maxAudioFramesDrift');
+    expect(config).not.toHaveProperty('nudgeOnVideoHole');
   });
 
   test('keeps LL-HLS explicit and bounded when source.lowLatency is true', () => {
@@ -36,5 +36,15 @@ describe('HLS playback config', () => {
       backBufferLength: 0
     });
     expect(config.liveSyncMode).toBeUndefined();
+    expect(config).not.toHaveProperty('maxAudioFramesDrift');
+  });
+
+  test('clamps LL-HLS buffer to a valid positive window', () => {
+    const config = buildHlsPlaybackConfig(
+      { type: 'hls', url: 'https://example.com/live/llhls.m3u8', lowLatency: true },
+      { maxBufferMs: 250 }
+    );
+
+    expect(config.maxBufferLength).toBe(1);
   });
 });

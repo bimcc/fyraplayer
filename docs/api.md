@@ -453,6 +453,13 @@ and `liveSyncMode: 'buffered'` unless the source declares `lowLatency: true`.
 Use this default for MediaMTX `/index.m3u8` live playback unless LL-HLS is the
 explicit test target.
 
+If local OBS testing produces repeated or layered audio and VLC/FyraPlayer show
+the same symptom, check OBS routing before changing player code. The confirmed
+local case was OBS desktop/browser audio being captured back into the stream.
+Keep only the intended media source audio active, mute/remove desktop or browser
+application capture for the playback app, and leave monitoring off unless it is
+deliberately required.
+
 HLS/LL-HLS 自适应码率播放：
 
 - 基于 hls.js

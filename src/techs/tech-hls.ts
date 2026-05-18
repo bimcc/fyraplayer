@@ -138,7 +138,11 @@ export class HLSTech extends AbstractTech {
       if (data?.fatal) {
         this.bus.emit('error', data);
         this.bus.emit('network', { type: 'hls-fatal', details: data.details, fatal: true });
-        this.hls?.recoverMediaError?.();
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          this.hls?.recoverMediaError?.();
+        } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          this.hls?.startLoad?.();
+        }
         return;
       }
       this.bus.emit('network', {
