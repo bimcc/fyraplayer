@@ -1,4 +1,5 @@
 import type { Source } from '../../src/types.js';
+import type { QualityState } from '../../src/types.js';
 
 type Handler = (...args: any[]) => void;
 
@@ -11,6 +12,8 @@ export class MockTechBase {
   public destroyCalls = 0;
   public loadCalls = 0;
   public lastSeekTime: number | null = null;
+  public qualityState: QualityState | null = null;
+  public setQualityCalls: Array<number | string | 'auto'> = [];
   private handlers = new Map<string, Set<Handler>>();
 
   constructor(private readonly playableType: Source['type']) {}
@@ -46,6 +49,14 @@ export class MockTechBase {
 
   getStats() {
     return { ts: Date.now() };
+  }
+
+  getQualityState(): QualityState {
+    return this.qualityState ?? { supported: false, auto: true, current: null, levels: [] };
+  }
+
+  async setQualityLevel(level: number | string | 'auto'): Promise<void> {
+    this.setQualityCalls.push(level);
   }
 
   on(event: string, handler: Handler): void {

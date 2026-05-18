@@ -92,6 +92,7 @@ Status values:
 | CR-015 | P3 | deferred | DRM | Keep DRM as plugin placeholder and Tech adapter design | EME integration can be added without changing core player shape |
 | CR-016 | P3 | deferred | Subtitles | Keep subtitles/text-tracks as plugin placeholder | HLS/DASH/native text tracks can be exposed later without blocking core work |
 | CR-017 | P1 | done | Plugins | Align plugin boundaries with `docs/pluginization-map.md` | Core/plugin split is documented before new feature work expands |
+| CR-018 | P1 | doing | Quality/ABR | Expose HLS/DASH quality state and manual/auto selection through public API and UI | `getQualityState()` / `setQualityLevel()` are typed, tested, documented, and wired into the optional UI selector |
 
 ---
 
@@ -863,6 +864,41 @@ Remaining:
 - For any future repeated/layered audio report, check OBS first: disable/mute `Desktop Audio` or browser `Application Audio Capture`, keep one intended audio source, set monitoring to `Monitor Off`, and avoid playing an audible preview on the same desktop session OBS captures.
 - Run a controlled MediaMTX interruption test: stop OBS or MediaMTX, observe `RECONNECT_ATTEMPT`, restart publishing, and verify the same Tech recovers without stale reloads.
 - Edge and long-run evidence still remain under `CR-005`, `CR-006`, and `CR-013`.
+
+---
+
+### 2026-05-18 HLS/DASH Quality Control API Pass
+
+Summary:
+
+- Started `CR-018` for player-facing quality control completeness.
+- Added public `QualityLevel` / `QualityState` types and Player methods:
+  - `getQualityState()`;
+  - `setQualityLevel(level)`, where `level` is a numeric/string level id or `'auto'`.
+- Added HLS quality state and selection on top of hls.js levels:
+  - exposes level labels, bitrate, dimensions, codec, active state, and ABR mode;
+  - setting `'auto'` restores hls.js ABR; numeric selection pins a level.
+- Added DASH quality state and selection on top of dash.js representations:
+  - exposes video representations with bitrate, dimensions, codec, active state, and ABR mode;
+  - setting `'auto'` restores DASH ABR; numeric/string selection disables video ABR and selects a representation by id/index.
+- Updated the optional UI plugin so the quality selector prefers Tech-level ABR controls. It falls back to multi-source switching only when the active Tech does not expose adaptive quality levels.
+- Added Player-level and HLS/DASH Tech-level regression coverage, and updated the public API smoke contract.
+
+Validation:
+
+- `cmd /c pnpm exec jest tests/hls-dash-events.test.ts tests/player.test.ts tests/ui-components.test.ts tests/storage-reconnect-plugin.test.ts --runInBand`: passed, 4 suites / 32 tests.
+- `cmd /c pnpm check:public-api`: passed.
+- `cmd /c pnpm exec jest --runInBand`: passed, 21 suites / 106 tests.
+- `cmd /c pnpm build`: passed.
+- `cmd /c pnpm bundle:examples`: passed.
+- `cmd /c pnpm check:exports`: passed, verified 22 package export files.
+- `cmd /c pnpm check:sources`: passed, verified 17 example sources.
+- `git diff --check`: passed.
+
+Remaining:
+
+- Browser evidence for real multi-rendition HLS/DASH quality switching is still needed before marking `CR-018` done.
+- WebRTC/OME-style playlist quality, quality persistence, and business-specific quality policies should remain pluginized/future work unless a project requires them.
 
 ---
 

@@ -66,6 +66,8 @@ class PlayerStub implements PlayerAPI {
   async play(): Promise<void> {}
   async pause(): Promise<void> {}
   async seek(): Promise<void> {}
+  getQualityState() { return { supported: false, auto: true, current: null, levels: [] }; }
+  async setQualityLevel(): Promise<void> {}
   getState() { return 'idle' as const; }
   getSources(): Source[] { return this.sources; }
   getCurrentSource(): Source | undefined { return this.sources[this.currentIndex]; }

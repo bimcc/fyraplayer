@@ -72,6 +72,8 @@ class FakeHls {
   public stopLoadCalls = 0;
   public detachMediaCalls = 0;
   public destroyCalls = 0;
+  public currentLevel = 1;
+  public autoLevelEnabled = true;
   public levels = [
     { bitrate: 800000, width: 640, height: 360, videoCodec: 'avc1.42e01e' },
     { bitrate: 2500000, width: 1280, height: 720, videoCodec: 'avc1.4d401f' }
@@ -108,6 +110,12 @@ class FakeHls {
 
 class FakeDash {
   public handlers = new Map<string, Handler>();
+  public settings: any = { streaming: { abr: { autoSwitchBitrate: { video: true } } } };
+  public representationIndex: number | null = null;
+  public representations = [
+    { absoluteIndex: 0, index: 0, bandwidth: 800000, bitrateInKbit: 800, width: 640, height: 360, codecs: 'avc1.42e01e', id: 'r0' },
+    { absoluteIndex: 1, index: 1, bandwidth: 2500000, bitrateInKbit: 2500, width: 1280, height: 720, codecs: 'avc1.4d401f', id: 'r1' }
+  ];
 
   on(event: string, handler: Handler): void {
     this.handlers.set(event, handler);
@@ -118,6 +126,40 @@ class FakeDash {
   }
 
   reset(): void {}
+
+  getSettings(): any {
+    return this.settings;
+  }
+
+  updateSettings(settings: any): void {
+    this.settings = {
+      ...this.settings,
+      streaming: {
+        ...this.settings.streaming,
+        ...settings.streaming,
+        abr: {
+          ...this.settings.streaming?.abr,
+          ...settings.streaming?.abr,
+          autoSwitchBitrate: {
+            ...this.settings.streaming?.abr?.autoSwitchBitrate,
+            ...settings.streaming?.abr?.autoSwitchBitrate
+          }
+        }
+      }
+    };
+  }
+
+  getRepresentationsByType(): any[] {
+    return this.representations;
+  }
+
+  getCurrentRepresentationForType(): any {
+    return this.representations[this.representationIndex ?? 0];
+  }
+
+  setRepresentationForTypeByIndex(_type: string, index: number): void {
+    this.representationIndex = index;
+  }
 }
 
 function createVideoStub(): HTMLVideoElement {
@@ -272,6 +314,32 @@ describe('HLS and DASH event semantics', () => {
     ]);
   });
 
+  test('HLS exposes quality levels and supports manual and auto selection', async () => {
+    const tech = new HLSTech();
+    const fakeHls = new FakeHls();
+    fakeHls.autoLevelEnabled = false;
+    (tech as unknown as { hls: FakeHls }).hls = fakeHls;
+
+    expect(tech.getQualityState()).toMatchObject({
+      supported: true,
+      tech: 'hls',
+      auto: false,
+      current: 1,
+      levels: [
+        { id: 0, index: 0, label: '360p 800 kbps', bitrateKbps: 800, width: 640, height: 360, codec: 'avc1.42e01e', active: false },
+        { id: 1, index: 1, label: '720p 2500 kbps', bitrateKbps: 2500, width: 1280, height: 720, codec: 'avc1.4d401f', active: true }
+      ]
+    });
+
+    await tech.setQualityLevel(0);
+    expect(fakeHls.currentLevel).toBe(0);
+
+    await tech.setQualityLevel('auto');
+    expect(fakeHls.currentLevel).toBe(-1);
+
+    await expect(tech.setQualityLevel(9)).rejects.toThrow('Invalid HLS quality level');
+  });
+
   test('HLS destroy stops loading and fully detaches the media element', async () => {
     const tech = new HLSTech();
     const fakeHls = new FakeHls();
@@ -373,5 +441,36 @@ describe('HLS and DASH event semantics', () => {
         reason: 'abr'
       }
     ]);
+  });
+
+  test('DASH exposes quality levels and supports manual and auto selection', async () => {
+    const tech = new DASHTech();
+    const fakeDash = new FakeDash();
+    fakeDash.settings.streaming.abr.autoSwitchBitrate.video = false;
+    fakeDash.representationIndex = 1;
+    (tech as unknown as { dash: FakeDash }).dash = fakeDash;
+
+    expect(tech.getQualityState()).toMatchObject({
+      supported: true,
+      tech: 'dash',
+      auto: false,
+      current: 1,
+      levels: [
+        { id: 0, index: 0, label: '360p 800 kbps', bitrateKbps: 800, width: 640, height: 360, codec: 'avc1.42e01e', active: false },
+        { id: 1, index: 1, label: '720p 2500 kbps', bitrateKbps: 2500, width: 1280, height: 720, codec: 'avc1.4d401f', active: true }
+      ]
+    });
+
+    await tech.setQualityLevel(0);
+    expect(fakeDash.settings.streaming.abr.autoSwitchBitrate.video).toBe(false);
+    expect(fakeDash.representationIndex).toBe(0);
+
+    await tech.setQualityLevel('r1');
+    expect(fakeDash.representationIndex).toBe(1);
+
+    await tech.setQualityLevel('auto');
+    expect(fakeDash.settings.streaming.abr.autoSwitchBitrate.video).toBe(true);
+
+    await expect(tech.setQualityLevel(9)).rejects.toThrow('Invalid DASH quality level');
   });
 });

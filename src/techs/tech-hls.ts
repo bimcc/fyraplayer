@@ -1,5 +1,5 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, HLSSource } from '../types.js';
+import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, HLSSource, QualityState } from '../types.js';
 import Hls, { HlsConfig } from 'hls.js';
 import { WebCodecsDecoder } from './wsRaw/webcodecsDecoder.js';
 import { Renderer } from './wsRaw/renderer.js';
@@ -244,6 +244,42 @@ export class HLSTech extends AbstractTech {
     this.readyEmitted = false;
   }
 
+  getQualityState(): QualityState {
+    if (!this.hls) {
+      return { supported: false, tech: 'hls', auto: true, current: null, levels: [] };
+    }
+    const current = this.hls.currentLevel >= 0 ? this.hls.currentLevel : null;
+    return {
+      supported: true,
+      tech: 'hls',
+      auto: this.hls.autoLevelEnabled,
+      current,
+      levels: this.hls.levels.map((level, index) => ({
+        id: index,
+        index,
+        label: this.formatQualityLabel(level.height, level.bitrate),
+        bitrateKbps: level.bitrate ? Math.round(level.bitrate / 1000) : undefined,
+        width: level.width,
+        height: level.height,
+        codec: level.videoCodec,
+        active: current === index
+      }))
+    };
+  }
+
+  async setQualityLevel(level: number | string | 'auto'): Promise<void> {
+    if (!this.hls) throw new Error('HLS is not loaded');
+    if (level === 'auto') {
+      this.hls.currentLevel = -1;
+      return;
+    }
+    const index = typeof level === 'number' ? level : Number(level);
+    if (!Number.isInteger(index) || index < 0 || index >= this.hls.levels.length) {
+      throw new Error(`Invalid HLS quality level: ${level}`);
+    }
+    this.hls.currentLevel = index;
+  }
+
   private cleanupWebCodecs(): void {
     if (this.wcAbort) {
       this.wcAbort.abort();
@@ -329,5 +365,12 @@ export class HLSTech extends AbstractTech {
   private asLevelSwitchPayload(value: unknown): HlsLevelSwitchPayload {
     if (typeof value !== 'object' || value === null) return {};
     return value as HlsLevelSwitchPayload;
+  }
+
+  private formatQualityLabel(height?: number, bitrate?: number): string {
+    const parts: string[] = [];
+    if (height) parts.push(`${height}p`);
+    if (bitrate) parts.push(`${Math.round(bitrate / 1000)} kbps`);
+    return parts.join(' ') || 'Quality';
   }
 }

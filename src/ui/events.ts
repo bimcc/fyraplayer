@@ -128,6 +128,7 @@ export function bindBusEvents(
     onPlay: () => void;
     onPause: () => void;
     onBuffer: () => void;
+    onLevelSwitch: (e: unknown) => void;
     onError: (e: unknown) => void;
     onNetwork: (e: unknown) => void;
     onStats: (e: unknown) => void;
@@ -137,6 +138,7 @@ export function bindBusEvents(
   addBusListener(bus, 'play', callbacks.onPlay, cleanup);
   addBusListener(bus, 'pause', callbacks.onPause, cleanup);
   addBusListener(bus, 'buffer', callbacks.onBuffer, cleanup);
+  addBusListener(bus, 'levelSwitch', callbacks.onLevelSwitch, cleanup);
   addBusListener(bus, 'error', callbacks.onError, cleanup);
   addBusListener(bus, 'network', callbacks.onNetwork, cleanup);
   addBusListener(bus, 'stats', callbacks.onStats, cleanup);

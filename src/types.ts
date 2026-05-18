@@ -614,6 +614,27 @@ export interface PlayerLevelSwitchEvent {
   [key: string]: unknown;
 }
 
+export interface QualityLevel {
+  /** Stable level id within the active Tech. Use with `setQualityLevel(id)`. */
+  id: number | string;
+  /** Zero-based level index when the underlying Tech exposes one. */
+  index?: number;
+  label?: string;
+  bitrateKbps?: number;
+  width?: number;
+  height?: number;
+  codec?: string;
+  active?: boolean;
+}
+
+export interface QualityState {
+  supported: boolean;
+  tech?: TechName;
+  auto: boolean;
+  current?: number | string | null;
+  levels: QualityLevel[];
+}
+
 export interface PlayerEventMap {
   ready: [];
   play: [];
@@ -653,6 +674,8 @@ export interface PlayerAPI {
   pause(): Promise<void>;
   seek(time: number): Promise<void>;
   switchSource(index: number): Promise<void>;
+  getQualityState(): QualityState;
+  setQualityLevel(level: number | string | 'auto'): Promise<void>;
   getState(): PlayerState;
   getSources(): Source[];
   getCurrentSource(): Source | undefined;
@@ -746,6 +769,10 @@ export interface Tech {
   pause(): Promise<void>;
   /** Seek to specified time. Throws if seeking is not supported for this tech/source. */
   seek(time: number): Promise<void>;
+  /** Optional quality/ABR state for adaptive techs. */
+  getQualityState?(): QualityState;
+  /** Optional manual quality selection. Use "auto" to restore ABR. */
+  setQualityLevel?(level: number | string | 'auto'): Promise<void>;
   destroy(): Promise<void>;
   getStats(): EngineStats;
   on<E extends EngineEvent>(event: E, handler: (...args: unknown[]) => void): void;

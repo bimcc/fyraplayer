@@ -27,7 +27,8 @@ import {
   Tech,
   TechRegistrationHandle,
   TechRegistrationOptions,
-  TechName
+  TechName,
+  QualityState
 } from './types.js';
 import { DEFAULT_BUFFER_POLICY, DEFAULT_METRICS_OPTIONS, DEFAULT_RECONNECT_POLICY, DEFAULT_TECH_ORDER } from './core/defaults.js';
 import { resolveVideoElement } from './utils/video.js';
@@ -191,6 +192,32 @@ export class FyraPlayer implements PlayerAPI {
     if (tech) {
       await tech.seek(time);
     }
+  }
+
+  getQualityState(): QualityState {
+    const tech = this.techManager.getCurrentTech();
+    const techName = this.techManager.getCurrentTechName() ?? undefined;
+    if (!tech?.getQualityState) {
+      return { supported: false, tech: techName, auto: true, current: null, levels: [] };
+    }
+    return {
+      tech: techName,
+      ...tech.getQualityState()
+    };
+  }
+
+  async setQualityLevel(level: number | string | 'auto'): Promise<void> {
+    const tech = this.techManager.getCurrentTech();
+    if (!tech?.setQualityLevel) {
+      throw new Error('Current tech does not support quality selection');
+    }
+    await this.middleware.run('control', {
+      source: this.getCurrentSource()!,
+      tech: this.techManager.getCurrentTechName() ?? this.techOrder[0],
+      action: 'quality',
+      payload: level
+    });
+    await tech.setQualityLevel(level);
   }
 
   private clearReconnectTimer(): void {

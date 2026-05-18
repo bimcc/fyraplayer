@@ -23,6 +23,7 @@ These scenarios have code, tests, and repeatable evidence.
 | Local MediaMTX WebRTC WHEP | Verified in Chrome, conditional overall | OBS RTMP -> MediaMTX WHEP -> FyraPlayer WebRTC is verified on Chrome with ICE connected, `ready=1`, stats, 1280x720, RTT/packet-loss metrics, and clean destroy/recreate. Player-side forced mute was removed. Current OBS RTMP -> MediaMTX WHEP audio can still be silent when the browser receives a muted WebRTC audio track; treat that as a source/server codec path issue and prefer an Opus-capable MediaMTX WebRTC ingest path for audio validation. Edge, interruption, and long-run evidence remain pending. |
 | Playback lifecycle | Verified | `pause -> play`, `seek`, `switchSource`, and `destroy -> recreate` are covered by unit and Chromium evidence. |
 | Observability | Verified | Stable `network.code`, `qos.code`, `stats`, and `levelSwitch` payloads are documented and tested. |
+| HLS/DASH quality control | In progress | Public API and optional UI now expose `getQualityState()` / `setQualityLevel()` for HLS/DASH ABR and manual level selection; real browser multi-rendition switching evidence is still pending. |
 | Performance budget monitoring | Verified contract | Optional plugin samples `stats`, reports budget violations, and emits `PERFORMANCE_BUDGET` QoS warnings; real long-run profiling is still pending. |
 | UI/plugin lifecycle | Verified | UI is plugin-only; UI, storage, reconnect, metrics, performance, metadata, and third-party Tech plugin cleanup are covered. |
 

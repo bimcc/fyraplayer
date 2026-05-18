@@ -49741,6 +49741,41 @@ var HLSTech = class extends AbstractTech {
     }
     this.readyEmitted = false;
   }
+  getQualityState() {
+    if (!this.hls) {
+      return { supported: false, tech: "hls", auto: true, current: null, levels: [] };
+    }
+    const current = this.hls.currentLevel >= 0 ? this.hls.currentLevel : null;
+    return {
+      supported: true,
+      tech: "hls",
+      auto: this.hls.autoLevelEnabled,
+      current,
+      levels: this.hls.levels.map((level, index) => ({
+        id: index,
+        index,
+        label: this.formatQualityLabel(level.height, level.bitrate),
+        bitrateKbps: level.bitrate ? Math.round(level.bitrate / 1e3) : void 0,
+        width: level.width,
+        height: level.height,
+        codec: level.videoCodec,
+        active: current === index
+      }))
+    };
+  }
+  async setQualityLevel(level) {
+    if (!this.hls)
+      throw new Error("HLS is not loaded");
+    if (level === "auto") {
+      this.hls.currentLevel = -1;
+      return;
+    }
+    const index = typeof level === "number" ? level : Number(level);
+    if (!Number.isInteger(index) || index < 0 || index >= this.hls.levels.length) {
+      throw new Error(`Invalid HLS quality level: ${level}`);
+    }
+    this.hls.currentLevel = index;
+  }
   cleanupWebCodecs() {
     if (this.wcAbort) {
       this.wcAbort.abort();
@@ -49825,6 +49860,14 @@ var HLSTech = class extends AbstractTech {
     if (typeof value !== "object" || value === null)
       return {};
     return value;
+  }
+  formatQualityLabel(height, bitrate) {
+    const parts = [];
+    if (height)
+      parts.push(`${height}p`);
+    if (bitrate)
+      parts.push(`${Math.round(bitrate / 1e3)} kbps`);
+    return parts.join(" ") || "Quality";
   }
 };
 
@@ -70558,6 +70601,64 @@ var DASHTech = class extends AbstractTech {
     this.videoCanPlayHandler = void 0;
     this.readyEmitted = false;
   }
+  getQualityState() {
+    const dash = this.dash;
+    if (!dash) {
+      return { supported: false, tech: "dash", auto: true, current: null, levels: [] };
+    }
+    const representations = dash.getRepresentationsByType("video") ?? [];
+    const currentRepresentation = dash.getCurrentRepresentationForType?.("video") ?? null;
+    const current = currentRepresentation?.absoluteIndex ?? currentRepresentation?.index ?? currentRepresentation?.id ?? null;
+    const auto = dash.getSettings?.()?.streaming?.abr?.autoSwitchBitrate?.video !== false;
+    return {
+      supported: true,
+      tech: "dash",
+      auto,
+      current,
+      levels: representations.map((representation, index) => {
+        const id = representation.absoluteIndex ?? representation.index ?? representation.id ?? index;
+        const bandwidth = representation.bandwidth || representation.bitrateInKbit * 1e3;
+        return {
+          id,
+          index,
+          label: this.formatQualityLabel(representation.height, bandwidth),
+          bitrateKbps: bandwidth ? Math.round(bandwidth / 1e3) : void 0,
+          width: representation.width || void 0,
+          height: representation.height || void 0,
+          codec: representation.codecs ?? void 0,
+          active: current === id || current === representation.index || current === representation.absoluteIndex
+        };
+      })
+    };
+  }
+  async setQualityLevel(level) {
+    const dash = this.dash;
+    if (!dash)
+      throw new Error("DASH is not loaded");
+    if (level === "auto") {
+      dash.updateSettings({
+        streaming: {
+          abr: {
+            autoSwitchBitrate: { video: true }
+          }
+        }
+      });
+      return;
+    }
+    const representations = dash.getRepresentationsByType?.("video") ?? [];
+    const representationIndex = this.findRepresentationIndex(representations, level);
+    if (representationIndex < 0) {
+      throw new Error(`Invalid DASH quality level: ${level}`);
+    }
+    dash.updateSettings({
+      streaming: {
+        abr: {
+          autoSwitchBitrate: { video: false }
+        }
+      }
+    });
+    dash.setRepresentationForTypeByIndex?.("video", representationIndex, true);
+  }
   emitReadyOnce() {
     if (this.readyEmitted)
       return;
@@ -70568,6 +70669,27 @@ var DASHTech = class extends AbstractTech {
     if (typeof value !== "object" || value === null)
       return {};
     return value;
+  }
+  formatQualityLabel(height, bitrate) {
+    const parts = [];
+    if (height)
+      parts.push(`${height}p`);
+    if (bitrate)
+      parts.push(`${Math.round(bitrate / 1e3)} kbps`);
+    return parts.join(" ") || "Quality";
+  }
+  findRepresentationIndex(representations, level) {
+    const numericLevel = typeof level === "number" ? level : Number(level);
+    if (Number.isInteger(numericLevel) && numericLevel >= 0) {
+      const representationIndexMatch = representations.findIndex(
+        (representation) => representation.index === numericLevel || representation.absoluteIndex === numericLevel
+      );
+      if (representationIndexMatch >= 0)
+        return representationIndexMatch;
+      if (numericLevel < representations.length)
+        return numericLevel;
+    }
+    return representations.findIndex((representation) => representation.id === level);
   }
 };
 
@@ -73023,6 +73145,30 @@ var FyraPlayer = class {
       await tech.seek(time);
     }
   }
+  getQualityState() {
+    const tech = this.techManager.getCurrentTech();
+    const techName = this.techManager.getCurrentTechName() ?? void 0;
+    if (!tech?.getQualityState) {
+      return { supported: false, tech: techName, auto: true, current: null, levels: [] };
+    }
+    return {
+      tech: techName,
+      ...tech.getQualityState()
+    };
+  }
+  async setQualityLevel(level) {
+    const tech = this.techManager.getCurrentTech();
+    if (!tech?.setQualityLevel) {
+      throw new Error("Current tech does not support quality selection");
+    }
+    await this.middleware.run("control", {
+      source: this.getCurrentSource(),
+      tech: this.techManager.getCurrentTechName() ?? this.techOrder[0],
+      action: "quality",
+      payload: level
+    });
+    await tech.setQualityLevel(level);
+  }
   clearReconnectTimer() {
     if (!this.reconnectTimer)
       return;
@@ -74396,6 +74542,7 @@ function bindBusEvents(bus, cleanup, callbacks) {
   addBusListener(bus, "play", callbacks.onPlay, cleanup);
   addBusListener(bus, "pause", callbacks.onPause, cleanup);
   addBusListener(bus, "buffer", callbacks.onBuffer, cleanup);
+  addBusListener(bus, "levelSwitch", callbacks.onLevelSwitch, cleanup);
   addBusListener(bus, "error", callbacks.onError, cleanup);
   addBusListener(bus, "network", callbacks.onNetwork, cleanup);
   addBusListener(bus, "stats", callbacks.onStats, cleanup);
@@ -74450,6 +74597,16 @@ var FyraUiShell = class extends HTMLElement {
   getSourceLabel(source, index) {
     const sourceWithName = source;
     return sourceWithName.label || sourceWithName.name || `${source.type} ${index + 1}`;
+  }
+  getQualityLabel(level) {
+    if (level.label)
+      return level.label;
+    const parts = [];
+    if (level.height)
+      parts.push(`${level.height}p`);
+    if (level.bitrateKbps)
+      parts.push(`${level.bitrateKbps} kbps`);
+    return parts.join(" ") || `Level ${level.index ?? level.id}`;
   }
   connectedCallback() {
   }
@@ -74569,10 +74726,18 @@ var FyraUiShell = class extends HTMLElement {
     this.elements.qualitySel?.addEventListener("change", () => {
       if (!this.elements.qualitySel || !this.player)
         return;
-      const idx = Number(this.elements.qualitySel.value);
-      if (Number.isNaN(idx))
+      const value = this.elements.qualitySel.value;
+      const mode = this.elements.qualitySel.dataset.mode;
+      if (mode === "quality") {
+        const numericValue = Number(value);
+        const level = value === "auto" ? "auto" : Number.isNaN(numericValue) ? value : numericValue;
+        this.player.setQualityLevel(level).catch((e2) => this.log(`[quality] switch failed: ${e2}`));
         return;
-      this.player.switchSource(idx).catch((e2) => this.log(`[quality] switch failed: ${e2}`));
+      }
+      const idx = Number(value);
+      if (!Number.isNaN(idx)) {
+        this.player.switchSource(idx).catch((e2) => this.log(`[source] switch failed: ${e2}`));
+      }
     });
   }
   bindEvents() {
@@ -74595,6 +74760,7 @@ var FyraUiShell = class extends HTMLElement {
         this.setBuffering(false);
         this.updatePlayUi(false);
         this.hideCover();
+        this.populateQuality();
       },
       onPlay: () => {
         this.setBuffering(false);
@@ -74603,6 +74769,7 @@ var FyraUiShell = class extends HTMLElement {
       },
       onPause: () => this.updatePlayUi(false),
       onBuffer: () => this.setBuffering(true),
+      onLevelSwitch: () => this.populateQuality(),
       onError: (eventPayload) => {
         this.setBuffering(false);
         this.updatePlayUi(false);
@@ -74933,12 +75100,32 @@ var FyraUiShell = class extends HTMLElement {
   populateQuality() {
     if (!this.elements.qualitySel)
       return;
+    const qualityState = this.player?.getQualityState?.();
+    if (qualityState?.supported && qualityState.levels.length > 0) {
+      this.elements.qualitySel.style.display = "block";
+      this.elements.qualitySel.dataset.mode = "quality";
+      this.elements.qualitySel.innerHTML = "";
+      const auto = document.createElement("option");
+      auto.value = "auto";
+      auto.textContent = "Auto";
+      this.elements.qualitySel.appendChild(auto);
+      qualityState.levels.forEach((level) => {
+        const opt = document.createElement("option");
+        opt.value = String(level.id);
+        opt.textContent = this.getQualityLabel(level);
+        this.elements.qualitySel?.appendChild(opt);
+      });
+      this.elements.qualitySel.value = qualityState.auto || qualityState.current == null ? "auto" : String(qualityState.current);
+      return;
+    }
     const sources = this.getPlayerSources();
     if (!sources.length || sources.length === 1) {
       this.elements.qualitySel.style.display = "none";
+      this.elements.qualitySel.dataset.mode = "";
       return;
     }
     this.elements.qualitySel.style.display = "block";
+    this.elements.qualitySel.dataset.mode = "source";
     this.elements.qualitySel.innerHTML = "";
     const currentSource = this.player?.getCurrentSource?.();
     const current = currentSource ? sources.indexOf(currentSource) : -1;

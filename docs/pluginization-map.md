@@ -69,7 +69,7 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 | Error UX / Error Codes | P1 | todo | Core should emit structured errors; products decide display/reporting |
 | Source Resolver | P1 | done | Engine URL conversion and fallback chains are vendor/project-specific |
 | Auth / Signing | P1 | todo | Token, cookie, and URL signing policies are business-specific |
-| Playback Preferences | P2 | todo | Volume, mute, speed, source, and quality persistence are optional UX |
+| Playback Preferences | P2 | partial | Volume, mute, speed, source, and quality persistence are optional UX; quality API exists, persistence remains plugin work |
 | Metadata Parser | P2 | done | KLV, SEI, ID3, and private data semantics differ by domain; `createMetadataPlugin()` keeps parsing optional |
 | Debug Panel | P2 | todo | Useful for development, too heavy/noisy for core |
 | Performance Monitor | P2 | done | Sampling/budget rules are optional and product-tunable |

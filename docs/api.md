@@ -646,6 +646,40 @@ interface PlayerLevelSwitchEvent {
 }
 ```
 
+### QualityState
+
+HLS and DASH expose adaptive-bitrate state through the public Player API.
+
+```typescript
+interface QualityLevel {
+  id: number | string
+  index?: number
+  label?: string
+  bitrateKbps?: number
+  width?: number
+  height?: number
+  codec?: string
+  active?: boolean
+}
+
+interface QualityState {
+  supported: boolean
+  tech?: TechName
+  auto: boolean
+  current?: number | string | null
+  levels: QualityLevel[]
+}
+
+player.getQualityState(): QualityState
+await player.setQualityLevel('auto') // restore ABR
+await player.setQualityLevel(0)      // manual level by id or index
+```
+
+`getQualityState()` returns `supported: false` when the active Tech does not
+support public quality selection. The optional UI plugin prefers this Tech-level
+quality state; only when no adaptive levels exist does the selector fall back to
+multi-source switching.
+
 ### HLS/DASH Event Semantics
 
 Current stable contract:
@@ -656,6 +690,7 @@ Current stable contract:
 - DASH non-fatal dash.js errors are emitted as `network` events with `type: 'dash-error'`.
 - DASH fatal dash.js errors emit player `error`.
 - `levelSwitch` uses `PlayerLevelSwitchEvent`; HLS/DASH payloads are normalized to small stable objects instead of third-party library internals.
+- HLS/DASH quality selection uses `getQualityState()` and `setQualityLevel()`. Passing `'auto'` restores ABR; numeric values select a Tech level index.
 
 Do not depend on raw hls.js or dash.js event payload objects from public player events. If a product needs library-specific diagnostics, add a diagnostics plugin rather than parsing public playback events.
 

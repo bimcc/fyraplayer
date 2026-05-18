@@ -1,5 +1,5 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, DASHSource } from '../types.js';
+import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, DASHSource, QualityState } from '../types.js';
 import * as dashjs from 'dashjs';
 import { probeWebCodecs } from '../utils/webcodecs.js';
 
@@ -217,6 +217,72 @@ export class DASHTech extends AbstractTech {
     this.readyEmitted = false;
   }
 
+  getQualityState(): QualityState {
+    const dash = this.dash;
+    if (!dash) {
+      return { supported: false, tech: 'dash', auto: true, current: null, levels: [] };
+    }
+    const representations = dash.getRepresentationsByType('video') ?? [];
+    const currentRepresentation = dash.getCurrentRepresentationForType?.('video') ?? null;
+    const current =
+      currentRepresentation?.absoluteIndex ??
+      currentRepresentation?.index ??
+      currentRepresentation?.id ??
+      null;
+    const auto = dash.getSettings?.()?.streaming?.abr?.autoSwitchBitrate?.video !== false;
+
+    return {
+      supported: true,
+      tech: 'dash',
+      auto,
+      current,
+      levels: representations.map((representation, index) => {
+        const id = representation.absoluteIndex ?? representation.index ?? representation.id ?? index;
+        const bandwidth = representation.bandwidth || representation.bitrateInKbit * 1000;
+        return {
+          id,
+          index,
+          label: this.formatQualityLabel(representation.height, bandwidth),
+          bitrateKbps: bandwidth ? Math.round(bandwidth / 1000) : undefined,
+          width: representation.width || undefined,
+          height: representation.height || undefined,
+          codec: representation.codecs ?? undefined,
+          active: current === id || current === representation.index || current === representation.absoluteIndex
+        };
+      })
+    };
+  }
+
+  async setQualityLevel(level: number | string | 'auto'): Promise<void> {
+    const dash = this.dash;
+    if (!dash) throw new Error('DASH is not loaded');
+    if (level === 'auto') {
+      dash.updateSettings({
+        streaming: {
+          abr: {
+            autoSwitchBitrate: { video: true }
+          }
+        }
+      });
+      return;
+    }
+
+    const representations = dash.getRepresentationsByType?.('video') ?? [];
+    const representationIndex = this.findRepresentationIndex(representations, level);
+    if (representationIndex < 0) {
+      throw new Error(`Invalid DASH quality level: ${level}`);
+    }
+
+    dash.updateSettings({
+      streaming: {
+        abr: {
+          autoSwitchBitrate: { video: false }
+        }
+      }
+    });
+    dash.setRepresentationForTypeByIndex?.('video', representationIndex, true);
+  }
+
   private emitReadyOnce(): void {
     if (this.readyEmitted) return;
     this.readyEmitted = true;
@@ -226,5 +292,25 @@ export class DASHTech extends AbstractTech {
   private asQualityChangePayload(value: unknown): DashQualityChangePayload {
     if (typeof value !== 'object' || value === null) return {};
     return value as DashQualityChangePayload;
+  }
+
+  private formatQualityLabel(height?: number, bitrate?: number): string {
+    const parts: string[] = [];
+    if (height) parts.push(`${height}p`);
+    if (bitrate) parts.push(`${Math.round(bitrate / 1000)} kbps`);
+    return parts.join(' ') || 'Quality';
+  }
+
+  private findRepresentationIndex(representations: dashjs.Representation[], level: number | string): number {
+    const numericLevel = typeof level === 'number' ? level : Number(level);
+    if (Number.isInteger(numericLevel) && numericLevel >= 0) {
+      const representationIndexMatch = representations.findIndex((representation) =>
+        representation.index === numericLevel ||
+        representation.absoluteIndex === numericLevel
+      );
+      if (representationIndexMatch >= 0) return representationIndexMatch;
+      if (numericLevel < representations.length) return numericLevel;
+    }
+    return representations.findIndex((representation) => representation.id === level);
   }
 }

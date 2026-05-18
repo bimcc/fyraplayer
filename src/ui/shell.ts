@@ -3,7 +3,7 @@
  * Custom element for player UI overlay
  */
 
-import type { PluginContext, PlayerAPI, Source } from '../types.js';
+import type { PluginContext, PlayerAPI, QualityLevel, Source } from '../types.js';
 import type { UiComponentsOptions, UiElements } from './types.js';
 import { UI_SHELL_STYLES, UI_SHELL_HTML } from './styles.js';
 import {
@@ -87,6 +87,14 @@ export class FyraUiShell extends HTMLElement {
   private getSourceLabel(source: Source, index: number): string {
     const sourceWithName = source as Source & { label?: string; name?: string };
     return sourceWithName.label || sourceWithName.name || `${source.type} ${index + 1}`;
+  }
+
+  private getQualityLabel(level: QualityLevel): string {
+    if (level.label) return level.label;
+    const parts: string[] = [];
+    if (level.height) parts.push(`${level.height}p`);
+    if (level.bitrateKbps) parts.push(`${level.bitrateKbps} kbps`);
+    return parts.join(' ') || `Level ${level.index ?? level.id}`;
   }
 
   constructor() {
@@ -230,9 +238,22 @@ export class FyraUiShell extends HTMLElement {
 
     this.elements.qualitySel?.addEventListener('change', () => {
       if (!this.elements.qualitySel || !this.player) return;
-      const idx = Number(this.elements.qualitySel.value);
-      if (Number.isNaN(idx)) return;
-      this.player.switchSource(idx).catch((e) => this.log(`[quality] switch failed: ${e}`));
+      const value = this.elements.qualitySel.value;
+      const mode = this.elements.qualitySel.dataset.mode;
+      if (mode === 'quality') {
+        const numericValue = Number(value);
+        const level = value === 'auto'
+          ? 'auto'
+          : Number.isNaN(numericValue)
+            ? value
+            : numericValue;
+        this.player.setQualityLevel(level).catch((e) => this.log(`[quality] switch failed: ${e}`));
+        return;
+      }
+      const idx = Number(value);
+      if (!Number.isNaN(idx)) {
+        this.player.switchSource(idx).catch((e) => this.log(`[source] switch failed: ${e}`));
+      }
     });
   }
 
@@ -257,6 +278,7 @@ export class FyraUiShell extends HTMLElement {
         this.setBuffering(false);
         this.updatePlayUi(false);
         this.hideCover();
+        this.populateQuality();
       },
       onPlay: () => {
         this.setBuffering(false);
@@ -265,6 +287,7 @@ export class FyraUiShell extends HTMLElement {
       },
       onPause: () => this.updatePlayUi(false),
       onBuffer: () => this.setBuffering(true),
+      onLevelSwitch: () => this.populateQuality(),
       onError: (eventPayload: unknown) => {
         this.setBuffering(false);
         this.updatePlayUi(false);
@@ -641,12 +664,37 @@ export class FyraUiShell extends HTMLElement {
 
   private populateQuality(): void {
     if (!this.elements.qualitySel) return;
+    const qualityState = this.player?.getQualityState?.();
+    if (qualityState?.supported && qualityState.levels.length > 0) {
+      this.elements.qualitySel.style.display = 'block';
+      this.elements.qualitySel.dataset.mode = 'quality';
+      this.elements.qualitySel.innerHTML = '';
+
+      const auto = document.createElement('option');
+      auto.value = 'auto';
+      auto.textContent = 'Auto';
+      this.elements.qualitySel.appendChild(auto);
+
+      qualityState.levels.forEach((level) => {
+        const opt = document.createElement('option');
+        opt.value = String(level.id);
+        opt.textContent = this.getQualityLabel(level);
+        this.elements.qualitySel?.appendChild(opt);
+      });
+
+      this.elements.qualitySel.value =
+        qualityState.auto || qualityState.current == null ? 'auto' : String(qualityState.current);
+      return;
+    }
+
     const sources = this.getPlayerSources();
     if (!sources.length || sources.length === 1) {
       this.elements.qualitySel.style.display = 'none';
+      this.elements.qualitySel.dataset.mode = '';
       return;
     }
     this.elements.qualitySel.style.display = 'block';
+    this.elements.qualitySel.dataset.mode = 'source';
     this.elements.qualitySel.innerHTML = '';
     const currentSource = this.player?.getCurrentSource?.();
     const current = currentSource ? sources.indexOf(currentSource) : -1;

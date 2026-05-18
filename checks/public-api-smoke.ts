@@ -10,6 +10,8 @@ import {
   type PlayerNetworkEvent,
   type PlayerQosCode,
   type PlayerQosEvent,
+  type QualityLevel,
+  type QualityState,
   type PluginCtor,
   type Gb28181Source,
   type Source,
@@ -157,6 +159,11 @@ player.on('levelSwitch', (evt: PlayerLevelSwitchEvent | undefined) => {
 player.currentTime.toFixed();
 player.getSources().map((source) => source.type);
 player.getCurrentSource()?.type;
+const qualityState: QualityState = player.getQualityState();
+const qualityLevels: QualityLevel[] = qualityState.levels;
+qualityState.tech?.toString();
+qualityLevels.map((level) => level.id.toString());
+await player.setQualityLevel('auto').catch(() => undefined);
 player.enableMetadataExtraction();
 player.disableMetadataExtraction();
 player.getDetectedPrivateDataPids().map((pid) => pid.toFixed());

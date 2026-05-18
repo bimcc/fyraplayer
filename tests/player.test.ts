@@ -293,6 +293,59 @@ describe('FyraPlayer P0/P1 regressions', () => {
     await player.destroy();
   });
 
+  test('exposes active tech quality state and forwards manual selection through middleware', async () => {
+    const controlEvents: any[] = [];
+    const player = new FyraPlayer({
+      video: createVideoStub(),
+      sources: [{ type: 'hls', url: 'https://origin/live.m3u8' }],
+      techOrder: ['hls'],
+      middleware: [
+        {
+          kind: 'control',
+          fn: (ctx) => {
+            controlEvents.push({ action: ctx.action, payload: ctx.payload, tech: ctx.tech });
+          }
+        }
+      ]
+    });
+
+    await player.init();
+    const hlsTech = mockTechInstances.hls[0];
+    hlsTech.qualityState = {
+      supported: true,
+      auto: true,
+      current: 1,
+      levels: [
+        { id: 0, index: 0, label: '360p', active: false },
+        { id: 1, index: 1, label: '720p', active: true }
+      ]
+    };
+
+    expect(player.getQualityState()).toEqual({
+      supported: true,
+      tech: 'hls',
+      auto: true,
+      current: 1,
+      levels: [
+        { id: 0, index: 0, label: '360p', active: false },
+        { id: 1, index: 1, label: '720p', active: true }
+      ]
+    });
+
+    await player.setQualityLevel(0);
+    await player.setQualityLevel('720p');
+    await player.setQualityLevel('auto');
+
+    expect(hlsTech.setQualityCalls).toEqual([0, '720p', 'auto']);
+    expect(controlEvents).toEqual([
+      { action: 'quality', payload: 0, tech: 'hls' },
+      { action: 'quality', payload: '720p', tech: 'hls' },
+      { action: 'quality', payload: 'auto', tech: 'hls' }
+    ]);
+
+    await player.destroy();
+  });
+
   test('switchSource destroys previous tech and ignores stale events from it', async () => {
     const player = new FyraPlayer({
       video: createVideoStub(),
