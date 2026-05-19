@@ -111,6 +111,7 @@ Status values:
 | CR-026 | P2 | done | Render Bridges | Keep PSV/Cesium/map/panorama integrations outside core but documented | `docs/render-bridges.md` defines the external bridge boundary, supported video/canvas/event/metadata outputs, PSV/Cesium ownership, cleanup checklist, and public API smoke covers `CanvasFrameBuffer` / `BaseTarget` |
 | CR-027 | P2 | done | Screenshot / Recording | Provide optional capture utilities | UI screenshot feedback exists; backend recording API plugin supports start/stop/status, typed events, normalized errors, and lifecycle cleanup; browser-side recording remains intentionally out of scope |
 | CR-028 | P3 | deferred | Ads / Business Analytics | Keep SSAI/CSAI and business event exporters out of current focus | Placeholder exists; not part of current core stabilization work |
+| CR-029 | P2 | todo | PanoramaLite | Add lightweight first-party WebGL2 panorama plugin | `docs/panoramalite.md` is the tracking baseline; implementation must cover equirectangular image, video, and live-source rendering, interaction controls, lifecycle cleanup, diagnostics, public API smoke, and browser pixel evidence |
 
 ---
 

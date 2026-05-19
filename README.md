@@ -251,6 +251,7 @@ player.on('metadata', (evt) => {
 - [商业化成熟度路线图](./docs/commercial-readiness-roadmap.md)：当前商业级差距、优先级、验收门槛和延期插件占位。
 - [插件化边界地图](./docs/pluginization-map.md)：已插件化能力、候选插件、核心边界和插件 API 后续方向。
 - [渲染桥边界](./docs/render-bridges.md)：PSV/Cesium/map/panorama 适配器的外部化方案和通用视频/画布输出契约。
+- [PanoramaLite 计划](./docs/panoramalite.md)：轻量 WebGL2 全景图片、全景视频和全景直播插件专项设计与跟踪。
 - [支持场景与已知限制](./docs/supported-scenarios.md)：当前可对外承诺的场景、实验项和明确边界。
 - [播放验证矩阵](./docs/playback-verification-matrix.md)：真实浏览器/协议验证范围、样例流、场景和证据记录。
 - [性能基线](./docs/performance-baseline.md)：可选性能预算插件、默认阈值和后续 profiling 证据状态。
