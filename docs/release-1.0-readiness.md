@@ -125,6 +125,18 @@ Final local validation on 2026-05-19:
 - `cmd /c pnpm bundle:examples`: passed.
 - `git diff --check`: passed.
 
+Example cleanup after the 1.0 push:
+
+- Removed old standalone HLS debug pages, placeholder PSV/Cesium HTML demos,
+  and the duplicate `examples/klv-integration.ts` sample because they were not
+  part of the supported SDK integration path.
+- Kept the supported 1.0 examples focused on `examples/basic.html`,
+  `examples/sources.js`, and `examples/minimal-iife.html`.
+- Kept compatibility exports such as `fyraplayer/plugins/recording`,
+  `HLSDASHTech`, `storagePlugin`, `reconnectPlugin`, and `metricsPlugin` for
+  1.x non-breaking compatibility; those can be considered for a future major
+  cleanup, not a 1.0 patch cleanup.
+
 ## 7. Post-1.0 Work
 
 Priority follow-ups:

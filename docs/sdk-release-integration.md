@@ -9,7 +9,19 @@
 - `pnpm bundle:iife` generates `dist/fyraplayer.iife.js`.
 - `pnpm build:release` runs both steps in sequence.
 - `pnpm bundle:examples` rebuilds the demo bundle used by `examples/basic.html`
-  and related demo pages.
+  from `examples/app.ts`.
+
+Supported example assets for 1.0 are intentionally small:
+
+- `examples/basic.html`: the primary ESM demo and protocol playground.
+- `examples/sources.js`: the checked source preset manifest used by the demo.
+- `examples/minimal-iife.html`: the no-build browser/IIFE integration smoke.
+
+Older standalone HLS debug pages and placeholder PSV/Cesium HTML demos were
+removed from `examples/` because they bypassed the current SDK integration path
+or pointed at external renderer packages that now have their own ownership
+boundary. Use `docs/render-bridges.md`, `docs/integration-psv.md`, and
+`docs/integration-cesium.md` for renderer guidance instead.
 
 ## Public Entry Points
 

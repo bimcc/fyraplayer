@@ -1636,6 +1636,30 @@ Post-1.0 focus:
 
 ---
 
+### 2026-05-19 Example And Compatibility Cleanup Pass
+
+Summary:
+
+- Removed stale standalone examples that were outside the 1.0 supported
+  integration path:
+  - old HLS direct/debug pages with hard-coded local LL-HLS URLs;
+  - placeholder PSV/Cesium HTML demos that mocked external renderer adapters;
+  - duplicate KLV TypeScript sample that imported from `../src` and used the
+    deprecated `experimental: true` source flag.
+- Kept `examples/basic.html`, `examples/app.ts`, `examples/sources.js`, and
+  `examples/minimal-iife.html` as the supported example set.
+
+Compatibility decision:
+
+- Do not remove documented 1.x compatibility surfaces in a patch cleanup:
+  `fyraplayer/plugins/recording`, `HLSDASHTech`, `LegacyTechName`,
+  `WSRawSource.experimental`, `PlayerOptions.ui`, `UiShellElements`,
+  `metricsPlugin`, `storagePlugin`, and `reconnectPlugin`.
+- These remain deprecated or compatibility-only and should be considered for a
+  future `2.0` breaking-change cleanup after consumers have a migration window.
+
+---
+
 ## 9. How To Update This Document
 
 When work is done:

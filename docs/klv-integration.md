@@ -22,7 +22,7 @@ const player = new FyraPlayer({
     url: 'wss://example.com/live.ts',
     codec: 'h264',
     transport: 'ts',  // 必须为 'ts'
-    experimental: true,
+    pipeline: 'experimental',
     metadata: {
       privateData: {
         enable: true,
@@ -97,7 +97,7 @@ const player = new FyraPlayer({
     url: 'wss://example.com/live.ts',
     codec: 'h264',
     transport: 'ts',
-    experimental: true,
+    pipeline: 'experimental',
     metadata: {
       privateData: { enable: true }
     }

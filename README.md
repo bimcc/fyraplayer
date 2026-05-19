@@ -272,6 +272,14 @@ player.on('metadata', (evt) => {
 - `pnpm dev:vite` — Vite 开发服务器
 - `pnpm bundle:examples` — 打包示例
 
+## 示例资产
+
+- `examples/basic.html`：主要 ESM 播放器示例和协议测试入口。
+- `examples/sources.js`：示例流配置清单，受 `pnpm check:sources` 校验。
+- `examples/minimal-iife.html`：无构建环境的 IIFE 集成示例。
+
+PSV、Cesium、地图、全景和 KLV 业务解析示例不再放在 `examples/` 里作为可运行占位页面；对应集成边界请看 `docs/render-bridges.md`、`docs/integration-psv.md`、`docs/integration-cesium.md` 和 `docs/klv-integration.md`。
+
 ## 与 @aspect/openklv 集成
 
 FyraPlayer 可以与 @aspect/openklv 配合使用，实现无人机视频的 KLV 元数据提取和解析。
