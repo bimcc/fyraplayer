@@ -115,6 +115,8 @@ export interface PanoramaLitePluginOptions {
   limits?: Partial<PanoramaLiteViewLimits>;
   pixelRatio?: number | 'auto';
   maxPixelRatio?: number;
+  preserveDrawingBuffer?: boolean;
+  crossOrigin?: '' | 'anonymous' | 'use-credentials';
   hideSourceVideo?: boolean;
   className?: string;
   onReady?: (handle: PanoramaLiteHandle) => void;
@@ -156,6 +158,7 @@ Defaults:
 - `limits: { minPitch: -85, maxPitch: 85, minFov: 35, maxFov: 110 }`;
 - `pixelRatio: 'auto'`;
 - `maxPixelRatio: 1.5`;
+- `preserveDrawingBuffer: false`;
 - `hideSourceVideo: true`.
 
 ## 5. Module Shape
@@ -313,12 +316,12 @@ Verification tools:
 | PLITE-001 | done | Add docs and roadmap tracking | `docs/panoramalite.md`, roadmap, and plugin map describe the same scope |
 | PLITE-002 | done | Add API/types and public export | `createPanoramaLitePlugin` compiles in public API smoke |
 | PLITE-003 | done | Implement math, camera, and sphere mesh | Unit tests cover projection basics and view limits |
-| PLITE-004 | doing | Implement WebGL2 renderer and image texture | Renderer and image texture path exist; browser screenshot evidence still pending |
-| PLITE-005 | doing | Implement video texture binding | Video texture path exists; MP4/HLS browser pixel evidence still pending |
-| PLITE-006 | doing | Implement interaction controls | Pointer/touch/wheel controls exist; browser drag/zoom pixel evidence still pending |
-| PLITE-007 | doing | Implement lifecycle and context recovery | Destroy/init-failure cleanup is unit-covered; source switch/context-restored browser evidence remains pending |
-| PLITE-008 | todo | Add example/demo preset | Example can toggle panoramic image/video/live source without custom glue |
-| PLITE-009 | todo | Add browser verification records | Matrix documents image, file/video, HLS, and live-source evidence |
+| PLITE-004 | done | Implement WebGL2 renderer and image texture | Renderer and image texture path exist; Edge smoke verifies nonblank generated image canvas |
+| PLITE-005 | done | Implement video texture binding | Edge smoke verifies MP4/file, HLS VOD, live HLS, and live WebRTC video texture rendering |
+| PLITE-006 | done | Implement interaction controls | Pointer drag changes view state and browser canvas pixels in smoke evidence |
+| PLITE-007 | doing | Implement lifecycle and context recovery | Destroy/init-failure cleanup is unit-covered; smoke verifies canvas removal after destroy; source switch/context-restored browser evidence remains pending |
+| PLITE-008 | done | Add example/demo preset | `examples/panoramalite.html` can load image/video/HLS/DASH/WebRTC sources and exposes a smoke API |
+| PLITE-009 | done for smoke scope | Add browser verification records | Matrix documents image, file/video, HLS VOD, live HLS, and live WebRTC smoke evidence; long-run/resource-leak evidence can be tracked separately |
 
 ## 12. Review Log
 
@@ -344,6 +347,35 @@ Verification tools:
   - `cmd /c pnpm check:release`: passed, 26 suites / 135 tests, 30 package
     export files, 18 example sources, public API check, ESM build, and IIFE
     bundle.
+
+### 2026-05-19 Browser Smoke Closure Pass
+
+- Added `examples/panoramalite.html` and `examples/panoramalite.ts` as the
+  first runnable PanoramaLite demo.
+- Added `pnpm smoke:panoramalite`, backed by `checks/panoramalite-smoke.mjs`,
+  to drive Edge/Chrome through CDP and assert:
+  - WebGL canvas exists and is nonblank;
+  - pointer drag changes view state;
+  - pointer drag changes sampled canvas pixels;
+  - video scenarios reach playable media state;
+  - destroy removes the PanoramaLite canvas.
+- Added `crossOrigin` and `preserveDrawingBuffer` plugin options. The latter is
+  intended for screenshots/automation and remains disabled by default.
+- Improved video texture scheduling by listening to media element readiness and
+  frame-progress events (`loadeddata`, `canplay`, `playing`, `timeupdate`,
+  `seeked`) in addition to Player events. This fixed a real HLS smoke timing
+  issue where video was playing but the first PanoramaLite canvas sample stayed
+  black.
+- Validation:
+  - `cmd /c pnpm smoke:panoramalite -- --scenario image --duration 2s --out .fyra-long-run\panoramalite-image-edge.json --fail-on-error`: passed.
+  - `cmd /c pnpm smoke:panoramalite -- --scenario file --source-url /testvideo/Rec%200017.mp4 --duration 6s --out .fyra-long-run\panoramalite-file-local-edge.json --fail-on-error`: passed.
+  - `cmd /c pnpm smoke:panoramalite -- --scenario hls --source-url https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8 --duration 8s --out .fyra-long-run\panoramalite-hls-demo-edge.json --fail-on-error`: passed.
+- Additional live validation after MediaMTX/OBS became available:
+  - `cmd /c pnpm smoke:panoramalite -- --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 20s --out .fyra-long-run\panoramalite-hls-live-edge.json --fail-on-error`: passed.
+  - `cmd /c pnpm smoke:panoramalite -- --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 8s --out .fyra-long-run\panoramalite-webrtc-live-edge.json --fail-on-error`: passed.
+- The external Bitmovin 360 MP4 default source did not pass this smoke because
+  the browser reported no supported source; same-origin local MP4 video texture
+  evidence is used for this pass.
 
 ## 13. Advanced Plugin Boundary
 

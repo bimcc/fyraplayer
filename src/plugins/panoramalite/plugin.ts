@@ -71,6 +71,7 @@ class PanoramaLiteInstance {
   private destroyed = false;
   private previousVideoVisibility: { visibility?: string; opacity?: string; pointerEvents?: string } | null = null;
   private previousHostPosition: string | null = null;
+  private readonly videoEventHandlers: Array<{ event: string; handler: EventListener }> = [];
   private readonly onReady = () => this.rebindCurrentVideo();
   private readonly onPlay = () => this.scheduleRender();
   private readonly onPause = () => this.scheduleRender();
@@ -111,6 +112,7 @@ class PanoramaLiteInstance {
         canvas: this.canvas,
         pixelRatio: options.pixelRatio ?? 'auto',
         maxPixelRatio: options.maxPixelRatio ?? 1.5,
+        preserveDrawingBuffer: !!options.preserveDrawingBuffer,
         onContextLost: () => emitQos(this.coreBus, 'PANORAMALITE_CONTEXT_LOST', 'warning', 'PanoramaLite WebGL context lost'),
         onContextRestored: () => {
           emitQos(this.coreBus, 'PANORAMALITE_CONTEXT_RESTORED', 'info', 'PanoramaLite WebGL context restored');
@@ -149,9 +151,14 @@ class PanoramaLiteInstance {
   }
 
   bindVideo(video: HTMLVideoElement): void {
+    this.detachVideoFrameEvents();
     this.restoreVideoStyle();
     this.video = video as VideoWithFrameCallback;
+    if (this.options.crossOrigin !== undefined) {
+      video.crossOrigin = this.options.crossOrigin;
+    }
     this.renderer.setTextureSource(video);
+    this.attachVideoFrameEvents(video);
     if (this.options.hideSourceVideo !== false) {
       this.previousVideoVisibility = {
         visibility: video.style.visibility,
@@ -188,6 +195,7 @@ class PanoramaLiteInstance {
     this.player.off('play', this.onPlay);
     this.player.off('pause', this.onPause);
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.detachVideoFrameEvents();
     this.controls?.destroy();
     this.controls = null;
     this.renderer.destroy();
@@ -262,6 +270,26 @@ class PanoramaLiteInstance {
     this.video.style.opacity = this.previousVideoVisibility.opacity ?? '';
     this.video.style.pointerEvents = this.previousVideoVisibility.pointerEvents ?? '';
     this.previousVideoVisibility = null;
+  }
+
+  private attachVideoFrameEvents(video: HTMLVideoElement): void {
+    const events = ['loadeddata', 'loadedmetadata', 'canplay', 'playing', 'timeupdate', 'seeked'];
+    for (const event of events) {
+      const handler = () => this.scheduleRender();
+      video.addEventListener?.(event, handler);
+      this.videoEventHandlers.push({ event, handler });
+    }
+  }
+
+  private detachVideoFrameEvents(): void {
+    if (!this.video || !this.videoEventHandlers.length) {
+      this.videoEventHandlers.length = 0;
+      return;
+    }
+    for (const { event, handler } of this.videoEventHandlers) {
+      this.video.removeEventListener?.(event, handler);
+    }
+    this.videoEventHandlers.length = 0;
   }
 
   private ensureHostPositioning(): void {

@@ -25,7 +25,11 @@ export function createPanoramaLiteControls(options: PanoramaLiteControlsOptions)
     dragging = true;
     lastX = event.clientX;
     lastY = event.clientY;
-    options.element.setPointerCapture?.(event.pointerId);
+    try {
+      options.element.setPointerCapture?.(event.pointerId);
+    } catch {
+      /* synthetic pointer events may not have an active pointer capture target */
+    }
   };
   const onPointerMove = (event: PointerEvent) => {
     if (!enabled || !dragging) return;
@@ -41,7 +45,11 @@ export function createPanoramaLiteControls(options: PanoramaLiteControlsOptions)
   };
   const onPointerUp = (event: PointerEvent) => {
     dragging = false;
-    options.element.releasePointerCapture?.(event.pointerId);
+    try {
+      options.element.releasePointerCapture?.(event.pointerId);
+    } catch {
+      /* ignore */
+    }
   };
   const onWheel = (event: WheelEvent) => {
     if (!enabled) return;
@@ -125,4 +133,3 @@ export function createPanoramaLiteControls(options: PanoramaLiteControlsOptions)
     },
   };
 }
-

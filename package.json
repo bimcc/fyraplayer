@@ -83,6 +83,7 @@
     "serve:fmp4-fixture": "node checks/ffmpeg-fmp4-fixture.mjs",
     "long-run:browser": "node checks/browser-long-run.mjs",
     "long-run:assert": "node checks/browser-long-run-assert.mjs",
+    "smoke:panoramalite": "node checks/panoramalite-smoke.mjs",
     "bundle:examples": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm",
     "bundle:iife": "esbuild src/iife.ts --bundle --outfile=dist/fyraplayer.iife.js --platform=browser --format=iife --global-name=FyraPlayerSDK",
     "bundle:examples:watch": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm --watch",

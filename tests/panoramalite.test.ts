@@ -410,6 +410,8 @@ describe('createPanoramaLitePlugin', () => {
     expect(host.style.position).toBe('relative');
     expect(video.style.visibility).toBe('hidden');
     expect(host.children.length).toBe(2);
+    expect(video.listeners.get('loadeddata')?.size).toBe(1);
+    expect(video.listeners.get('timeupdate')?.size).toBe(1);
 
     lifecycle?.destroy?.();
 
@@ -417,5 +419,7 @@ describe('createPanoramaLitePlugin', () => {
     expect(video.style.visibility).toBe('visible');
     expect(video.style.opacity).toBe('1');
     expect(host.children).toEqual([video]);
+    expect(video.listeners.get('loadeddata')?.size ?? 0).toBe(0);
+    expect(video.listeners.get('timeupdate')?.size ?? 0).toBe(0);
   });
 });

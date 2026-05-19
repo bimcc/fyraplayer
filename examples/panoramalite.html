@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FyraPlayer PanoramaLite Demo</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 20px;
+        background: #f4f6f8;
+        color: #172033;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      .page {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 14px;
+        font-size: 22px;
+        font-weight: 650;
+      }
+      .player-shell {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+      }
+      #video {
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: #000;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto auto;
+        gap: 10px;
+        margin-top: 14px;
+        align-items: center;
+      }
+      input, select, button {
+        height: 36px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        font-size: 13px;
+      }
+      input {
+        min-width: 0;
+        padding: 0 10px;
+      }
+      select {
+        padding: 0 8px;
+      }
+      button {
+        padding: 0 14px;
+        cursor: pointer;
+        font-weight: 550;
+      }
+      button.primary {
+        background: #0f766e;
+        border-color: #0f766e;
+        color: #fff;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .status {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric {
+        min-width: 0;
+        border: 1px solid #d8dee9;
+        border-radius: 6px;
+        background: #fff;
+        padding: 8px 10px;
+        font-size: 12px;
+        color: #334155;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .log {
+        margin-top: 12px;
+        min-height: 56px;
+        max-height: 120px;
+        overflow: auto;
+        border: 1px solid #d8dee9;
+        border-radius: 6px;
+        background: #fff;
+        padding: 10px;
+        color: #334155;
+        font: 12px/1.45 Consolas, "SF Mono", monospace;
+        white-space: pre-wrap;
+      }
+      @media (max-width: 720px) {
+        body { padding: 12px; }
+        .controls {
+          grid-template-columns: 1fr 1fr;
+        }
+        .controls input {
+          grid-column: 1 / -1;
+        }
+        .status {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <h1>PanoramaLite</h1>
+      <div class="player-shell" id="pano-shell">
+        <video id="video" muted playsinline crossorigin="anonymous"></video>
+      </div>
+      <div class="controls">
+        <input id="source-url" type="text" />
+        <select id="source-kind">
+          <option value="image">Image</option>
+          <option value="file">MP4/File</option>
+          <option value="hls">HLS</option>
+          <option value="dash">DASH</option>
+          <option value="webrtc">WebRTC</option>
+        </select>
+        <button id="load" class="primary">Load</button>
+        <button id="reset">Reset</button>
+      </div>
+      <div class="status">
+        <div class="metric" id="state">state: idle</div>
+        <div class="metric" id="view">view: -</div>
+        <div class="metric" id="video-info">video: -</div>
+        <div class="metric" id="canvas-info">canvas: -</div>
+      </div>
+      <div class="log" id="log"></div>
+    </main>
+    <script type="module" src="./panoramalite.ts"></script>
+  </body>
+</html>

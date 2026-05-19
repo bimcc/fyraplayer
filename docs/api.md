@@ -1072,6 +1072,8 @@ interface PanoramaLitePluginOptions {
   limits?: Partial<PanoramaLiteViewLimits>
   pixelRatio?: number | 'auto'
   maxPixelRatio?: number
+  preserveDrawingBuffer?: boolean
+  crossOrigin?: '' | 'anonymous' | 'use-credentials'
   hideSourceVideo?: boolean
   className?: string
   onReady?: (handle: PanoramaLiteHandle) => void

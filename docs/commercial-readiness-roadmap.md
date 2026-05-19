@@ -111,7 +111,7 @@ Status values:
 | CR-026 | P2 | done | Render Bridges | Keep PSV/Cesium/map/panorama integrations outside core but documented | `docs/render-bridges.md` defines the external bridge boundary, supported video/canvas/event/metadata outputs, PSV/Cesium ownership, cleanup checklist, and public API smoke covers `CanvasFrameBuffer` / `BaseTarget` |
 | CR-027 | P2 | done | Screenshot / Recording | Provide optional capture utilities | UI screenshot feedback exists; backend recording API plugin supports start/stop/status, typed events, normalized errors, and lifecycle cleanup; browser-side recording remains intentionally out of scope |
 | CR-028 | P3 | deferred | Ads / Business Analytics | Keep SSAI/CSAI and business event exporters out of current focus | Placeholder exists; not part of current core stabilization work |
-| CR-029 | P2 | doing | PanoramaLite | Add lightweight first-party WebGL2 panorama plugin | API/types/export, renderer skeleton, image/video texture binding, interaction controls, and unit coverage exist. Browser pixel evidence for image, MP4/HLS, and live sources remains required before support claims |
+| CR-029 | P2 | done for smoke scope | PanoramaLite | Add lightweight first-party WebGL2 panorama plugin | API/types/export, renderer, image/video texture binding, interaction controls, unit coverage, demo, and Edge browser smoke evidence for image, MP4/file, HLS VOD, live HLS, and live WebRTC exist. Longer WebGL resource-leak runs can be tracked separately |
 
 ---
 
@@ -1698,6 +1698,39 @@ Remaining:
 - Add a runnable PanoramaLite example/demo preset.
 - Record browser pixel evidence for panoramic image, MP4/file video, HLS 360,
   and live/WebRTC or MediaMTX sources before marking `CR-029` done.
+
+---
+
+### 2026-05-19 PanoramaLite Browser Smoke Pass
+
+Summary:
+
+- Added `examples/panoramalite.html` and the `pnpm smoke:panoramalite` CDP
+  smoke runner.
+- Added browser-readable PanoramaLite smoke assertions for nonblank WebGL
+  canvas pixels, pointer-drag view/pixel changes, video readiness, and destroy
+  cleanup.
+- Added media-element event scheduling to PanoramaLite after an initial HLS
+  smoke showed video playback could be ready while the first canvas sample
+  stayed black.
+- Added `crossOrigin` and `preserveDrawingBuffer` options for integration and
+  automation use cases.
+
+Validation:
+
+- `cmd /c pnpm smoke:panoramalite -- --scenario image --duration 2s --out .fyra-long-run\panoramalite-image-edge.json --fail-on-error`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --scenario file --source-url /testvideo/Rec%200017.mp4 --duration 6s --out .fyra-long-run\panoramalite-file-local-edge.json --fail-on-error`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --scenario hls --source-url https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8 --duration 8s --out .fyra-long-run\panoramalite-hls-demo-edge.json --fail-on-error`: passed.
+
+Additional live validation:
+
+- After OBS started publishing to MediaMTX `live/test`, MediaMTX API reported
+  the path ready and the HLS playlist returned 200.
+- `cmd /c pnpm smoke:panoramalite -- --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 20s --out .fyra-long-run\panoramalite-hls-live-edge.json --fail-on-error`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 8s --out .fyra-long-run\panoramalite-webrtc-live-edge.json --fail-on-error`: passed.
+- `CR-029` is closed for smoke/product-demo scope. Longer WebGL resource-leak
+  or 30-minute panorama-specific runs can be tracked as a separate hardening
+  item if needed.
 
 ---
 

@@ -16,6 +16,8 @@ Supported example assets for 1.0 are intentionally small:
 - `examples/basic.html`: the primary ESM demo and protocol playground.
 - `examples/sources.js`: the checked source preset manifest used by the demo.
 - `examples/minimal-iife.html`: the no-build browser/IIFE integration smoke.
+- `examples/panoramalite.html`: the PanoramaLite WebGL2 renderer demo and
+  browser smoke target.
 
 Older standalone HLS debug pages and placeholder PSV/Cesium HTML demos were
 removed from `examples/` because they bypassed the current SDK integration path
@@ -100,6 +102,7 @@ Keep optional features outside the core import:
 - `fyraplayer/plugins/reconnect`
 - `fyraplayer/plugins/metrics`
 - `fyraplayer/plugins/performance`
+- `fyraplayer/plugins/panoramalite`
 - `fyraplayer/plugins/engines`
 - `fyraplayer/plugins/metadata`
 

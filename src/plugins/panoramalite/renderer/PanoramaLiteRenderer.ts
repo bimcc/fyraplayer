@@ -8,6 +8,7 @@ export interface PanoramaLiteRendererOptions {
   canvas: HTMLCanvasElement;
   pixelRatio?: number | 'auto';
   maxPixelRatio?: number;
+  preserveDrawingBuffer?: boolean;
   onContextLost?: () => void;
   onContextRestored?: () => void;
 }
@@ -127,6 +128,7 @@ export class PanoramaLiteRenderer {
       antialias: false,
       alpha: false,
       premultipliedAlpha: false,
+      preserveDrawingBuffer: !!this.options.preserveDrawingBuffer,
     });
     if (!gl) {
       throw new Error('WebGL2 is not available');

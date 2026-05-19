@@ -269,6 +269,7 @@ player.on('metadata', (evt) => {
 - `pnpm check:sources` — 校验 `examples/sources.js` 的示例源结构
 - `pnpm check:public-api` — 校验 README/API 关键公共用法可通过 TypeScript 编译
 - `pnpm check:exports` — 清理并重建 `dist/`，校验 `package.json` exports 指向的文件存在
+- `pnpm smoke:panoramalite` — 启动 PanoramaLite 示例并做浏览器 canvas 像素/交互 smoke
 - `pnpm test` — 运行 Jest 测试
 - `pnpm dev:vite` — Vite 开发服务器
 - `pnpm bundle:examples` — 打包示例
@@ -278,6 +279,7 @@ player.on('metadata', (evt) => {
 - `examples/basic.html`：主要 ESM 播放器示例和协议测试入口。
 - `examples/sources.js`：示例流配置清单，受 `pnpm check:sources` 校验。
 - `examples/minimal-iife.html`：无构建环境的 IIFE 集成示例。
+- `examples/panoramalite.html`：PanoramaLite WebGL2 全景渲染示例和 smoke 目标。
 
 PSV、Cesium、地图、全景和 KLV 业务解析示例不再放在 `examples/` 里作为可运行占位页面；对应集成边界请看 `docs/render-bridges.md`、`docs/integration-psv.md`、`docs/integration-cesium.md` 和 `docs/klv-integration.md`。
 

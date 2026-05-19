@@ -25,6 +25,8 @@ export interface PanoramaLitePluginOptions {
   limits?: Partial<PanoramaLiteViewLimits>;
   pixelRatio?: number | 'auto';
   maxPixelRatio?: number;
+  preserveDrawingBuffer?: boolean;
+  crossOrigin?: '' | 'anonymous' | 'use-credentials';
   hideSourceVideo?: boolean;
   className?: string;
   onReady?: (handle: PanoramaLiteHandle) => void;
@@ -58,4 +60,3 @@ export interface PanoramaLiteQosPayload {
   ts: number;
   [key: string]: unknown;
 }
-
