@@ -1745,18 +1745,49 @@ Summary:
 - Added public `textureFlipX` and `textureFlipY` options and moved orientation
   correction into shader texture-coordinate transforms. WebGL upload now keeps
   `UNPACK_FLIP_Y_WEBGL` disabled by default.
-- Added `maxVideoFps` and `maxCanvasPixels` for live panorama performance. The
-  renderer already rasterizes only the visible canvas pixels; the practical
-  optimization target is full-frame video texture upload and high-DPI backing
-  store size.
-- Demo defaults now cap WebRTC panorama uploads at 24 fps and other video
-  sources at 30 fps, with `maxPixelRatio: 1` and `maxCanvasPixels: 1280 * 720`.
+- Added `maxVideoFps` and `maxCanvasPixels` as explicit fallback controls for
+  live panorama performance. The renderer already rasterizes only the visible
+  canvas pixels; the practical optimization target is full-frame video texture
+  upload and high-DPI backing-store size.
+- Earlier live smoke used conservative demo caps for quick stability proof.
+  Current SDK/demo defaults preserve quality; upload/frame/canvas caps are
+  opt-in fallbacks for constrained clients or dense monitoring layouts.
 
 Validation:
 
 - `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed, 8
   tests.
 - `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+
+---
+
+### 2026-05-19 PanoramaLite Default Quality Scheduling Pass
+
+Summary:
+
+- Separated default `textureFlipY` behavior by media type. Generated panorama
+  images now default to Y-flipped shader coordinates; video/WebRTC/HLS sources
+  default to neutral Y orientation. Explicit `textureFlipY` still overrides for
+  camera-specific integrations.
+- Removed normal demo defaults that capped `maxPixelRatio`, `maxCanvasPixels`,
+  and `maxVideoFps`. The demo now keeps full quality unless the integrator
+  explicitly opts into those fallback knobs.
+- Scoped `preserveDrawingBuffer` to `?smoke=1` automation mode because it is
+  useful for pixel readback but can add GPU synchronization cost in normal
+  playback.
+- Added non-degrading render-loop hardening: duplicate frame skipping via
+  `requestVideoFrameCallback` metadata, dirty-frame texture uploads,
+  RAF-coalesced rendering, `ResizeObserver` dirty resize, cached WebGL texture
+  limits, and default `powerPreference: 'high-performance'`.
+
+Validation:
+
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed, 10
+  tests.
+- `cmd /c pnpm smoke:panoramalite -- --scenario image --duration 2s --out .fyra-long-run\panoramalite-grid-image-orientation-default-quality-edge.json --fail-on-error`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --port 4201 --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 12s --out .fyra-long-run\panoramalite-hls-live-default-quality-edge.json --fail-on-error`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --port 4202 --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 10s --out .fyra-long-run\panoramalite-webrtc-live-default-quality-edge.json --fail-on-error`: passed.
 
 ---
 

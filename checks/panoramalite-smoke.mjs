@@ -481,7 +481,7 @@ async function main() {
   let session = null;
   let profileDir = null;
   try {
-    const pageUrl = options.url || `http://127.0.0.1:${options.port}/panoramalite.html`;
+    const pageUrl = options.url || `http://127.0.0.1:${options.port}/panoramalite.html?smoke=1`;
     if (!options.url) {
       if (!(await isPortFree(options.port))) options.port = await findFreePort(options.port + 1);
       server = spawnVite(options.port);

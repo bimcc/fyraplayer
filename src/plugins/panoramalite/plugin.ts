@@ -67,10 +67,14 @@ class PanoramaLiteInstance {
   private video: VideoWithFrameCallback | null = null;
   private readonly minVideoFrameIntervalMs: number;
   private lastVideoRenderAt = 0;
+  private lastPresentedFrames: number | null = null;
+  private lastVideoMediaTime: number | null = null;
+  private videoFrameDirty = false;
   private rafId: number | null = null;
   private videoFrameId: number | null = null;
   private pendingRenderUpload = false;
   private destroyed = false;
+  private resizeObserver: ResizeObserver | null = null;
   private previousVideoVisibility: { visibility?: string; opacity?: string; pointerEvents?: string } | null = null;
   private previousHostPosition: string | null = null;
   private readonly videoEventHandlers: Array<{ event: string; handler: EventListener }> = [];
@@ -86,6 +90,7 @@ class PanoramaLiteInstance {
       return;
     }
     this.scheduleRender();
+    this.scheduleVideoFrameLoop();
   };
 
   readonly handle: PanoramaLiteHandle = {
@@ -106,7 +111,7 @@ class PanoramaLiteInstance {
     this.limits = mergeLimits(options.limits);
     this.initialView = normalizeView(options.initialView, this.limits, DEFAULT_PANORAMA_VIEW);
     this.view = { ...this.initialView };
-    this.minVideoFrameIntervalMs = resolveVideoFrameIntervalMs(options.maxVideoFps ?? 30);
+    this.minVideoFrameIntervalMs = resolveVideoFrameIntervalMs(options.maxVideoFps);
     this.host = resolveTarget(options.target, player.getVideoElement());
     this.canvas = document.createElement('canvas');
     this.canvas.className = [PLUGIN_CLASS, options.className].filter(Boolean).join(' ');
@@ -119,20 +124,22 @@ class PanoramaLiteInstance {
         pixelRatio: options.pixelRatio ?? 'auto',
         maxPixelRatio: options.maxPixelRatio ?? 1.5,
         maxCanvasPixels: options.maxCanvasPixels,
+        powerPreference: options.powerPreference,
         textureFlipX: options.textureFlipX ?? false,
-        textureFlipY: options.textureFlipY ?? false,
+        textureFlipY: resolveTextureFlipY(options, options.media ?? 'video'),
         preserveDrawingBuffer: !!options.preserveDrawingBuffer,
         onContextLost: () => emitQos(this.coreBus, 'PANORAMALITE_CONTEXT_LOST', 'warning', 'PanoramaLite WebGL context lost'),
         onContextRestored: () => {
           emitQos(this.coreBus, 'PANORAMALITE_CONTEXT_RESTORED', 'info', 'PanoramaLite WebGL context restored');
           this.scheduleRender();
         },
-    });
-  } catch (error) {
+      });
+    } catch (error) {
       this.canvas.remove();
       this.restoreHostPositioning();
       throw error;
     }
+    this.observeResize();
     this.controls = createPanoramaLiteControls({
       element: this.canvas,
       getView: () => this.view,
@@ -160,12 +167,21 @@ class PanoramaLiteInstance {
   }
 
   bindVideo(video: HTMLVideoElement): void {
+    this.cancelRenderScheduling();
     this.detachVideoFrameEvents();
     this.restoreVideoStyle();
     this.video = video as VideoWithFrameCallback;
+    this.videoFrameDirty = true;
+    this.lastPresentedFrames = null;
+    this.lastVideoMediaTime = null;
+    this.lastVideoRenderAt = 0;
     if (this.options.crossOrigin !== undefined) {
       video.crossOrigin = this.options.crossOrigin;
     }
+    this.renderer.setTextureTransform({
+      textureFlipX: this.options.textureFlipX ?? false,
+      textureFlipY: resolveTextureFlipY(this.options, 'video'),
+    });
     this.renderer.setTextureSource(video);
     this.attachVideoFrameEvents(video);
     if (this.options.hideSourceVideo !== false) {
@@ -178,13 +194,21 @@ class PanoramaLiteInstance {
       video.style.opacity = '0';
       video.style.pointerEvents = 'none';
     }
-    this.lastVideoRenderAt = 0;
     this.scheduleRender();
     this.scheduleVideoFrameLoop();
   }
 
   async setImage(image: string | HTMLImageElement | ImageBitmap): Promise<void> {
     const loaded = await loadPanoramaImage(image);
+    this.cancelRenderScheduling();
+    this.detachVideoFrameEvents();
+    this.restoreVideoStyle();
+    this.video = null;
+    this.videoFrameDirty = false;
+    this.renderer.setTextureTransform({
+      textureFlipX: this.options.textureFlipX ?? false,
+      textureFlipY: resolveTextureFlipY(this.options, 'image'),
+    });
     this.renderer.setTextureSource(loaded);
     this.scheduleRender();
   }
@@ -194,6 +218,7 @@ class PanoramaLiteInstance {
   }
 
   resize(): void {
+    this.renderer.requestResize();
     this.renderer.resize();
     this.scheduleRender(false);
   }
@@ -206,6 +231,8 @@ class PanoramaLiteInstance {
     this.player.off('play', this.onPlay);
     this.player.off('pause', this.onPause);
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.detachVideoFrameEvents();
     this.controls?.destroy();
     this.controls = null;
@@ -236,28 +263,38 @@ class PanoramaLiteInstance {
     if (this.destroyed || !video?.requestVideoFrameCallback || video.paused || isDocumentHidden() || this.videoFrameId !== null) {
       return;
     }
-    this.videoFrameId = video.requestVideoFrameCallback((now) => {
+    this.videoFrameId = video.requestVideoFrameCallback((now, metadata) => {
       this.videoFrameId = null;
-      if (!this.destroyed && !isDocumentHidden() && this.shouldRenderVideoFrame(now)) {
-        this.renderOnce(true);
+      if (!this.destroyed && !isDocumentHidden() && this.shouldRenderVideoFrame(now, metadata)) {
+        this.videoFrameDirty = true;
+        this.scheduleRender();
       }
       this.scheduleVideoFrameLoop();
     });
   }
 
-  private shouldRenderVideoFrame(now: number): boolean {
+  private shouldRenderVideoFrame(now: number, metadata?: unknown): boolean {
+    const frame = normalizeVideoFrameMetadata(metadata);
+    if (frame.presentedFrames !== null && frame.presentedFrames === this.lastPresentedFrames) return false;
+    if (frame.presentedFrames === null && frame.mediaTime !== null && frame.mediaTime === this.lastVideoMediaTime) return false;
     if (this.minVideoFrameIntervalMs <= 0 || this.lastVideoRenderAt <= 0) {
       this.lastVideoRenderAt = now;
+      this.lastPresentedFrames = frame.presentedFrames;
+      this.lastVideoMediaTime = frame.mediaTime;
       return true;
     }
     if (now - this.lastVideoRenderAt < this.minVideoFrameIntervalMs) return false;
     this.lastVideoRenderAt = now;
+    this.lastPresentedFrames = frame.presentedFrames;
+    this.lastVideoMediaTime = frame.mediaTime;
     return true;
   }
 
   private renderOnce(uploadTexture = true): void {
+    const shouldUpload = uploadTexture && (!this.video || !this.video.requestVideoFrameCallback || this.videoFrameDirty);
     try {
-      this.renderer.render(this.view, { uploadTexture });
+      this.renderer.render(this.view, { uploadTexture: shouldUpload });
+      if (shouldUpload) this.videoFrameDirty = false;
     } catch (error) {
       this.handleError(error, 'PANORAMALITE_RENDER_ERROR');
     }
@@ -338,6 +375,15 @@ class PanoramaLiteInstance {
     this.host.style.position = this.previousHostPosition;
     this.previousHostPosition = null;
   }
+
+  private observeResize(): void {
+    if (typeof ResizeObserver === 'undefined') return;
+    this.resizeObserver = new ResizeObserver(() => {
+      this.renderer.requestResize();
+      this.scheduleRender(false);
+    });
+    this.resizeObserver.observe(this.host);
+  }
 }
 
 function resolveTarget(target: HTMLElement | string | undefined, video: HTMLVideoElement): HTMLElement {
@@ -367,6 +413,20 @@ function resolveVideoFrameIntervalMs(maxVideoFps: number | undefined): number {
     return 0;
   }
   return 1000 / Math.min(120, Math.max(1, maxVideoFps));
+}
+
+function resolveTextureFlipY(options: PanoramaLitePluginOptions, media: 'video' | 'image'): boolean {
+  if (typeof options.textureFlipY === 'boolean') return options.textureFlipY;
+  return media === 'image';
+}
+
+function normalizeVideoFrameMetadata(metadata: unknown): { presentedFrames: number | null; mediaTime: number | null } {
+  if (!metadata || typeof metadata !== 'object') return { presentedFrames: null, mediaTime: null };
+  const candidate = metadata as { presentedFrames?: unknown; mediaTime?: unknown };
+  return {
+    presentedFrames: typeof candidate.presentedFrames === 'number' ? candidate.presentedFrames : null,
+    mediaTime: typeof candidate.mediaTime === 'number' ? candidate.mediaTime : null,
+  };
 }
 
 function emitQos(

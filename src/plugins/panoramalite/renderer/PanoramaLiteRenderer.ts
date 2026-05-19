@@ -9,6 +9,7 @@ export interface PanoramaLiteRendererOptions {
   pixelRatio?: number | 'auto';
   maxPixelRatio?: number;
   maxCanvasPixels?: number;
+  powerPreference?: WebGLPowerPreference;
   textureFlipX?: boolean;
   textureFlipY?: boolean;
   preserveDrawingBuffer?: boolean;
@@ -32,6 +33,8 @@ export class PanoramaLiteRenderer {
   private textureTransformLocation: WebGLUniformLocation | null = null;
   private textureSource: PanoramaLiteTextureSource | null = null;
   private textureSize: { width: number; height: number } | null = null;
+  private resizeDirty = true;
+  private maxTextureSize: number | null = null;
   private destroyed = false;
   private readonly handleContextLost = (event: Event) => {
     event.preventDefault();
@@ -83,6 +86,19 @@ export class PanoramaLiteRenderer {
     }
   }
 
+  setTextureTransform(options: { textureFlipX?: boolean; textureFlipY?: boolean }): void {
+    if (options.textureFlipX !== undefined) {
+      this.options.textureFlipX = options.textureFlipX;
+    }
+    if (options.textureFlipY !== undefined) {
+      this.options.textureFlipY = options.textureFlipY;
+    }
+  }
+
+  requestResize(): void {
+    this.resizeDirty = true;
+  }
+
   resize(): void {
     const rect = this.canvas.getBoundingClientRect();
     const ratio = this.resolvePixelRatio(rect);
@@ -91,12 +107,13 @@ export class PanoramaLiteRenderer {
     if (this.canvas.width !== width) this.canvas.width = width;
     if (this.canvas.height !== height) this.canvas.height = height;
     this.gl?.viewport(0, 0, width, height);
+    this.resizeDirty = false;
   }
 
   render(view: PanoramaLiteView, options: { uploadTexture?: boolean } = {}): void {
     const gl = this.gl;
     if (!gl || !this.program || !this.vao || !this.texture || !this.mesh) return;
-    this.resize();
+    if (this.resizeDirty) this.resize();
     if (options.uploadTexture !== false) {
       this.uploadTextureFrame();
     }
@@ -145,6 +162,7 @@ export class PanoramaLiteRenderer {
       antialias: false,
       alpha: false,
       premultipliedAlpha: false,
+      powerPreference: this.options.powerPreference ?? 'high-performance',
       preserveDrawingBuffer: !!this.options.preserveDrawingBuffer,
     });
     if (!gl) {
@@ -152,6 +170,7 @@ export class PanoramaLiteRenderer {
     }
     this.gl = gl;
     this.mesh = createEquirectSphereMesh();
+    this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     this.program = this.createProgram(PANORAMA_VERTEX_SHADER, PANORAMA_FRAGMENT_SHADER);
     this.viewProjectionLocation = gl.getUniformLocation(this.program, 'uViewProjection');
     this.textureLocation = gl.getUniformLocation(this.program, 'uTexture');
@@ -192,7 +211,8 @@ export class PanoramaLiteRenderer {
     const gl = this.gl;
     const source = this.textureSource;
     if (!gl || !this.texture || !source || !isTextureSourceReady(source)) return;
-    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    const maxTextureSize = this.maxTextureSize ?? (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number);
+    this.maxTextureSize = maxTextureSize;
     const size = getTextureSourceSize(source);
     if (size.width > maxTextureSize || size.height > maxTextureSize) {
       throw new Error(`panoramalite texture exceeds MAX_TEXTURE_SIZE: ${size.width}x${size.height}`);
@@ -263,6 +283,8 @@ export class PanoramaLiteRenderer {
     this.program = null;
     this.gl = null;
     this.textureTransformLocation = null;
+    this.maxTextureSize = null;
+    this.resizeDirty = true;
   }
 
   private requireGl(): WebGL2RenderingContext {

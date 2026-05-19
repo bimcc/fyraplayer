@@ -83,7 +83,7 @@ class CanvasStub extends ElementStub {
   constructor(private readonly gl: unknown = null) {
     super();
   }
-  getContext(type: string): unknown {
+  getContext(type: string, _attributes?: unknown): unknown {
     return type === 'webgl2' ? this.gl : null;
   }
 }
@@ -165,6 +165,11 @@ class WebGL2Stub {
   deleteTexture = jest.fn();
 }
 
+interface CanvasContextAttributes {
+  powerPreference?: WebGLPowerPreference;
+  preserveDrawingBuffer?: boolean;
+}
+
 class PlayerStub implements PlayerAPI {
   readonly currentTime = 0;
   private readonly handlers = new Map<string, Set<Handler>>();
@@ -232,6 +237,22 @@ describe('panoramalite math and mesh', () => {
 });
 
 describe('PanoramaLiteRenderer', () => {
+  test('requests a high-performance WebGL context by default', () => {
+    const gl = new WebGL2Stub();
+    const canvas = new CanvasStub(gl);
+    const getContextSpy = jest.spyOn(canvas, 'getContext');
+    Object.defineProperty(globalThis, 'document', {
+      value: { createElement: () => new CanvasStub(gl) },
+      configurable: true,
+    });
+
+    new PanoramaLiteRenderer({ canvas: canvas as unknown as HTMLCanvasElement, pixelRatio: 1 });
+
+    const [, attributes] = getContextSpy.mock.calls[0];
+    expect((attributes as CanvasContextAttributes).powerPreference).toBe('high-performance');
+    expect((attributes as CanvasContextAttributes).preserveDrawingBuffer).toBe(false);
+  });
+
   test('allocates a real video texture after a 1x1 placeholder', () => {
     const gl = new WebGL2Stub();
     const canvas = new CanvasStub(gl);
@@ -445,5 +466,54 @@ describe('createPanoramaLitePlugin', () => {
     expect(host.children).toEqual([video]);
     expect(video.listeners.get('loadeddata')?.size ?? 0).toBe(0);
     expect(video.listeners.get('timeupdate')?.size ?? 0).toBe(0);
+  });
+
+  test('uses image-up and video-neutral Y orientation defaults', async () => {
+    const gl = new WebGL2Stub();
+    const host = new ElementStub();
+    const video = new VideoStub();
+    host.appendChild(video);
+    const documentStub = {
+      visibilityState: 'visible',
+      querySelector: () => host,
+      createElement: (tagName: string) => tagName === 'canvas' ? new CanvasStub(gl) : new ElementStub(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      body: new ElementStub(),
+    };
+    Object.defineProperty(globalThis, 'document', { value: documentStub, configurable: true });
+    Object.defineProperty(globalThis, 'HTMLElement', { value: ElementStub, configurable: true });
+    Object.defineProperty(globalThis, 'window', {
+      value: { getComputedStyle: () => ({ position: 'relative' }), devicePixelRatio: 1 },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      value: (cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { value: jest.fn(), configurable: true });
+
+    const player = new PlayerStub(video as unknown as HTMLVideoElement);
+    const imageLifecycle = createPanoramaLitePlugin({
+      target: '.host',
+      media: 'image',
+      image: { width: 2048, height: 1024 } as ImageBitmap,
+    })(createContext(player, new BusStub()));
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), 1, -1, 0, 1);
+    imageLifecycle?.destroy?.();
+
+    const videoLifecycle = createPanoramaLitePlugin({ target: '.host', media: 'video' })(
+      createContext(player, new BusStub())
+    );
+
+    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), 1, 1, 0, 0);
+    videoLifecycle?.destroy?.();
   });
 });

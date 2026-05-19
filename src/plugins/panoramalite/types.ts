@@ -27,6 +27,7 @@ export interface PanoramaLitePluginOptions {
   maxPixelRatio?: number;
   maxCanvasPixels?: number;
   maxVideoFps?: number;
+  powerPreference?: WebGLPowerPreference;
   textureFlipX?: boolean;
   textureFlipY?: boolean;
   preserveDrawingBuffer?: boolean;

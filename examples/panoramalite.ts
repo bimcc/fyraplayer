@@ -22,6 +22,7 @@ let player: FyraPlayer | null = null;
 let handle: PanoramaLiteHandle | null = null;
 let mode: SourceKind = 'image';
 let renderTimer: number | null = null;
+const smokeMode = new URLSearchParams(window.location.search).has('smoke');
 
 function appendLog(message: string): void {
   const line = `[${new Date().toLocaleTimeString()}] ${message}`;
@@ -156,6 +157,11 @@ function toSource(kind: SourceKind, url: string): Source {
   return { type: 'file', url, preferTech: 'file' };
 }
 
+function syncOrientationDefaults(): void {
+  flipXInput.checked = false;
+  flipYInput.checked = (kindSelect.value as SourceKind) === 'image';
+}
+
 function startStatusLoop(): void {
   if (renderTimer !== null) window.clearInterval(renderTimer);
   renderTimer = window.setInterval(() => {
@@ -228,10 +234,8 @@ async function loadCurrent(): Promise<void> {
       media: mode === 'image' ? 'image' : 'video',
       image: mode === 'image' ? url : undefined,
       crossOrigin: 'anonymous',
-      preserveDrawingBuffer: true,
-      maxPixelRatio: 1,
-      maxCanvasPixels: 1280 * 720,
-      maxVideoFps: mode === 'webrtc' ? 24 : 30,
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: smokeMode,
       textureFlipX: flipXInput.checked,
       textureFlipY: flipYInput.checked,
       onReady: (nextHandle) => {
@@ -278,8 +282,10 @@ resetButton.onclick = () => {
 
 urlInput.value = createFixturePanoramaUrl();
 kindSelect.value = detectKind(urlInput.value);
+syncOrientationDefaults();
 kindSelect.onchange = () => {
   const selected = kindSelect.value as SourceKind;
+  syncOrientationDefaults();
   if (selected === 'image') {
     urlInput.value = createFixturePanoramaUrl();
   } else if (urlInput.value.startsWith('data:image/')) {
@@ -302,6 +308,7 @@ kindSelect.onchange = () => {
   setSource(kind: SourceKind, url: string) {
     kindSelect.value = kind;
     urlInput.value = url;
+    syncOrientationDefaults();
   },
 };
 

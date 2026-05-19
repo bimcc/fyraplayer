@@ -1043,7 +1043,7 @@ const player = new FyraPlayer({
       interactive: true,
       initialView: { yaw: 0, pitch: 0, fov: 80 },
       maxPixelRatio: 1.5,
-      maxVideoFps: 30
+      powerPreference: 'high-performance'
     })
   ]
 });
@@ -1075,6 +1075,7 @@ interface PanoramaLitePluginOptions {
   maxPixelRatio?: number
   maxCanvasPixels?: number
   maxVideoFps?: number
+  powerPreference?: WebGLPowerPreference
   textureFlipX?: boolean
   textureFlipY?: boolean
   preserveDrawingBuffer?: boolean
@@ -1093,12 +1094,19 @@ The plugin emits QoS codes such as `PANORAMALITE_UNSUPPORTED`,
 `PANORAMALITE_CONTEXT_LOST`, `PANORAMALITE_CONTEXT_RESTORED`, and
 `PANORAMALITE_TEXTURE_ERROR`.
 
-For live/WebRTC panorama scenes, tune `maxVideoFps`, `maxCanvasPixels`, and
-`maxPixelRatio` before changing media Tech settings. `textureFlipX` and
-`textureFlipY` are source-orientation corrections; use the generated demo grid
-to confirm upside-down or mirrored streams before enabling them. Browser pixel
-evidence for image, file/video, HLS, live HLS, and live WebRTC is tracked in
-`docs/panoramalite.md`.
+For live/WebRTC panorama scenes, the default strategy preserves quality:
+PanoramaLite skips duplicate video frames, uploads textures only for real new
+frames, coalesces work through `requestAnimationFrame()`, avoids per-frame
+layout reads, disables `preserveDrawingBuffer`, and requests a high-performance
+WebGL context. `maxVideoFps`, `maxCanvasPixels`, and lower `maxPixelRatio`
+values are explicit fallback knobs for constrained devices or dense
+multi-view dashboards.
+
+`textureFlipX` and `textureFlipY` are source-orientation corrections. Images
+default to `textureFlipY: true`; videos default to `textureFlipY: false`. Use
+the generated demo grid to confirm upside-down or mirrored streams before
+overriding them. Browser pixel evidence for image, file/video, HLS, live HLS,
+and live WebRTC is tracked in `docs/panoramalite.md`.
 
 ## Storage And Reconnect Plugins
 

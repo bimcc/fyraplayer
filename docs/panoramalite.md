@@ -97,8 +97,7 @@ const player = new FyraPlayer({
       projection: 'equirectangular',
       interactive: true,
       initialView: { yaw: 0, pitch: 0, fov: 80 },
-      maxVideoFps: 30,
-      maxCanvasPixels: 1280 * 720,
+      powerPreference: 'high-performance',
     }),
   ],
 });
@@ -119,6 +118,7 @@ export interface PanoramaLitePluginOptions {
   maxPixelRatio?: number;
   maxCanvasPixels?: number;
   maxVideoFps?: number;
+  powerPreference?: WebGLPowerPreference;
   textureFlipX?: boolean;
   textureFlipY?: boolean;
   preserveDrawingBuffer?: boolean;
@@ -165,9 +165,10 @@ Defaults:
 - `pixelRatio: 'auto'`;
 - `maxPixelRatio: 1.5`;
 - `maxCanvasPixels: undefined`;
-- `maxVideoFps: 30`;
+- `maxVideoFps: undefined`;
+- `powerPreference: 'high-performance'`;
 - `textureFlipX: false`;
-- `textureFlipY: false`;
+- `textureFlipY: false` for video sources, `true` for image sources;
 - `preserveDrawingBuffer: false`;
 - `hideSourceVideo: true`.
 
@@ -223,14 +224,25 @@ Renderer details:
 - use simple vertex/fragment shaders and one texture sampler;
 - upload video frames through `texSubImage2D`;
 - prefer `HTMLVideoElement.requestVideoFrameCallback()` for video texture
-  updates and fall back to readiness/progress events;
-- cap video texture uploads through `maxVideoFps` so WebRTC/live panorama
-  playback does not upload every camera frame on constrained clients;
-- cap canvas backing-store pixels through `maxCanvasPixels` in addition to
-  `maxPixelRatio` to protect high-DPI laptops and 4K displays;
+  updates, skip duplicate `presentedFrames` / `mediaTime`, and fall back to
+  readiness/progress events;
+- coalesce video frame callbacks, input changes, and resize notifications into
+  `requestAnimationFrame()` so the renderer uploads and draws at most once per
+  display frame;
+- resize through `ResizeObserver` dirty flags instead of reading layout on
+  every render;
+- request the WebGL context with `powerPreference: 'high-performance'` by
+  default, while allowing integrations to override it;
 - do not generate mipmaps for live video textures;
 - use `CLAMP_TO_EDGE` and `LINEAR` filtering;
-- cap canvas device pixel ratio to protect fill rate on high-DPI displays;
+- keep `preserveDrawingBuffer` disabled outside screenshots/automation because
+  it can add GPU synchronization cost;
+- cap canvas device pixel ratio through `maxPixelRatio` only as an explicit
+  quality/performance tradeoff;
+- cap video texture uploads through `maxVideoFps` only as an explicit fallback
+  on constrained devices;
+- cap canvas backing-store pixels through `maxCanvasPixels` only as an explicit
+  fallback for high-DPI laptops, 4K displays, or many simultaneous viewers;
 - check `gl.MAX_TEXTURE_SIZE` before binding large images or videos when
   dimensions are known.
 
@@ -332,8 +344,30 @@ Orientation and calibration:
 - WebGL upload keeps `UNPACK_FLIP_Y_WEBGL` disabled by default, so image/video
   orientation is controlled in shader texture coordinates instead of hidden
   upload state;
+- image sources default to `textureFlipY: true`, while video sources default to
+  `textureFlipY: false`. The generated canvas/image fixture and browser video
+  textures land with different practical Y orientation in the current renderer,
+  so a single shared default would make one side appear upside down;
 - if a camera or encoder outputs inverted equirectangular frames, confirm it
   with the grid first, then set `textureFlipY: true` at integration level.
+
+Performance interpretation:
+
+- A single equirectangular sphere does not render the whole 360 frame to the
+  screen; the GPU shades the visible canvas pixels. "Render only the visible
+  range" is therefore already the normal rasterization behavior for this
+  renderer.
+- The expensive parts in live panorama are usually browser media decode timing,
+  full video-frame texture upload, high-DPI canvas fill rate, and WebRTC
+  network jitter. HLS often feels smoother because its buffer hides short-term
+  jitter; WebRTC exposes it sooner by design.
+- First-line optimizations must preserve quality: skip duplicate video frames,
+  upload only when a real new frame arrives, coalesce render work into RAF,
+  avoid per-frame layout reads, keep `preserveDrawingBuffer` off, and prefer the
+  high-performance WebGL context.
+- Quality-reducing controls (`maxVideoFps`, `maxCanvasPixels`, lower
+  `maxPixelRatio`) are opt-in fallback knobs for weak clients or multi-view
+  dashboards, not demo or SDK defaults.
 
 ## 11. Implementation Milestones
 
@@ -348,7 +382,7 @@ Orientation and calibration:
 | PLITE-007 | doing | Implement lifecycle and context recovery | Destroy/init-failure cleanup is unit-covered; smoke verifies canvas removal after destroy; source switch/context-restored browser evidence remains pending |
 | PLITE-008 | done | Add example/demo preset | `examples/panoramalite.html` can load image/video/HLS/DASH/WebRTC sources and exposes a smoke API |
 | PLITE-009 | done for smoke scope | Add browser verification records | Matrix documents image, file/video, HLS VOD, live HLS, and live WebRTC smoke evidence; long-run/resource-leak evidence can be tracked separately |
-| PLITE-010 | doing | Add orientation/performance hardening | Default demo calibration grid exists; texture flip, max video fps, and max canvas pixels are implemented; live WebRTC/HLS manual retest is pending |
+| PLITE-010 | doing | Add orientation/performance hardening | Default demo calibration grid exists; image/video Y defaults are separated; non-degrading scheduling/upload/layout/context optimizations are implemented; default-quality live WebRTC/HLS smoke evidence is pending |
 
 ## 12. Review Log
 
@@ -415,12 +449,14 @@ Orientation and calibration:
 - Stopped forcing `UNPACK_FLIP_Y_WEBGL` on texture upload. Default orientation
   is now controlled by shader texture coordinates and is easier to reason about
   across images and video sources.
-- Added `maxVideoFps` and `maxCanvasPixels`. These are the current practical
-  performance controls for WebRTC/live panorama rendering because the single
-  sphere is already rasterized only to visible screen pixels; the expensive
-  part is full-frame texture upload and high-DPI canvas fill rate.
-- Demo defaults now use `maxPixelRatio: 1`, `maxCanvasPixels: 1280 * 720`,
-  `maxVideoFps: 24` for WebRTC, and `maxVideoFps: 30` for other video sources.
+- Added `maxVideoFps` and `maxCanvasPixels` as explicit fallback controls for
+  WebRTC/live panorama rendering because the single sphere is already
+  rasterized only to visible screen pixels; the expensive part is full-frame
+  texture upload and high-DPI canvas fill rate.
+- Earlier demo validation used conservative caps (`maxPixelRatio: 1`,
+  `maxCanvasPixels: 1280 * 720`, `maxVideoFps: 24/30`) to prove live stability
+  quickly. These caps are no longer SDK/demo defaults; they remain opt-in
+  fallback knobs.
 - Validation:
   - `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed,
     8 tests.
@@ -430,6 +466,33 @@ Orientation and calibration:
   - `cmd /c pnpm smoke:panoramalite -- --scenario image --duration 2s --out .fyra-long-run\panoramalite-grid-image-edge.json --fail-on-error`: passed.
   - `cmd /c pnpm smoke:panoramalite -- --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 12s --out .fyra-long-run\panoramalite-hls-live-optimized-edge.json --fail-on-error`: passed.
   - `cmd /c pnpm smoke:panoramalite -- --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 6s --out .fyra-long-run\panoramalite-webrtc-live-optimized-edge-retry.json --fail-on-error`: passed after one CDP-only retry.
+
+### 2026-05-19 Default Quality Orientation And Scheduling Pass
+
+- Split `textureFlipY` defaults by source type: images default to `true`,
+  videos default to `false`, and explicit integration options still override.
+  This matches the observed generated-grid image orientation without flipping
+  the MediaMTX/WebRTC video path that was already upright.
+- Added unit coverage for image-up and video-neutral Y defaults.
+- Removed demo-level default caps for `maxPixelRatio`, `maxCanvasPixels`, and
+  `maxVideoFps`. The demo now preserves quality by default; the caps remain
+  public opt-in fallbacks.
+- Limited `preserveDrawingBuffer` to `?smoke=1` automation mode because normal
+  interactive playback does not need readback-stable buffers.
+- Added non-degrading live-render optimizations:
+  - use request-video-frame metadata to skip duplicate frames;
+  - mark video frames dirty and upload only real new frames;
+  - coalesce frame, input, and resize work through RAF;
+  - use `ResizeObserver` dirty flags to avoid layout reads on every render;
+  - cache `gl.MAX_TEXTURE_SIZE`;
+  - request a high-performance WebGL context by default.
+- Validation:
+  - `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+  - `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed,
+    10 tests.
+  - `cmd /c pnpm smoke:panoramalite -- --scenario image --duration 2s --out .fyra-long-run\panoramalite-grid-image-orientation-default-quality-edge.json --fail-on-error`: passed.
+  - `cmd /c pnpm smoke:panoramalite -- --port 4201 --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 12s --out .fyra-long-run\panoramalite-hls-live-default-quality-edge.json --fail-on-error`: passed.
+  - `cmd /c pnpm smoke:panoramalite -- --port 4202 --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 10s --out .fyra-long-run\panoramalite-webrtc-live-default-quality-edge.json --fail-on-error`: passed.
 
 ## 13. Advanced Plugin Boundary
 
