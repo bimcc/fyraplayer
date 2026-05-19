@@ -279,9 +279,9 @@ class CdpSession {
 }
 
 function defaultUrlForScenario(scenario) {
-  if (scenario === 'file') return 'https://cdn.bitmovin.com/content/assets/playhouse-vr/progressive.mp4';
-  if (scenario === 'hls') return 'https://cdn.bitmovin.com/content/assets/playhouse-vr/m3u8s/105560.m3u8';
-  if (scenario === 'dash') return 'https://cdn.bitmovin.com/content/assets/playhouse-vr/mpds/105560.mpd';
+  if (scenario === 'file') return '/testvideo/Rec%200017.mp4';
+  if (scenario === 'hls') return 'https://naver.github.io/egjs-view360/pano/equirect/m3u8/equi.m3u8';
+  if (scenario === 'dash') return 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd';
   if (scenario === 'webrtc') return 'http://127.0.0.1:28889/live/test/whep';
   return '';
 }
@@ -429,12 +429,14 @@ function summarize(report) {
   const pixelDelta = report.canvas?.pixelDelta ?? 0;
   const videoReady = report.scenario === 'image'
     || (report.video?.readyState >= 2 && (report.video?.currentTime > 0 || (report.video?.totalFrames ?? 0) > 0));
+  const rollStableAfterDrag = Math.abs((report.view?.after?.roll ?? 0) - (report.view?.before?.roll ?? 0)) < 0.1;
   return {
     scenario: report.scenario,
     canvasReady: report.canvas?.width > 0 && report.canvas?.height > 0,
     nonBlankCanvas: nonBlack >= 2 && unique >= 2,
     viewChanged: !!report.view?.changed,
     pixelChangedAfterDrag: pixelDelta > 24,
+    rollStableAfterDrag,
     videoReady,
     destroyedCanvas: report.canvas?.countAfterDestroy === 0,
     pixelDelta,
@@ -541,6 +543,7 @@ async function main() {
         || !report.summary.nonBlankCanvas
         || !report.summary.viewChanged
         || !report.summary.pixelChangedAfterDrag
+        || !report.summary.rollStableAfterDrag
         || !report.summary.videoReady
         || !report.summary.destroyedCanvas;
       if (failed) process.exitCode = 1;

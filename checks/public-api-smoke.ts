@@ -490,6 +490,7 @@ const panoramaOptions: PanoramaLitePluginOptions = {
   target: '.player-shell',
   media: 'video',
   projection: 'equirectangular',
+  enabled: false,
   interactive: true,
   initialView: { yaw: 0, pitch: 0, fov: 80 },
   limits: { minFov: 35, maxFov: 110 },
@@ -502,6 +503,8 @@ const panoramaOptions: PanoramaLitePluginOptions = {
 createPanoramaLitePlugin(panoramaOptions);
 const panoramaOptionsFromPlugins: PanoramaLitePluginOptionsFromPlugins = panoramaOptions;
 createPanoramaLitePluginFromPlugins(panoramaOptionsFromPlugins);
+panoramaHandle?.setEnabled(true);
+panoramaHandle?.isEnabled().valueOf();
 panoramaHandle?.setView({ yaw: 45 });
 panoramaHandle?.getView().fov.toFixed();
 const panoramaMesh = createEquirectSphereMesh({ widthSegments: 16, heightSegments: 8 });

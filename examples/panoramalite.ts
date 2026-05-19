@@ -6,12 +6,19 @@ type SourceKind = 'image' | 'file' | 'hls' | 'dash' | 'webrtc';
 
 const shell = document.getElementById('pano-shell') as HTMLElement;
 const video = document.getElementById('video') as HTMLVideoElement;
+const presetSelect = document.getElementById('source-preset') as HTMLSelectElement;
 const urlInput = document.getElementById('source-url') as HTMLInputElement;
 const kindSelect = document.getElementById('source-kind') as HTMLSelectElement;
+const panoramaEnabledInput = document.getElementById('panorama-enabled') as HTMLInputElement;
 const flipXInput = document.getElementById('flip-x') as HTMLInputElement;
 const flipYInput = document.getElementById('flip-y') as HTMLInputElement;
 const loadButton = document.getElementById('load') as HTMLButtonElement;
 const resetButton = document.getElementById('reset') as HTMLButtonElement;
+const pluginsToggleButton = document.getElementById('plugins-toggle') as HTMLButtonElement;
+const pluginPanel = document.getElementById('plugin-panel') as HTMLDivElement;
+const pluginConfiguredEl = document.getElementById('plugin-configured') as HTMLSpanElement;
+const pluginActiveEl = document.getElementById('plugin-active') as HTMLSpanElement;
+const pluginModeEl = document.getElementById('plugin-mode') as HTMLSpanElement;
 const stateEl = document.getElementById('state') as HTMLDivElement;
 const viewEl = document.getElementById('view') as HTMLDivElement;
 const videoInfoEl = document.getElementById('video-info') as HTMLDivElement;
@@ -23,6 +30,23 @@ let handle: PanoramaLiteHandle | null = null;
 let mode: SourceKind = 'image';
 let renderTimer: number | null = null;
 const smokeMode = new URLSearchParams(window.location.search).has('smoke');
+const NAVER_PANORAMA_HLS_URL = 'https://naver.github.io/egjs-view360/pano/equirect/m3u8/equi.m3u8';
+const RADIANT_PANORAMA_HLS_URL = 'https://cdn.radiantmediatechs.com/rmp/media/samples-for-rmp-site/04052024-lac-de-bimont/hls/playlist.m3u8';
+const ELECTROTEQUE_PANORAMA_HLS_URL = 'https://videos.electroteque.org/360/hls/ultra_light_flight.m3u8';
+const MEDIAMTX_HLS_URL = 'http://127.0.0.1:28888/live/test/index.m3u8';
+const MEDIAMTX_WHEP_URL = 'http://127.0.0.1:28889/live/test/whep';
+const LOCAL_MP4_URL = '/testvideo/Rec%200017.mp4';
+const GENERIC_DASH_URL = 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd';
+
+const presetSources: Record<string, { kind: SourceKind; url: string | (() => string) }> = {
+  'generated-image': { kind: 'image', url: createFixturePanoramaUrl },
+  'naver-hls': { kind: 'hls', url: NAVER_PANORAMA_HLS_URL },
+  'radiant-hls': { kind: 'hls', url: RADIANT_PANORAMA_HLS_URL },
+  'electroteque-hls': { kind: 'hls', url: ELECTROTEQUE_PANORAMA_HLS_URL },
+  'mediamtx-hls': { kind: 'hls', url: MEDIAMTX_HLS_URL },
+  'mediamtx-webrtc': { kind: 'webrtc', url: MEDIAMTX_WHEP_URL },
+  'local-mp4': { kind: 'file', url: LOCAL_MP4_URL },
+};
 
 function appendLog(message: string): void {
   const line = `[${new Date().toLocaleTimeString()}] ${message}`;
@@ -158,9 +182,34 @@ function toSource(kind: SourceKind, url: string): Source {
 }
 
 function syncOrientationDefaults(): void {
-  const sourceKind = kindSelect.value as SourceKind;
-  flipXInput.checked = sourceKind !== 'image';
-  flipYInput.checked = sourceKind === 'image';
+  flipXInput.checked = false;
+  flipYInput.checked = false;
+}
+
+function defaultUrlForKind(kind: SourceKind): string {
+  if (kind === 'image') return createFixturePanoramaUrl();
+  if (kind === 'hls') return NAVER_PANORAMA_HLS_URL;
+  if (kind === 'webrtc') return MEDIAMTX_WHEP_URL;
+  if (kind === 'dash') return GENERIC_DASH_URL;
+  return LOCAL_MP4_URL;
+}
+
+function applyPreset(value: string): void {
+  const preset = presetSources[value];
+  if (!preset) return;
+  kindSelect.value = preset.kind;
+  urlInput.value = typeof preset.url === 'function' ? preset.url() : preset.url;
+  syncOrientationDefaults();
+}
+
+function updatePluginPanel(): void {
+  const enabled = handle?.isEnabled() ?? panoramaEnabledInput.checked;
+  const activePlugins = handle ? [`panoramalite:${enabled ? 'on' : 'standby'}`] : [];
+  pluginConfiguredEl.textContent = 'panoramalite';
+  pluginActiveEl.textContent = activePlugins.length ? activePlugins.join(', ') : 'none';
+  pluginModeEl.textContent = enabled
+    ? `panorama renderer / ${mode}`
+    : `ordinary video / ${mode}`;
 }
 
 function startStatusLoop(): void {
@@ -168,11 +217,12 @@ function startStatusLoop(): void {
   renderTimer = window.setInterval(() => {
     const view = handle?.getView();
     viewEl.textContent = view
-      ? `view: yaw ${view.yaw.toFixed(1)} / pitch ${view.pitch.toFixed(1)} / fov ${view.fov.toFixed(1)}`
+      ? `view: yaw ${view.yaw.toFixed(1)} / pitch ${view.pitch.toFixed(1)} / roll ${view.roll.toFixed(1)} / fov ${view.fov.toFixed(1)}`
       : 'view: -';
     videoInfoEl.textContent = `video: ${video.videoWidth || '-'}x${video.videoHeight || '-'} / t ${video.currentTime.toFixed(2)}`;
     const canvas = shell.querySelector('canvas') as HTMLCanvasElement | null;
     canvasInfoEl.textContent = canvas ? `canvas: ${canvas.width}x${canvas.height}` : 'canvas: -';
+    updatePluginPanel();
   }, 250);
 }
 
@@ -234,6 +284,7 @@ async function loadCurrent(): Promise<void> {
       target: shell,
       media: mode === 'image' ? 'image' : 'video',
       image: mode === 'image' ? url : undefined,
+      enabled: panoramaEnabledInput.checked,
       crossOrigin: 'anonymous',
       powerPreference: 'high-performance',
       preserveDrawingBuffer: smokeMode,
@@ -242,6 +293,7 @@ async function loadCurrent(): Promise<void> {
       textureFlipY: flipYInput.checked,
       onReady: (nextHandle) => {
         handle = nextHandle;
+        updatePluginPanel();
       },
       onError: (error) => appendLog(`panoramalite error: ${error instanceof Error ? error.message : String(error)}`),
     }),
@@ -282,22 +334,34 @@ resetButton.onclick = () => {
   handle?.resetView();
 };
 
-urlInput.value = createFixturePanoramaUrl();
-kindSelect.value = detectKind(urlInput.value);
-syncOrientationDefaults();
+panoramaEnabledInput.onchange = () => {
+  handle?.setEnabled(panoramaEnabledInput.checked);
+  updatePluginPanel();
+};
+
+pluginsToggleButton.onclick = () => {
+  const expanded = pluginPanel.hidden;
+  pluginPanel.hidden = !expanded;
+  pluginsToggleButton.setAttribute('aria-expanded', String(expanded));
+  updatePluginPanel();
+};
+
+presetSelect.value = 'generated-image';
+applyPreset(presetSelect.value);
+updatePluginPanel();
+presetSelect.onchange = () => {
+  if (presetSelect.value === 'custom') return;
+  applyPreset(presetSelect.value);
+};
+urlInput.oninput = () => {
+  presetSelect.value = 'custom';
+};
 kindSelect.onchange = () => {
   const selected = kindSelect.value as SourceKind;
+  presetSelect.value = 'custom';
   syncOrientationDefaults();
-  if (selected === 'image') {
-    urlInput.value = createFixturePanoramaUrl();
-  } else if (urlInput.value.startsWith('data:image/')) {
-    urlInput.value = selected === 'hls'
-      ? 'https://cdn.bitmovin.com/content/assets/playhouse-vr/m3u8s/105560.m3u8'
-      : selected === 'dash'
-        ? 'https://cdn.bitmovin.com/content/assets/playhouse-vr/mpds/105560.mpd'
-        : selected === 'webrtc'
-          ? 'http://127.0.0.1:28889/live/test/whep'
-          : 'https://cdn.bitmovin.com/content/assets/playhouse-vr/progressive.mp4';
+  if (urlInput.value.startsWith('data:image/') || !urlInput.value.trim()) {
+    urlInput.value = defaultUrlForKind(selected);
   }
 };
 
@@ -308,6 +372,7 @@ kindSelect.onchange = () => {
   getPlayer: () => player,
   getCanvas: () => shell.querySelector('canvas'),
   setSource(kind: SourceKind, url: string) {
+    presetSelect.value = 'custom';
     kindSelect.value = kind;
     urlInput.value = url;
     syncOrientationDefaults();

@@ -118,6 +118,26 @@ const player = new FyraPlayer({
 await player.init();
 ```
 
+### 插件能力速查
+
+FyraPlayer 的核心只负责播放生命周期、Tech 选择、事件和中间件执行。产品能力通过插件显式启用，推荐从独立子路径导入，避免把不需要的能力打进业务包。
+
+| 插件入口 | 工厂/能力 | 适用场景 |
+|---|---|---|
+| `fyraplayer/plugins/ui-components` | `createUiComponentsPlugin()` | 播放控制条、质量/源选择、重试、截图入口、录制按钮钩子 |
+| `fyraplayer/plugins/diagnostics` | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | 当前状态、最近错误/网络/QoS/ICE 线索、诊断导出和调试面板 |
+| `fyraplayer/plugins/storage` | `createStoragePlugin()` | 音量、静音、倍速、清晰度、低延迟偏好和上次播放源持久化 |
+| `fyraplayer/plugins/auth` | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | 请求头、凭证、Token、URL 签名和显式 401/403 恢复 |
+| `fyraplayer/plugins/recording-api` | `createRecordingApiPlugin()` | 对接后端开始/停止/查询录制；不做浏览器本地录制 |
+| `fyraplayer/plugins/performance` | `createPerformanceMonitorPlugin()` | FPS、延迟、pending buffer 等性能预算告警 |
+| `fyraplayer/plugins/metrics` | `createMetricsPlugin()` | 业务自定义指标回调或上报适配 |
+| `fyraplayer/plugins/reconnect` | `createReconnectPlugin()` | 重连事件日志和产品侧回调；不替代核心重连策略 |
+| `fyraplayer/plugins/metadata` | `createMetadataPlugin()`, `KlvBridge` | KLV/SEI/private-data 等元数据业务解析 |
+| `fyraplayer/plugins/engines` | `createSourceResolverMiddleware()` | MediaMTX/OME 等服务端播放 URL 到 source/fallback 链的转换 |
+| `fyraplayer/plugins/panoramalite` | `createPanoramaLitePlugin()` | 轻量 WebGL2 全景图片、全景视频和全景直播渲染 |
+
+插件应在创建 `FyraPlayer` 时通过 `plugins` 数组安装。产品 UI 可以显示已安装插件并开放安全的运行时模式开关，例如 PanoramaLite 的 `handle.setEnabled()`；当前 SDK 不提供任意热安装插件的公共 API。具体边界见 [插件化边界地图](./docs/pluginization-map.md) 和 [SDK 发布与集成](./docs/sdk-release-integration.md)。
+
 ## 使用示例
 
 ### HLS 播放

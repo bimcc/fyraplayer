@@ -3,6 +3,7 @@ import type { PanoramaLiteMediaType, PanoramaLiteViewerControlsOptions } from '.
 export interface PanoramaLiteViewerControls {
   bindVideo(video: HTMLVideoElement, media: PanoramaLiteMediaType): void;
   setMedia(media: PanoramaLiteMediaType): void;
+  setVisible(visible: boolean): void;
   update(): void;
   destroy(): void;
 }
@@ -210,6 +211,9 @@ export function createPanoramaLiteViewerControls(config: PanoramaLiteViewerContr
     setMedia(nextMedia) {
       media = nextMedia;
       update();
+    },
+    setVisible(visible) {
+      toggleElement(root, visible);
     },
     update,
     destroy() {

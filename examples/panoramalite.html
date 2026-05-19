@@ -41,7 +41,7 @@
       }
       .controls {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto auto auto auto auto;
+        grid-template-columns: minmax(150px, 0.85fr) minmax(0, 1.5fr) repeat(7, auto);
         gap: 10px;
         margin-top: 14px;
         align-items: center;
@@ -128,6 +128,32 @@
         font: 12px/1.45 Consolas, "SF Mono", monospace;
         white-space: pre-wrap;
       }
+      .plugin-panel {
+        margin-top: 12px;
+        border: 1px solid #d8dee9;
+        border-radius: 6px;
+        background: #fff;
+        overflow: hidden;
+      }
+      .plugin-panel[hidden] {
+        display: none;
+      }
+      .plugin-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 0.45fr) minmax(0, 1fr);
+        gap: 10px;
+        padding: 9px 10px;
+        border-top: 1px solid #edf1f7;
+        font-size: 12px;
+        color: #334155;
+      }
+      .plugin-row:first-child {
+        border-top: 0;
+      }
+      .plugin-row strong {
+        color: #172033;
+        font-weight: 650;
+      }
       @media (max-width: 720px) {
         body { padding: 12px; }
         .controls {
@@ -152,24 +178,40 @@
         <video id="video" muted playsinline crossorigin="anonymous"></video>
       </div>
       <div class="controls">
+        <select id="source-preset" aria-label="Preset source">
+          <option value="generated-image">Generated grid</option>
+          <option value="naver-hls">Naver equirect HLS</option>
+          <option value="radiant-hls">Radiant Lac de Bimont HLS</option>
+          <option value="electroteque-hls">Electroteque flight HLS</option>
+          <option value="mediamtx-hls">MediaMTX HLS local</option>
+          <option value="mediamtx-webrtc">MediaMTX WebRTC local</option>
+          <option value="local-mp4">Local MP4 file</option>
+          <option value="custom">Custom URL</option>
+        </select>
         <input id="source-url" type="text" />
         <select id="source-kind">
           <option value="image">Image</option>
           <option value="file">MP4/File</option>
           <option value="hls">HLS</option>
-          <option value="dash">DASH</option>
           <option value="webrtc">WebRTC</option>
         </select>
+        <label class="toggle"><input id="panorama-enabled" type="checkbox" checked />Panorama</label>
         <label class="toggle"><input id="flip-x" type="checkbox" />Flip X</label>
         <label class="toggle"><input id="flip-y" type="checkbox" />Flip Y</label>
         <button id="load" class="primary">Load</button>
         <button id="reset">Reset</button>
+        <button id="plugins-toggle" aria-expanded="false" aria-controls="plugin-panel">Plugins</button>
       </div>
       <div class="status">
         <div class="metric" id="state">state: idle</div>
         <div class="metric" id="view">view: -</div>
         <div class="metric" id="video-info">video: -</div>
         <div class="metric" id="canvas-info">canvas: -</div>
+      </div>
+      <div class="plugin-panel" id="plugin-panel" hidden>
+        <div class="plugin-row"><strong>Configured</strong><span id="plugin-configured">-</span></div>
+        <div class="plugin-row"><strong>Active</strong><span id="plugin-active">-</span></div>
+        <div class="plugin-row"><strong>Mode</strong><span id="plugin-mode">-</span></div>
       </div>
       <div class="log" id="log"></div>
     </main>

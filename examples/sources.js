@@ -18,9 +18,9 @@ export default [
   { type: 'dash', url: 'https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd', preferTech: 'dash' },
   
   // === 全景视频测试流 (360°) ===
-  { type: 'hls', url: 'https://cdn.bitmovin.com/content/assets/playhouse-vr/m3u8s/105560.m3u8', preferTech: 'hls', panorama: true },
-  { type: 'dash', url: 'https://cdn.bitmovin.com/content/assets/playhouse-vr/mpds/105560.mpd', preferTech: 'dash', panorama: true },
-  { type: 'file', url: 'https://cdn.bitmovin.com/content/assets/playhouse-vr/progressive.mp4', panorama: true },
+  { label: 'Panorama HLS - Naver equirect', type: 'hls', url: 'https://naver.github.io/egjs-view360/pano/equirect/m3u8/equi.m3u8', preferTech: 'hls', panorama: true },
+  { label: 'Panorama HLS - Radiant Lac de Bimont', type: 'hls', url: 'https://cdn.radiantmediatechs.com/rmp/media/samples-for-rmp-site/04052024-lac-de-bimont/hls/playlist.m3u8', preferTech: 'hls', panorama: true },
+  { label: 'Panorama HLS - Electroteque Ultra Light Flight', type: 'hls', url: 'https://videos.electroteque.org/360/hls/ultra_light_flight.m3u8', preferTech: 'hls', panorama: true },
   
   // === MP4 文件 ===
   { type: 'file', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4' },

@@ -111,7 +111,7 @@ const presetSources: SimpleSource[] = [
 
 defaultSources?.forEach((s: any, idx: number) => {
   presetSources.push({
-    label: `Default ${idx} - ${s.type}`,
+    label: s.label || `Default ${idx} - ${s.type}`,
     type: s.type,
     url: s.url,
     lowLatency: (s as any).lowLatency,

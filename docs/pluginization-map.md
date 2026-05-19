@@ -49,6 +49,36 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 | Third-party Techs | `PluginContext.techs.register()` | `src/types.ts`, `src/player.ts`, `src/core/techManager.ts` | Controlled plugin API for custom Tech registration, replacement, tech-order insertion, and teardown |
 | Custom plugins | `PluginCtor` | `src/types.ts` | Supports lifecycle with optional `destroy()` |
 
+### 2.1 Public Plugin Entry Points
+
+Use these subpaths for product integrations. Prefer the narrow subpath over the
+aggregate `fyraplayer/plugins` import when bundle size matters.
+
+| Entry | Main Factory / Type | Runtime Ownership | Notes |
+|---|---|---|---|
+| `fyraplayer/plugins/ui-components` | `createUiComponentsPlugin()` | Product-owned UI shell | Optional controls, status overlay, retry, screenshot callback, diagnostics entry, and recording toggle hook |
+| `fyraplayer/plugins/diagnostics` | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | Support/QA tooling | Collects state/source/Tech/recent events and can export diagnostic JSON |
+| `fyraplayer/plugins/storage` | `createStoragePlugin()` | Browser preference persistence | Stores only local playback preferences; not account/cloud sync |
+| `fyraplayer/plugins/auth` | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | App/backend auth policy | Injects headers/credentials/tokens/signatures and optionally reloads current source on explicit auth expiry |
+| `fyraplayer/plugins/recording-api` | `createRecordingApiPlugin()` | Backend recording service | API control only; browser-side local recording stays out of scope |
+| `fyraplayer/plugins/performance` | `createPerformanceMonitorPlugin()` | QA/performance budget | Emits warnings; does not change playback behavior |
+| `fyraplayer/plugins/metrics` | `createMetricsPlugin()` | Product reporter/exporter | Products decide endpoint, batching, privacy, and sampling policy |
+| `fyraplayer/plugins/reconnect` | `createReconnectPlugin()` | Product observability | Logs/callbacks only; core player owns reconnect/fallback policy |
+| `fyraplayer/plugins/metadata` | `createMetadataPlugin()`, `KlvBridge` | Domain parser | KLV/SEI/private data semantics remain product-specific |
+| `fyraplayer/plugins/engines` | `createSourceResolverMiddleware()` | Stream-server adapter | Converts vendor/project URLs into concrete `Source` fallback chains |
+| `fyraplayer/plugins/panoramalite` | `createPanoramaLitePlugin()` | First-party renderer plugin | WebGL2 equirectangular image/video/live panorama renderer without Three.js/PSV dependency |
+
+Installation policy:
+
+- Plugins are installed through the `FyraPlayer` constructor `plugins` array.
+- A product may expose safe runtime controls for an installed plugin, such as
+  PanoramaLite ordinary/panorama mode switching through `handle.setEnabled()`.
+- Arbitrary end-user plugin installation is not part of the public 1.0 API.
+- If a plugin is not installed on a player instance, recreate the player with
+  the required plugin instead of mutating internal plugin manager state.
+- Keep plugin state scoped and lifecycle-safe: detach DOM listeners, bus
+  listeners, timers, network requests, and renderer resources in `destroy()`.
+
 ---
 
 ## 3. Modular But Not Yet Standard Plugins
@@ -78,7 +108,8 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 | Performance Monitor | P2 | done | Sampling/budget rules are optional and product-tunable |
 | Screenshot / Recording | P2 | done for current scope | UI screenshot download/feedback and recording toggle hook exist; backend recording API plugin supports start/stop/status, structured recording events, and normalized backend errors. Browser-side recording, permissions, storage, retention, and privacy policy stay out of scope/product-owned |
 | Render Target Bridge | P2 | done for player package boundary | `docs/render-bridges.md` documents external bridge ownership and supported video/canvas/event/metadata outputs; concrete PSV/Cesium/map adapters remain external |
-| PanoramaLite | P2 | done for product-demo scope; hardening continues | First-party lightweight WebGL2 equirectangular panorama renderer plugin for panoramic video, panoramic images, and live panorama playback. API, renderer, texture binding, panorama drag/zoom, optional in-view playback/fullscreen controls, source-type orientation defaults, non-degrading render scheduling, unit coverage, demo, and Edge smoke evidence exist. Upload/canvas caps remain optional fallback knobs. Keep it dependency-free; see `docs/panoramalite.md` |
+| PanoramaLite | P2 | done for product-demo scope; hardening continues | First-party lightweight WebGL2 equirectangular panorama renderer plugin for panoramic video, panoramic images, and live panorama playback. API, renderer, texture binding, runtime ordinary/panorama mode toggle, panorama drag/zoom, optional in-view playback/fullscreen controls, source-type orientation defaults, non-degrading render scheduling, unit coverage, demo, and Edge smoke evidence exist. Upload/canvas caps remain optional fallback knobs. Keep it dependency-free; see `docs/panoramalite.md` |
+| Panorama gyro / WebXR mode | P3 | deferred | Default PanoramaLite should remain screen-oriented yaw/pitch/fov playback. DeviceOrientation gyro and headset/WebXR stereo presentation require permissions, calibration, session lifecycle, and device-specific input handling, so they should be explicit opt-in modes or separate plugins. |
 | DRM | P3 | deferred | Requires EME/license/vendor config; not current focus |
 | Subtitles/Text Tracks | P3 | deferred | Important later, but should not block playback stabilization |
 | Ads / SSAI / CSAI | P3 | deferred | Product/business feature; separate lifecycle and compliance concerns |

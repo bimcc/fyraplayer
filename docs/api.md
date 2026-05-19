@@ -1069,6 +1069,7 @@ interface PanoramaLitePluginOptions {
   media?: 'video' | 'image'
   image?: string | HTMLImageElement | ImageBitmap
   projection?: 'equirectangular'
+  enabled?: boolean
   interactive?: boolean
   viewerControls?: boolean | PanoramaLiteViewerControlsOptions
   initialView?: Partial<PanoramaLiteView>
@@ -1100,12 +1101,30 @@ interface PanoramaLiteViewerControlsOptions {
 }
 ```
 
-`PanoramaLiteHandle` exposes `setView()`, `getView()`, `resetView()`,
-`bindVideo()`, `setImage()`, `setInteractive()`, `resize()`, and `destroy()`.
+`PanoramaLiteHandle` exposes `setEnabled()`, `isEnabled()`, `setView()`,
+`getView()`, `resetView()`, `bindVideo()`, `setImage()`, `setInteractive()`,
+`resize()`, and `destroy()`.
 The plugin emits QoS codes such as `PANORAMALITE_UNSUPPORTED`,
 `PANORAMALITE_READY`, `PANORAMALITE_RENDER_ERROR`,
 `PANORAMALITE_CONTEXT_LOST`, `PANORAMALITE_CONTEXT_RESTORED`, and
 `PANORAMALITE_TEXTURE_ERROR`.
+
+Plugin installation and panorama mode are intentionally separate. If the plugin
+is installed when the player is created, it can bind the current video element
+and a product can expose a runtime "panorama mode" toggle without reloading the
+stream. Use `enabled: false` to start in ordinary video mode, then call
+`handle.setEnabled(true)` to switch the current media into panorama rendering.
+If the plugin is not installed on that player instance, the current public API
+does not support hot plugin installation; use deployment-level plugin
+configuration or recreate the player with the plugin enabled.
+
+The default interaction model is screen-oriented. Pointer/touch controls change
+yaw/pitch and wheel/pinch changes fov; they do not change roll/Z-axis rotation,
+so normal screen interaction keeps `PanoramaLiteView.roll` unchanged.
+Programmatic `setView({ roll })` remains available for future
+gyro/device-orientation, WebXR, or product-owned orientation integrations.
+Those modes are not implemented in the current plugin and should be treated as
+future opt-in work.
 
 For live/WebRTC panorama scenes, the default strategy preserves quality:
 PanoramaLite skips duplicate video frames, uploads textures only for real new
@@ -1124,10 +1143,10 @@ picture occlusion. The built-in play/pause buttons call FyraPlayer's
 `PlayerAPI`, so application middleware and state transitions remain the single
 playback authority.
 
-`textureFlipX` and `textureFlipY` are source-orientation corrections. Videos
-default to `textureFlipX: true` and `textureFlipY: false` so the panorama view
-matches ordinary video-element left/right orientation. Images default to
-`textureFlipX: false` and `textureFlipY: true`. Use the generated demo grid to
+`textureFlipX` and `textureFlipY` are source-orientation corrections. Image
+and video sources default to `textureFlipX: false` and `textureFlipY: false`;
+the generated demo grid is the zero-flip orientation baseline. Use the
+generated demo grid to
 confirm upside-down or mirrored streams before overriding them. Browser pixel
 evidence for image, file/video, HLS, live HLS, and live WebRTC is tracked in
 `docs/panoramalite.md`.

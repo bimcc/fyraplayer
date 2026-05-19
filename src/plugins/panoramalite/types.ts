@@ -20,6 +20,7 @@ export interface PanoramaLitePluginOptions {
   media?: PanoramaLiteMediaType;
   image?: string | HTMLImageElement | ImageBitmap;
   projection?: PanoramaLiteProjection;
+  enabled?: boolean;
   interactive?: boolean;
   viewerControls?: boolean | PanoramaLiteViewerControlsOptions;
   initialView?: Partial<PanoramaLiteView>;
@@ -51,6 +52,8 @@ export interface PanoramaLiteViewerControlsOptions {
 }
 
 export interface PanoramaLiteHandle {
+  setEnabled(enabled: boolean): void;
+  isEnabled(): boolean;
   setView(view: Partial<PanoramaLiteView>): void;
   getView(): PanoramaLiteView;
   resetView(): void;

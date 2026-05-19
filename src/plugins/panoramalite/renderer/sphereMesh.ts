@@ -43,7 +43,7 @@ export function createEquirectSphereMesh(options: SphereMeshOptions = {}): Panor
       vertices[vertexOffset + 2] = radius * sinTheta * cosPhi;
       vertexOffset += 3;
 
-      uvs[uvOffset] = 1 - u;
+      uvs[uvOffset] = u;
       uvs[uvOffset + 1] = v;
       uvOffset += 2;
     }
@@ -74,4 +74,3 @@ export function createEquirectSphereMesh(options: SphereMeshOptions = {}): Panor
     indexType: useUint32 ? 'uint32' : 'uint16',
   };
 }
-

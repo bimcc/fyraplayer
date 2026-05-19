@@ -1766,9 +1766,10 @@ Validation:
 Summary:
 
 - Separated default `textureFlipY` behavior by media type. Generated panorama
-  images now default to Y-flipped shader coordinates; video/WebRTC/HLS sources
-  default to neutral Y orientation. Explicit `textureFlipY` still overrides for
-  camera-specific integrations.
+  images defaulted to Y-flipped shader coordinates in this pass; this was later
+  corrected because the generated grid must be the zero-flip calibration
+  baseline. Video/WebRTC/HLS sources defaulted to neutral Y orientation.
+  Explicit `textureFlipY` still overrides for camera-specific integrations.
 - Removed normal demo defaults that capped `maxPixelRatio`, `maxCanvasPixels`,
   and `maxVideoFps`. The demo now keeps full quality unless the integrator
   explicitly opts into those fallback knobs.
@@ -1799,7 +1800,8 @@ Summary:
   video matches the ordinary FyraPlayer/video-element left/right orientation.
   This fixes the observed need to click Flip X manually for live/video sources.
 - Kept image-source `textureFlipX` default `false`; image-source vertical
-  orientation remains `textureFlipY: true`.
+  orientation was still `textureFlipY: true` in this pass, then corrected in
+  the image-baseline follow-up.
 - Added optional `viewerControls`, disabled by default for SDK purity and
   enabled in the PanoramaLite demo. The overlay provides in-view play/pause,
   seek for finite media, loop, mute/volume, reset view, and fullscreen controls.
@@ -1810,7 +1812,7 @@ Summary:
 - Routed viewer-control play/pause through the FyraPlayer `PlayerAPI`, and
   exported `PanoramaLiteViewerControlsOptions` from public plugin entry points.
 - Viewer controls are intentionally a lightweight plugin-level affordance for
-  fullscreen/headset-style usage; richer branded controls, WebXR presentation,
+  fullscreen/touch usage; richer branded controls, WebXR presentation,
   keyboard/focus polish, and mobile safe-area polish remain follow-up work.
 
 Validation:
@@ -1821,6 +1823,105 @@ Validation:
 - `cmd /c pnpm smoke:panoramalite -- --port 4224 --scenario image --duration 3s --out .fyra-long-run\panoramalite-viewer-controls-image-edge-20260520-retry.json --fail-on-error`: passed after one concurrent automation timeout.
 - `cmd /c pnpm smoke:panoramalite -- --port 4221 --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 12s --out .fyra-long-run\panoramalite-hls-video-x-default-edge-20260520.json --fail-on-error`: passed.
 - `cmd /c pnpm smoke:panoramalite -- --port 4225 --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 10s --out .fyra-long-run\panoramalite-webrtc-video-x-default-edge-20260520-retry.json --fail-on-error`: passed after one CDP-only timeout.
+
+---
+
+### 2026-05-20 PanoramaLite Image Baseline Orientation Correction
+
+Summary:
+
+- Corrected image-source defaults to `textureFlipX: false` and
+  `textureFlipY: false`.
+- Changed the demo so the generated latitude/longitude grid loads with both
+  `Flip X` and `Flip Y` unchecked. The generated grid is the calibration
+  baseline, not a source that should need default compensation.
+- Corrected the sphere mesh U coordinates from mirrored `1 - u` to standard
+  equirectangular `u` after browser screenshot review showed the zero-flip grid
+  was horizontally mirrored.
+- Changed video-source defaults to the same zero-flip baseline:
+  `textureFlipX: false` and `textureFlipY: false`; explicit flips remain
+  available for deployment-specific camera or encoder exceptions.
+- Updated tests and public docs to remove the older image-Y-flip and
+  video-X-flip assumptions.
+
+Validation:
+
+- Browser screenshot review on `http://127.0.0.1:4197/panoramalite.html`
+  confirmed `Flip X` and `Flip Y` both unchecked with readable `FRONT 0deg`
+  and latitude labels.
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --port 4230 --scenario image --duration 3s --out .fyra-long-run\panoramalite-image-zero-flip-baseline-edge-20260520.json --fail-on-error`: passed.
+
+---
+
+### 2026-05-20 PanoramaLite Demo Source Refresh And Runtime Mode Guidance
+
+Summary:
+
+- Added Naver equirectangular HLS, Radiant Lac de Bimont HLS, and Electroteque
+  Ultra Light Flight HLS to `examples/sources.js` and
+  `examples/panoramalite.html`.
+- Removed the old Bitmovin Playhouse 360 HLS/MP4/DASH demo defaults and stopped
+  using them in the PanoramaLite smoke runner.
+- Added a PanoramaLite demo preset selector for generated image, Naver HLS,
+  Radiant HLS, MediaMTX HLS, MediaMTX WebRTC, local MP4, and custom URL.
+- Added `enabled` / `handle.setEnabled()` runtime mode control so a player that
+  was created with PanoramaLite can switch the current video element between
+  ordinary playback and panorama rendering without reloading the stream.
+- Added a demo plugin-status panel that reports configured plugins, active
+  plugin state, and current ordinary/panorama mode.
+- Documented the interaction boundary: current PanoramaLite is screen-oriented
+  yaw/pitch/fov playback with stable horizon and default roll lock;
+  gyro/device-orientation and headset/WebXR behavior remain future opt-in
+  modes/plugins.
+- Clarified the product design: plugin availability should be set by
+  deployment/config; the product UI can show installed plugins and expose safe
+  runtime modes, but arbitrary plugin installation should not be an end-user
+  setting in the player surface.
+
+Validation:
+
+- `cmd /c pnpm check:sources`: passed, 17 example sources.
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed.
+- `cmd /c pnpm check:release`: passed, 26 suites / 141 tests plus public API, exports, source contract, and IIFE bundle.
+- `cmd /c pnpm smoke:panoramalite -- --port 4233 --scenario hls --source-url https://naver.github.io/egjs-view360/pano/equirect/m3u8/equi.m3u8 --duration 8s --out .fyra-long-run\panoramalite-hls-naver-equirect-edge-20260520-runtime-mode.json --fail-on-error`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --port 4234 --scenario hls --source-url https://cdn.radiantmediatechs.com/rmp/media/samples-for-rmp-site/04052024-lac-de-bimont/hls/playlist.m3u8 --duration 8s --out .fyra-long-run\panoramalite-hls-radiant-lac-de-bimont-edge-20260520-runtime-mode.json --fail-on-error`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --port 4235 --scenario hls --source-url https://videos.electroteque.org/360/hls/ultra_light_flight.m3u8 --duration 8s --out .fyra-long-run\panoramalite-hls-electroteque-ultra-light-flight-edge-20260520.json --fail-on-error`: passed.
+- Playwright manual check on `http://127.0.0.1:4240/panoramalite.html` confirmed the Plugins panel and Panorama runtime toggle update active/mode state without reloading the source.
+
+---
+
+### 2026-05-20 PanoramaLite Z-Axis Roll Boundary Cleanup
+
+Summary:
+
+- Removed the temporary visible Z-axis locking switch and related public handle
+  methods after product review. Screen interaction already does not write roll,
+  and the locking approach would not solve camera/projection visual tilt.
+- Kept `PanoramaLiteView.roll` and programmatic `setView({ roll })` available
+  for future gyro, WebXR, or product-owned orientation integrations.
+- Kept the demo roll value readout for diagnostics while removing the locking
+  control from the user surface.
+- Updated smoke automation to assert that pointer drag changes view/pixels
+  while keeping roll stable during normal screen interaction.
+
+Validation:
+
+- `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed,
+  14 tests.
+- `cmd /c pnpm check:public-api`: passed.
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm check:sources`: passed, 18 example sources.
+- `cmd /c pnpm bundle:examples`: passed.
+- `git diff --check`: passed.
+- `cmd /c pnpm check:release`: passed, 26 suites / 142 tests plus public API,
+  exports, source contract, and IIFE bundle.
+- `cmd /c pnpm smoke:panoramalite -- --port 4242 --scenario image --duration 3s --out .fyra-long-run\panoramalite-screen-roll-stable-image-edge-20260520.json --fail-on-error`: passed with `rollStableAfterDrag: true`.
+- Playwright check on `http://127.0.0.1:4240/panoramalite.html` confirmed
+  the Z-axis locking switch is absent, the status shows `roll 0.0`, and
+  pointer drag changed `yaw/pitch` while `rollDelta = 0`.
 
 ---
 

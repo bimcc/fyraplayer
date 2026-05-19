@@ -2,6 +2,7 @@ import { createPanoramaLitePlugin } from '../src/plugins/panoramalite.js';
 import { DEFAULT_PANORAMA_LIMITS, normalizeView } from '../src/plugins/panoramalite/renderer/camera.js';
 import { PanoramaLiteRenderer } from '../src/plugins/panoramalite/renderer/PanoramaLiteRenderer.js';
 import { createEquirectSphereMesh } from '../src/plugins/panoramalite/renderer/sphereMesh.js';
+import type { PanoramaLiteHandle } from '../src/plugins/panoramalite.js';
 import type { EventBusLike, PlayerAPI, PluginContext } from '../src/types.js';
 
 type Handler = (...args: unknown[]) => void;
@@ -250,6 +251,19 @@ describe('panoramalite math and mesh', () => {
     expect(mesh.indices).toHaveLength(16 * 8 * 6);
     expect(mesh.indexType).toBe('uint16');
   });
+
+  test('uses non-mirrored equirectangular uv orientation', () => {
+    const widthSegments = 8;
+    const heightSegments = 4;
+    const mesh = createEquirectSphereMesh({ widthSegments, heightSegments });
+    const indexFor = (x: number, y: number) => ((y * (widthSegments + 1)) + x) * 2;
+
+    expect(Array.from(mesh.uvs.slice(indexFor(4, 2), indexFor(4, 2) + 2))).toEqual([0.5, 0.5]);
+    expect(Array.from(mesh.uvs.slice(indexFor(6, 2), indexFor(6, 2) + 2))).toEqual([0.75, 0.5]);
+    expect(Array.from(mesh.uvs.slice(indexFor(2, 2), indexFor(2, 2) + 2))).toEqual([0.25, 0.5]);
+    expect(Array.from(mesh.uvs.slice(indexFor(4, 0), indexFor(4, 0) + 2))).toEqual([0.5, 0]);
+    expect(Array.from(mesh.uvs.slice(indexFor(4, 4), indexFor(4, 4) + 2))).toEqual([0.5, 1]);
+  });
 });
 
 describe('PanoramaLiteRenderer', () => {
@@ -484,7 +498,106 @@ describe('createPanoramaLitePlugin', () => {
     expect(video.listeners.get('timeupdate')?.size ?? 0).toBe(0);
   });
 
-  test('uses image-up and video matching-normal-playback orientation defaults', async () => {
+  test('can toggle panorama rendering without reloading the current video', () => {
+    const gl = new WebGL2Stub();
+    const host = new ElementStub();
+    const video = new VideoStub();
+    host.appendChild(video);
+    const documentStub = {
+      visibilityState: 'visible',
+      querySelector: () => host,
+      createElement: (tagName: string) => tagName === 'canvas' ? new CanvasStub(gl) : new ElementStub(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      getElementById: jest.fn(() => null),
+      head: new ElementStub(),
+      body: new ElementStub(),
+    };
+    Object.defineProperty(globalThis, 'document', { value: documentStub, configurable: true });
+    Object.defineProperty(globalThis, 'HTMLElement', { value: ElementStub, configurable: true });
+    Object.defineProperty(globalThis, 'window', {
+      value: { getComputedStyle: () => ({ position: 'relative' }), devicePixelRatio: 1 },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'requestAnimationFrame', { value: () => 1, configurable: true });
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { value: jest.fn(), configurable: true });
+
+    let handle: PanoramaLiteHandle | undefined;
+    const lifecycle = createPanoramaLitePlugin({
+      target: '.host',
+      enabled: false,
+      onReady: (nextHandle) => {
+        handle = nextHandle;
+      },
+    })(createContext(new PlayerStub(video as unknown as HTMLVideoElement), new BusStub()));
+
+    const canvas = host.children.find((child) => child.className.includes('fyra-panoramalite')) as CanvasStub | undefined;
+    expect(lifecycle).toBeDefined();
+    expect(handle).toBeDefined();
+    expect(handle?.isEnabled()).toBe(false);
+    expect(canvas?.style.display).toBe('none');
+    expect(video.style.visibility).toBeUndefined();
+
+    handle!.setEnabled(true);
+    expect(handle!.isEnabled()).toBe(true);
+    expect(canvas?.style.display).toBe('block');
+    expect(video.style.visibility).toBe('hidden');
+
+    handle!.setEnabled(false);
+    expect(handle!.isEnabled()).toBe(false);
+    expect(canvas?.style.display).toBe('none');
+    expect(video.style.visibility).toBe('');
+
+    lifecycle?.destroy?.();
+  });
+
+  test('preserves explicit roll view state for programmatic integrations', () => {
+    const gl = new WebGL2Stub();
+    const host = new ElementStub();
+    const video = new VideoStub();
+    host.appendChild(video);
+    const documentStub = {
+      visibilityState: 'visible',
+      querySelector: () => host,
+      createElement: (tagName: string) => tagName === 'canvas' ? new CanvasStub(gl) : new ElementStub(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      getElementById: jest.fn(() => null),
+      head: new ElementStub(),
+      body: new ElementStub(),
+    };
+    Object.defineProperty(globalThis, 'document', { value: documentStub, configurable: true });
+    Object.defineProperty(globalThis, 'HTMLElement', { value: ElementStub, configurable: true });
+    Object.defineProperty(globalThis, 'window', {
+      value: { getComputedStyle: () => ({ position: 'relative' }), devicePixelRatio: 1 },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'requestAnimationFrame', { value: () => 1, configurable: true });
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { value: jest.fn(), configurable: true });
+
+    let handle: PanoramaLiteHandle | undefined;
+    const lifecycle = createPanoramaLitePlugin({
+      target: '.host',
+      initialView: { roll: 35 },
+      onReady: (nextHandle) => {
+        handle = nextHandle;
+      },
+    })(createContext(new PlayerStub(video as unknown as HTMLVideoElement), new BusStub()));
+
+    expect(lifecycle).toBeDefined();
+    expect(handle).toBeDefined();
+    expect(handle!.getView().roll).toBe(35);
+
+    handle!.setView({ roll: 45 });
+    expect(handle!.getView().roll).toBe(45);
+
+    handle!.resetView();
+    expect(handle!.getView().roll).toBe(35);
+
+    lifecycle?.destroy?.();
+  });
+
+  test('uses neutral image and video matching-normal-playback orientation defaults', async () => {
     const gl = new WebGL2Stub();
     const host = new ElementStub();
     const video = new VideoStub();
@@ -524,14 +637,14 @@ describe('createPanoramaLitePlugin', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), 1, -1, 0, 1);
+    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), 1, 1, 0, 0);
     imageLifecycle?.destroy?.();
 
     const videoLifecycle = createPanoramaLitePlugin({ target: '.host', media: 'video' })(
       createContext(player, new BusStub())
     );
 
-    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), -1, 1, 1, 0);
+    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), 1, 1, 0, 0);
     videoLifecycle?.destroy?.();
   });
 
