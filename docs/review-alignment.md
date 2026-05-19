@@ -153,7 +153,7 @@
 - `FP-008` 第二批已完成：`src/ui/shell.ts` 与 `src/ui/events.ts` 的事件 payload 与 bus handler 完成 `unknown`/显式类型收敛。
 - 配套类型补齐：`src/types.ts` 为 `WebCodecsConfig` 增加 `preferMp4?: boolean`，与 `tech-file` 现有行为对齐。
 - 验证结果：`pnpm -s test`（3 suites / 10 tests）通过，`pnpm -s build` 通过。
-- `FP-009` 持续推进：完成 `hlsdash` 残留引用对齐（`docs/integration-psv.md`、`docs/integration-cesium.md`、`examples/cesium-video.html`、`examples/panorama-psv.html`）。
+- `FP-009` 持续推进：完成 `hlsdash` 残留引用对齐（PSV/Cesium 迁移文档与旧占位示例页）。
 - `FP-008` 第三批已完成（核心层）：`src/core/techManager.ts`、`src/core/pluginManager.ts`、`src/core/middleware.ts` 完成一轮 `any` 收敛与错误类型化。
 - 类型一致性修复：`src/types.ts` 中 `PluginCtor` 与插件实际生命周期行为对齐（支持返回 `destroy`）。
 - 第三批验证结果：`pnpm -s test`（3 suites / 10 tests）通过，`pnpm -s build` 通过。

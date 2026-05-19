@@ -128,8 +128,8 @@ Final local validation on 2026-05-19:
 Example cleanup after the 1.0 push:
 
 - Removed old standalone HLS debug pages, placeholder PSV/Cesium HTML demos,
-  and the duplicate `examples/klv-integration.ts` sample because they were not
-  part of the supported SDK integration path.
+  and the duplicate KLV sample because they were not part of the supported SDK
+  integration path.
 - Kept the supported 1.0 examples focused on `examples/basic.html`,
   `examples/sources.js`, and `examples/minimal-iife.html`.
 - Kept compatibility exports such as `fyraplayer/plugins/recording`,
