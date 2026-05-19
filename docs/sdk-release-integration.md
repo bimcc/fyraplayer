@@ -44,9 +44,7 @@ internals.
 | `fyraplayer/plugins/engines` | Streaming-server URL/source adapters |
 | `fyraplayer/plugins/metadata` | KLV/SEI/private-data metadata bridge |
 
-`fyraplayer/plugins/recording` remains exported as an alias for
-`fyraplayer/plugins/recording-api`, but new product code should prefer the
-clearer `recording-api` path.
+Backend recording is exposed only through `fyraplayer/plugins/recording-api`.
 
 Renderer bridge note: PSV, Cesium, map, and panorama adapters are not package
 entrypoints in `fyraplayer`. The main package exports generic helpers such as

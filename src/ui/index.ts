@@ -13,7 +13,6 @@ export type {
   UiElements,
   UiRecordToggleEvent,
   UiScreenshotEvent,
-  UiShellElements,
   UiShellState,
   OriginalStyles,
   FullscreenHandler,

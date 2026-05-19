@@ -15,9 +15,6 @@ export interface CustomTechNameMap {}
 export type CustomTechName = Extract<keyof CustomTechNameMap, string>;
 export type TechName = BuiltinTechName | CustomTechName;
 
-/** @deprecated Use 'hls' or 'dash' instead */
-export type LegacyTechName = 'hlsdash';
-
 // ============================================================================
 // Metadata Configuration (for KLV/SEI extraction)
 // ============================================================================
@@ -137,8 +134,6 @@ export type WSRawSource = BaseSourceFields & {
    * - `experimental` enables the in-house WebCodecs/WASM pipeline and may fall back to MSE.
    */
   pipeline?: 'mse' | 'experimental';
-  /** @deprecated Use `pipeline: 'experimental'` instead. */
-  experimental?: boolean;
   decoderUrl?: string;
   wasm?: WasmDecoderConfig;
   disableAudio?: boolean;
@@ -424,12 +419,6 @@ export interface PlayerOptions {
   reconnect?: ReconnectPolicy;
   webCodecs?: WebCodecsConfig;
   dataChannel?: DataChannelOptions;
-}
-
-/** @deprecated UI is enabled through createUiComponentsPlugin(), not PlayerOptions.ui. */
-export interface UIOptions {
-  skin?: string;
-  layout?: string;
 }
 
 export type MiddlewareKind = 'request' | 'signal' | 'control' | 'resolve';

@@ -13,7 +13,6 @@
       "fyraplayer/plugins/metrics": ["./src/plugins/metrics.ts"],
       "fyraplayer/plugins/diagnostics": ["./src/plugins/diagnostics.ts"],
       "fyraplayer/plugins/performance": ["./src/plugins/performance.ts"],
-      "fyraplayer/plugins/recording": ["./src/plugins/recording.ts"],
       "fyraplayer/plugins/recording-api": ["./src/plugins/recording.ts"],
       "fyraplayer/plugins/reconnect": ["./src/plugins/reconnect.ts"],
       "fyraplayer/plugins/storage": ["./src/plugins/storage.ts"],

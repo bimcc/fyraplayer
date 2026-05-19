@@ -76,7 +76,7 @@ interface PlayerOptions {
 }
 ```
 
-UI 控件通过 `plugins: [createUiComponentsPlugin(...)]` 显式启用；`PlayerOptions.ui` 不是当前有效配置入口。
+UI controls are enabled only through `plugins: [createUiComponentsPlugin(...)]`.
 
 ### Source Resolver Middleware
 
@@ -297,8 +297,6 @@ interface WSRawSource {
   disableAudio?: boolean
   webTransport?: boolean
   pipeline?: 'mse' | 'experimental'
-  /** @deprecated Use pipeline: 'experimental' instead. */
-  experimental?: boolean
   preferTech?: 'ws-raw'
 }
 
@@ -523,7 +521,7 @@ Stable contract:
 
 - The default `ws-raw` path is `pipeline: 'mse'`, implemented through `mpegts.js` + browser MSE. This is the current commercial/default path.
 - `pipeline: 'experimental'` opts into the in-house WebCodecs/WASM path. It can emit additional diagnostics and may fall back to MSE on startup or decode failure.
-- The legacy boolean `experimental: true` is still accepted as an alias for `pipeline: 'experimental'`, but new code should use `pipeline`.
+- `pipeline: 'experimental'` is the only supported opt-in for the in-house WebCodecs/WASM path.
 - Metadata extraction from TS is tied to the experimental demux pipeline. Do not treat metadata extraction as part of the stable MSE-only contract until it has its own verified path.
 
 ```typescript
@@ -617,9 +615,9 @@ interface PlayerNetworkEvent {
 }
 ```
 
-`type` keeps the original Tech event name for backwards compatibility. New
-integrations should branch on `code`, which is normalized at the Player boundary
-for Tech events, source fallback events, and Player-owned reconnect events.
+`type` keeps the original Tech event name for debugging. Product integrations
+should branch on `code`, which is normalized at the Player boundary for Tech
+events, source fallback events, and Player-owned reconnect events.
 Unknown custom Tech events keep their original `type` and receive
 `code: 'NETWORK_EVENT'` unless the Tech supplies its own stable `code`.
 
@@ -1051,14 +1049,13 @@ const player = new FyraPlayer({
 });
 ```
 
-`storagePlugin` and `reconnectPlugin` remain backwards-compatible default plugin
-exports. Prefer the factory functions for production integrations so callbacks,
-logging, and storage keys are explicit. Both factories return plugin lifecycles
-that detach listeners during Player destroy/plugin unregister.
+Use `createStoragePlugin()` and `createReconnectPlugin()` so callbacks, logging,
+and storage keys are explicit. Both factories return plugin lifecycles that
+detach listeners during Player destroy/plugin unregister.
 
 Storage preference notes:
 
-- `key` remains the legacy source-index key for backwards compatibility.
+- `key` stores the source index for simple integrations.
 - `preferencesKey` stores structured playback preferences as JSON.
 - Volume, muted state, playback speed, quality mode, low-latency preference, and
   source index are opt-in so products can decide what should persist.

@@ -25,7 +25,7 @@ type HlsWithStopLoad = Hls & {
   stopLoad?: () => void;
 };
 
-// Re-export for backwards compatibility
+// Public helper for products that need to inspect or reuse the LL-HLS config.
 export { buildLowLatencyConfig } from './hlsConfig.js';
 
 /**

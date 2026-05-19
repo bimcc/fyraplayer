@@ -119,9 +119,9 @@ committed.
 
 Final local validation on 2026-05-19:
 
-- `cmd /c pnpm check:release`: passed, including 25 Jest suites / 132 tests,
-  public API check, export contract, source manifest contract, ESM build, and
-  IIFE bundle generation.
+- `cmd /c pnpm check:release`: passed, including 25 Jest suites / 128 tests,
+  public API check, export contract (28 package export files), source manifest
+  contract (18 example sources), ESM build, and IIFE bundle generation.
 - `cmd /c pnpm bundle:examples`: passed.
 - `git diff --check`: passed.
 
@@ -132,10 +132,10 @@ Example cleanup after the 1.0 push:
   integration path.
 - Kept the supported 1.0 examples focused on `examples/basic.html`,
   `examples/sources.js`, and `examples/minimal-iife.html`.
-- Kept compatibility exports such as `fyraplayer/plugins/recording`,
-  `HLSDASHTech`, `storagePlugin`, `reconnectPlugin`, and `metricsPlugin` for
-  1.x non-breaking compatibility; those can be considered for a future major
-  cleanup, not a 1.0 patch cleanup.
+- Removed pre-release compatibility exports and aliases so the 1.0 API stays
+  narrow: use `fyraplayer/plugins/recording-api`, `HLSTech`,
+  `createStoragePlugin()`, `createReconnectPlugin()`, and
+  `createMetricsPlugin()` directly.
 
 ## 7. Post-1.0 Work
 

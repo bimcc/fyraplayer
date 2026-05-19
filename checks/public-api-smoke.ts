@@ -25,7 +25,7 @@ import {
   CanvasFrameBuffer,
 } from 'fyraplayer';
 import { createMetadataPlugin, KlvBridge, type MetadataPluginOptions } from 'fyraplayer/plugins/metadata';
-import { createMetricsPlugin, metricsPlugin, type MetricsPluginOptions } from 'fyraplayer/plugins/metrics';
+import { createMetricsPlugin, type MetricsPluginOptions } from 'fyraplayer/plugins/metrics';
 import {
   createDebugPanelPlugin,
   createDiagnosticsPlugin,
@@ -52,8 +52,8 @@ import {
   type PerformanceSample,
   type PerformanceViolation,
 } from 'fyraplayer/plugins/performance';
-import { createReconnectPlugin, reconnectPlugin, type ReconnectPluginOptions } from 'fyraplayer/plugins/reconnect';
-import { createStoragePlugin, storagePlugin, type StoragePluginOptions } from 'fyraplayer/plugins/storage';
+import { createReconnectPlugin, type ReconnectPluginOptions } from 'fyraplayer/plugins/reconnect';
+import { createStoragePlugin, type StoragePluginOptions } from 'fyraplayer/plugins/storage';
 import {
   createUiComponentsPlugin,
   type UiActionContext,
@@ -95,8 +95,7 @@ import {
   type RecordingApiHandle,
   type RecordingApiPluginOptions,
   type RecordingApiResponse,
-} from 'fyraplayer/plugins/recording';
-import { createRecordingApiPlugin as createRecordingApiPluginFromAlias } from 'fyraplayer/plugins/recording-api';
+} from 'fyraplayer/plugins/recording-api';
 import { Demuxer, type DemuxerCallbacks } from 'fyraplayer/techs/wsRaw/demuxer';
 
 declare module 'fyraplayer' {
@@ -392,7 +391,6 @@ const metricsOptions: MetricsPluginOptions = {
   onEvent: (event) => event.toString(),
 };
 createMetricsPlugin(metricsOptions);
-metricsPlugin;
 
 let diagnosticsHandle: DiagnosticsHandle | undefined;
 const diagnosticsOptions: DiagnosticsPluginOptions = {
@@ -491,7 +489,6 @@ const storageOptions: StoragePluginOptions = {
 createStoragePlugin(storageOptions);
 const storageOptionsFromPlugins: StoragePluginOptionsFromPlugins = storageOptions;
 createStoragePluginFromPlugins(storageOptionsFromPlugins);
-storagePlugin;
 
 const reconnectOptions: ReconnectPluginOptions = {
   logNetwork: false,
@@ -502,7 +499,6 @@ const reconnectOptions: ReconnectPluginOptions = {
 createReconnectPlugin(reconnectOptions);
 const reconnectOptionsFromPlugins: ReconnectPluginOptionsFromPlugins = reconnectOptions;
 createReconnectPluginFromPlugins(reconnectOptionsFromPlugins);
-reconnectPlugin;
 
 let recordingHandle: RecordingApiHandle | undefined;
 const recordingOptions: RecordingApiPluginOptions = {
@@ -522,7 +518,6 @@ const recordingOptions: RecordingApiPluginOptions = {
   },
 };
 createRecordingApiPlugin(recordingOptions);
-createRecordingApiPluginFromAlias(recordingOptions);
 const recordingOptionsFromPlugins: RecordingApiPluginOptionsFromPlugins = recordingOptions;
 createRecordingApiPluginFromPlugins(recordingOptionsFromPlugins);
 recordingHandle?.isRecording();

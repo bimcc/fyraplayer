@@ -61,9 +61,6 @@ export interface UiElements {
   speedBtn: HTMLElement | null;
 }
 
-/** @deprecated Use UiElements instead */
-export type UiShellElements = UiElements & { shell: HTMLElement | null };
-
 export interface UiShellState {
   player: PlayerAPI | null;
   video: HTMLVideoElement | null;

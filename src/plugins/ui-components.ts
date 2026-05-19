@@ -1,11 +1,10 @@
 /**
  * FyraPlayer UI Components Plugin
- * Entry point - re-exports from ui/ module for backward compatibility
+ * Entry point for the optional UI controls shell.
  */
 
 // Main exports
 export { FyraUiShell, createUiComponentsPlugin } from '../ui/index.js';
-export { createUiComponentsPlugin as default } from '../ui/index.js';
 
 // Types
 export type {

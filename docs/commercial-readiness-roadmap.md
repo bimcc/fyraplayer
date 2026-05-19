@@ -317,7 +317,7 @@ Summary:
 - Added `FyraPlayer.currentTime` so README/API KLV synchronization examples match the public class behavior.
 - Updated `PlayerAPI` with typed event overloads for core player events while keeping a string fallback for custom plugin events.
 - Added existing ws-raw metadata helper methods to `PlayerAPI`: `enableMetadataExtraction()`, `disableMetadataExtraction()`, `getDetectedPrivateDataPids()`, and `getDetectedSeiTypes()`.
-- Clarified the UI decision: UI is enabled through `createUiComponentsPlugin()` and is not configured through `PlayerOptions.ui`.
+- Clarified the UI decision: UI is enabled through `createUiComponentsPlugin()` and `PlayerOptions` does not expose a UI configuration field.
 - Updated package docs to use current dependency versions and to describe `PlayerNetworkEvent` / `MetadataDetectedEvent`.
 - Added `pnpm check:public-api` with a public API smoke file covering package-style imports, typed events, `currentTime`, metadata helpers, and the UI plugin factory.
 
@@ -557,11 +557,10 @@ Summary:
 - Started `CR-009`.
 - Clarified that `ws-raw` defaults to the stable MSE path (`pipeline: 'mse'`) using `mpegts.js`.
 - Added `WSRawSource.pipeline?: 'mse' | 'experimental'`.
-- Kept the legacy `experimental: true` boolean as a deprecated compatibility alias for `pipeline: 'experimental'`.
-- Updated `WSRawTech` so only `pipeline: 'experimental'` or `experimental: true` enables the in-house WebCodecs/WASM pipeline.
+- Updated `WSRawTech` so only `pipeline: 'experimental'` enables the in-house WebCodecs/WASM pipeline.
 - Documented that metadata extraction from TS currently belongs to the experimental demux pipeline, not the stable MSE-only contract.
 - Updated README/API docs with the stable vs experimental ws-raw contract.
-- Added `tests/ws-raw.tech.test.ts` to lock down default MSE behavior, explicit experimental opt-in, legacy alias behavior, and fallback to MSE after experimental startup failure.
+- Added `tests/ws-raw.tech.test.ts` to lock down default MSE behavior, explicit experimental opt-in, and fallback to MSE after experimental startup failure.
 - Extended `checks/public-api-smoke.ts` so `WSRawSource.pipeline: 'mse' | 'experimental'` is compiled as part of the public API contract.
 - Added Chromium browser evidence for HTTP-FLV/ws-raw default MSE playback.
 
@@ -722,10 +721,9 @@ Summary:
 
 - Continued `CR-017` plugin boundary work and closed `PL-003`.
 - Added `createMetricsPlugin()` with configurable `onStats`, `onQos`, and `onEvent` reporter callbacks.
-- Kept `metricsPlugin` as a backwards-compatible default console reporter.
 - Added lifecycle cleanup: metrics plugin now unregisters `stats` and `qos` handlers on destroy.
 - Exported the metrics plugin factory from `fyraplayer/plugins` and `fyraplayer/plugins/metrics`.
-- Extended `checks/public-api-smoke.ts` for `createMetricsPlugin`, `metricsPlugin`, and `MetricsPluginOptions`.
+- Extended `checks/public-api-smoke.ts` for `createMetricsPlugin` and `MetricsPluginOptions`.
 - Updated `docs/pluginization-map.md` to mark `PL-003` done.
 
 Validation:
@@ -791,7 +789,7 @@ Summary:
 - Began `CR-011` observability work by adding a stable `PlayerNetworkEvent.code` contract.
 - Added `PlayerNetworkCode` and `PlayerNetworkSeverity` public types.
 - Added shared network event normalization under core so Tech-forwarded events, `TechManager` source fallback events, and Player-owned reconnect events use the same `code`, `severity`, and `message` rules.
-- Kept `PlayerNetworkEvent.type` backwards-compatible as the original Tech event name; consumers should use `code` for stable business handling.
+- Kept `PlayerNetworkEvent.type` as the original Tech event name for debugging; consumers should use `code` for stable business handling.
 - Covered HLS warning normalization, WebRTC signaling WebSocket normalization, source fallback normalization, and Player reconnect-exhausted normalization.
 - Fixed fatal network event ordering so the root cause event is emitted before the reconnect/reconnect-exhausted event.
 - Updated `docs/api.md` and public API smoke coverage for the new network event code surface.
@@ -881,9 +879,7 @@ Summary:
 
 - Continued core reliability work that does not depend on external stream backends.
 - Added `createStoragePlugin()` with explicit key/restore options, valid-index restore checks, and lifecycle cleanup for the `play` listener.
-- Kept `storagePlugin` as the backwards-compatible default export.
 - Added `createReconnectPlugin()` with optional callbacks/logging controls and lifecycle cleanup for `network` / `error` listeners.
-- Kept `reconnectPlugin` as the backwards-compatible default export.
 - Exported both factories from their subpaths and from `fyraplayer/plugins`.
 - Updated API, support, and pluginization docs.
 
@@ -1649,14 +1645,22 @@ Summary:
 - Kept `examples/basic.html`, `examples/app.ts`, `examples/sources.js`, and
   `examples/minimal-iife.html` as the supported example set.
 
-Compatibility decision:
+Clean API decision:
 
-- Do not remove documented 1.x compatibility surfaces in a patch cleanup:
+- Removed pre-release compatibility surfaces before the first formal release:
   `fyraplayer/plugins/recording`, `HLSDASHTech`, `LegacyTechName`,
   `WSRawSource.experimental`, `PlayerOptions.ui`, `UiShellElements`,
   `metricsPlugin`, `storagePlugin`, and `reconnectPlugin`.
-- These remain deprecated or compatibility-only and should be considered for a
-  future `2.0` breaking-change cleanup after consumers have a migration window.
+- The supported 1.0 surface now keeps a single public path for each feature:
+  `fyraplayer/plugins/recording-api`, `HLSTech`, `pipeline: 'experimental'`,
+  `createMetricsPlugin()`, `createStoragePlugin()`, and
+  `createReconnectPlugin()`.
+- Validation after the clean API pass:
+  - `cmd /c pnpm check:public-api`: passed.
+  - `cmd /c pnpm exec jest tests/ws-raw.tech.test.ts tests/metrics-plugin.test.ts tests/storage-reconnect-plugin.test.ts --runInBand`: passed, 3 suites / 10 tests.
+  - `cmd /c pnpm check:release`: passed, including 25 Jest suites / 128 tests, 28 package export files, and 18 example sources.
+  - `cmd /c pnpm bundle:examples`: passed.
+  - `git diff --check`: passed.
 
 ---
 

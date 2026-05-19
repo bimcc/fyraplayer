@@ -44,10 +44,6 @@
       "import": "./dist/plugins/reconnect.js",
       "types": "./dist/plugins/reconnect.d.ts"
     },
-    "./plugins/recording": {
-      "import": "./dist/plugins/recording.js",
-      "types": "./dist/plugins/recording.d.ts"
-    },
     "./plugins/recording-api": {
       "import": "./dist/plugins/recording.js",
       "types": "./dist/plugins/recording.d.ts"

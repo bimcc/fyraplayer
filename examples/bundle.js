@@ -72333,7 +72333,7 @@ var WSRawTech = class extends AbstractTech {
     this.metrics = opts.metrics;
     this.video = opts.video;
     this.cleanup();
-    this.useExperimental = wsSource.pipeline === "experimental" || !!wsSource.experimental;
+    this.useExperimental = wsSource.pipeline === "experimental";
     this.fallbackStarted = false;
     this.pipelineActive = false;
     const startFallback = (reason) => {

@@ -53,16 +53,3 @@ export function createMetricsPlugin(options: MetricsPluginOptions = {}): PluginC
     };
   };
 }
-
-/**
- * Backwards-compatible default metrics plugin.
- * Prefer `createMetricsPlugin()` for production reporters.
- */
-export const metricsPlugin: PluginCtor = createMetricsPlugin({
-  onStats: (payload) => {
-    console.debug('[metrics]', payload.stats);
-  },
-  onQos: (payload) => {
-    console.debug('[qos]', payload);
-  }
-});

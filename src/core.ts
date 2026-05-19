@@ -26,9 +26,6 @@ export * from './techs/tech-ws-raw.js';
 export * from './techs/tech-gb28181.js';
 export * from './techs/tech-file.js';
 
-// Legacy export for backwards compatibility
-export { HLSTech as HLSDASHTech } from './techs/tech-hls.js';
-
 // Utils
 export * from './utils/webcodecs.js';
 export * from './utils/formatDetector.js';

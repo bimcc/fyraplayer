@@ -23,7 +23,6 @@ export {
 // Metrics reporter plugin
 export {
   createMetricsPlugin,
-  metricsPlugin,
   type MetricsEventPayload,
   type MetricsPluginOptions,
 } from './metrics.js';
@@ -43,14 +42,12 @@ export {
 // Storage preference plugin
 export {
   createStoragePlugin,
-  storagePlugin,
   type StoragePluginOptions,
 } from './storage.js';
 
 // Reconnect diagnostics plugin
 export {
   createReconnectPlugin,
-  reconnectPlugin,
   type ReconnectPluginOptions,
 } from './reconnect.js';
 

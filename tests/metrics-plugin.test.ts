@@ -1,4 +1,4 @@
-import { createMetricsPlugin, metricsPlugin } from '../src/plugins/metrics.js';
+import { createMetricsPlugin } from '../src/plugins/metrics.js';
 import type { EventBusLike, PluginContext } from '../src/types.js';
 
 type Handler = (payload?: unknown) => void;
@@ -119,9 +119,5 @@ describe('createMetricsPlugin', () => {
 
     expect(onQos).toHaveBeenCalledWith(qosPayload);
     expect(onEvent).toHaveBeenCalledWith('qos', qosPayload);
-  });
-
-  test('keeps backwards-compatible metricsPlugin export', () => {
-    expect(typeof metricsPlugin).toBe('function');
   });
 });

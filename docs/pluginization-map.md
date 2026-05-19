@@ -36,11 +36,11 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 
 | Capability | Current Form | Location | Notes |
 |---|---|---|---|
-| UI controls | `createUiComponentsPlugin()` | `src/ui/shell.ts`, `src/plugins/ui-components.ts` | Explicit plugin entry with quality/source controls, interruption status layer, retry button, preference events, diagnostics entry, screenshot feedback, and recording toggle hook; `PlayerOptions.ui` is not an active configuration surface |
-| Storage/preferences | `storagePlugin`, `createStoragePlugin()` | `src/plugins/storage.ts` | Persists last source index plus opt-in volume, mute, speed, quality, and low-latency preferences with lifecycle cleanup and bounded restore |
-| Metrics | `metricsPlugin`, `createMetricsPlugin()` | `src/plugins/metrics.ts` | Reporter-based plugin factory; default export remains console/debug compatible |
+| UI controls | `createUiComponentsPlugin()` | `src/ui/shell.ts`, `src/plugins/ui-components.ts` | Explicit plugin entry with quality/source controls, interruption status layer, retry button, preference events, diagnostics entry, screenshot feedback, and recording toggle hook |
+| Storage/preferences | `createStoragePlugin()` | `src/plugins/storage.ts` | Persists last source index plus opt-in volume, mute, speed, quality, and low-latency preferences with lifecycle cleanup and bounded restore |
+| Metrics | `createMetricsPlugin()` | `src/plugins/metrics.ts` | Reporter-based plugin factory; products provide their own callbacks/reporters |
 | Performance monitor | `createPerformanceMonitorPlugin()` | `src/plugins/performance.ts` | Optional budget/sampling plugin; emits `PERFORMANCE_BUDGET` QoS warnings without changing playback |
-| Reconnect logs | `reconnectPlugin`, `createReconnectPlugin()` | `src/plugins/reconnect.ts` | Optional diagnostics callbacks/logging with lifecycle cleanup; not reconnect policy owner |
+| Reconnect logs | `createReconnectPlugin()` | `src/plugins/reconnect.ts` | Optional diagnostics callbacks/logging with lifecycle cleanup; not reconnect policy owner |
 | Diagnostics snapshot/export/debug panel | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | `src/plugins/diagnostics.ts` | Optional support/QA surface that collects state, source, Tech, stats, network, QoS, retry and ICE clues, with a lightweight DOM panel when enabled |
 | Auth/signing/recovery | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | `src/plugins/auth.ts` | Optional request/signal middleware helper plus runtime recovery plugin for explicit 401/403 or custom expiry matchers |
 | Source resolver | `createSourceResolverMiddleware()` | `src/plugins/engines/sourceResolver.ts` | Converts `auto` sources through `EngineFactory` into primary/fallback `Source` objects |
@@ -124,7 +124,7 @@ Do not expose mutable internal player state directly. Add narrow APIs only when 
 
 | ID | Priority | Task | Acceptance |
 |---|---|---|---|
-| PL-001 | P1 | done: keep UI as explicit plugin, not `PlayerOptions.ui` | README/API/code agree |
+| PL-001 | P1 | done: keep UI as explicit plugin | README/API/code agree |
 | PL-002 | P1 | done: convert engine URL resolution into a documented resolver middleware pattern | `auto` source examples can use `createSourceResolverMiddleware()` without app-specific glue |
 | PL-003 | P1 | done: turn metrics into reporter plugin factory | Consumers can provide endpoint/callback without editing plugin code |
 | PL-004 | P2 | done: wrap `KlvBridge` into `createMetadataPlugin()` | Metadata parsing can be enabled with one plugin |

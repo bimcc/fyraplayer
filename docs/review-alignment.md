@@ -20,7 +20,7 @@
 
 ### 2.2 类型与实现一致性
 - `PluginCtor` 类型定义为仅返回 `void`，但运行时支持返回带 `destroy` 的对象（类型与行为不一致）。
-- `PlayerOptions.ui` 存在于类型，但 `FyraPlayer` 构造流程未直接消费该配置。
+- UI is plugin-only; `PlayerOptions` no longer exposes a UI configuration field.
 
 ### 2.3 状态管理与失败回退
 - `failedTechs` 在 `FyraPlayer` 与 `TechManager` 双处维护，存在状态不同步风险。
@@ -247,7 +247,7 @@
 - Began `CR-003` API consistency work:
   - `FyraPlayer.currentTime` now exists and is covered by a Jest regression test.
   - `PlayerAPI` now exposes typed event overloads plus the existing ws-raw metadata helper methods.
-  - UI integration is documented as explicit plugin usage through `createUiComponentsPlugin()`, not `PlayerOptions.ui`.
+  - UI integration is documented as explicit plugin usage through `createUiComponentsPlugin()`.
   - Added `pnpm check:public-api` to compile a package-style public API smoke file.
 - Updated long-term tracking:
   - `docs/pluginization-map.md` marks `PL-001` done for the UI configuration decision.
@@ -331,7 +331,7 @@
 ## 22. Network Event Code Follow-up (2026-05-17)
 
 - Began `CR-011` observability work:
-  - `PlayerNetworkEvent` now exposes stable `code` in addition to the backwards-compatible raw `type`.
+  - `PlayerNetworkEvent` now exposes stable `code` in addition to the raw `type`.
   - Added public `PlayerNetworkCode` and `PlayerNetworkSeverity` types.
   - Centralized network normalization in `src/core/networkEvents.ts`.
   - Player Tech forwarding, source fallback events, and Player reconnect events now share normalized `code`, `severity`, and `message` rules.
@@ -399,9 +399,7 @@
 
 - Continued lifecycle reliability work:
   - `createStoragePlugin()` now exposes explicit storage key/restore options, validates restored source indexes, and unregisters its `play` listener on destroy.
-  - `storagePlugin` remains as a backwards-compatible default plugin.
   - `createReconnectPlugin()` now exposes callback/logging options and unregisters `network` / `error` listeners on destroy.
-  - `reconnectPlugin` remains as a backwards-compatible default plugin.
   - Both factories are available from package subpaths and the aggregate `fyraplayer/plugins` entry.
 - Updated `docs/pluginization-map.md`, `docs/api.md`, `docs/supported-scenarios.md`, and `docs/commercial-readiness-roadmap.md`.
 - Validation:

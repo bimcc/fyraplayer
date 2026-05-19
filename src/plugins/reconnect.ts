@@ -37,5 +37,3 @@ export function createReconnectPlugin(options: ReconnectPluginOptions = {}): Plu
     };
   };
 }
-
-export const reconnectPlugin: PluginCtor = createReconnectPlugin();

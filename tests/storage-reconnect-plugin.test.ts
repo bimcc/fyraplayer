@@ -1,5 +1,5 @@
-import { createReconnectPlugin, reconnectPlugin } from '../src/plugins/reconnect.js';
-import { createStoragePlugin, storagePlugin } from '../src/plugins/storage.js';
+import { createReconnectPlugin } from '../src/plugins/reconnect.js';
+import { createStoragePlugin } from '../src/plugins/storage.js';
 import type { EventBusLike, KeyValueStore, PlayerAPI, PluginContext, Source } from '../src/types.js';
 
 type Handler = (...args: unknown[]) => void;
@@ -169,10 +169,6 @@ describe('storage plugin lifecycle', () => {
     expect(player.switchSource).not.toHaveBeenCalled();
   });
 
-  test('keeps backwards-compatible storagePlugin export', () => {
-    expect(typeof storagePlugin).toBe('function');
-  });
-
   test('restores and persists playback preferences when enabled', async () => {
     const bus = new BusStub();
     const storage = new MemoryStorage();
@@ -280,9 +276,5 @@ describe('reconnect plugin lifecycle', () => {
 
     warn.mockRestore();
     error.mockRestore();
-  });
-
-  test('keeps backwards-compatible reconnectPlugin export', () => {
-    expect(typeof reconnectPlugin).toBe('function');
   });
 });

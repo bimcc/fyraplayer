@@ -71,16 +71,6 @@ describe('WSRawTech commercial pipeline contract', () => {
     expect(fallbackStartMock).not.toHaveBeenCalled();
   });
 
-  test('keeps deprecated experimental boolean as an opt-in alias', async () => {
-    const tech = new WSRawTech();
-    await tech.load(createSource({ experimental: true, url: 'wss://media.example.com/live.ts', transport: 'ts' }), {
-      video: createVideoStub()
-    });
-
-    expect(pipelineStartMock).toHaveBeenCalledTimes(1);
-    expect(fallbackStartMock).not.toHaveBeenCalled();
-  });
-
   test('falls back to MSE when experimental pipeline startup fails', async () => {
     pipelineStartMock.mockRejectedValueOnce(new Error('decode init failed'));
 

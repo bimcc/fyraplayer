@@ -213,5 +213,3 @@ export function createStoragePlugin(options: StoragePluginOptions = {}): PluginC
     };
   };
 }
-
-export const storagePlugin: PluginCtor = createStoragePlugin();
