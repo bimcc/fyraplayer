@@ -274,8 +274,11 @@ interface FMP4Source {
   type: 'fmp4'
   url: string
   transport: 'http' | 'ws'  // HTTP fetch 或 WebSocket
+  mimeType?: string
   codec?: 'h264' | 'h265' | 'av1'
+  videoCodecString?: string
   audioCodec?: 'aac' | 'opus' | 'mp3'
+  audioCodecString?: string
   isLive?: boolean
   preferTech?: 'fmp4'
 }
@@ -403,6 +406,11 @@ Defaults are conservative for live playback: keep at most 120 queued segments or
 the playhead during quota cleanup, and retry quota cleanup twice before dropping
 the failing segment. Products can tune this through `buffer.fmp4`.
 
+For HTTP direct fMP4, `load()` resolves after the HTTP response and MSE
+`SourceBuffer` are ready. The response body is then pumped in the background, so
+long-lived live streams do not block `player.init()` or source-switch
+completion while the stream remains open.
+
 `FMP4_BACKPRESSURE` is emitted when the pending queue exceeds the configured
 segment or byte limit. `FMP4_QUOTA_EXCEEDED` is emitted when MSE append runs into
 `QuotaExceededError` and cleanup/retry is attempted.
@@ -492,6 +500,7 @@ fMP4 直播流播放（无清单文件）：
 ```typescript
 { type: 'fmp4', url: '...', transport: 'http', codec: 'h264', preferTech: 'fmp4' }
 { type: 'fmp4', url: 'wss://...', transport: 'ws', codec: 'h264', preferTech: 'fmp4' }
+{ type: 'fmp4', url: '/ffmpeg-fmp4/stream.fmp4', transport: 'http', videoCodecString: 'avc1.4d401f', audioCodecString: 'mp4a.40.2', preferTech: 'fmp4' }
 ```
 
 ### tech-ws-raw
@@ -548,10 +557,12 @@ TS + WebCodecs now derives codec strings from SPS/VPS and falls back to mpegts.j
 GB28181 网关适配：
 
 - 支持 Invite/Bye 控制
-- 支持 PTZ 云台控制
+- 支持 PTZ 云台控制入口：播放器只调用后端网关，不直接控制摄像机
 - 支持 query/keepalive 控制
 - 媒体面只播放后端返回的标准 FLV/TS URL
 - 不在浏览器端实现 SIP/RTP/PS/G.711 国标协议栈
+
+PTZ 的真实设备控制属于服务端 GB28181 网关或厂商/ONVIF 控制服务。播放器端 `player.control('gb:ptz', payload)` 只负责把 UI/业务意图和当前会话字段提交给网关；权限、预置位映射、云台状态、协议 XML/SIP MESSAGE、设备执行结果都应由后端处理。
 
 ## 事件列表
 
@@ -620,8 +631,9 @@ Common stable codes:
 | `DASH_ERROR` | dash.js non-fatal errors |
 | `SOURCE_FALLBACK` | primary source failed and fallback source loaded |
 | `RECONNECT_ATTEMPT` / `RECONNECT_EXHAUSTED` | Player reconnect policy |
+| `AUTH_RECOVERY_ATTEMPT` / `AUTH_RECOVERY_SUCCESS` / `AUTH_RECOVERY_FAILED` / `AUTH_RECOVERY_SKIPPED` | optional auth recovery plugin lifecycle |
 | `CONNECT_TIMEOUT` / `METADATA_TIMEOUT` / `AUTOPLAY_BLOCKED` | browser/runtime playback warnings |
-| `WEBRTC_ICE_FAILED` / `WEBRTC_ICE_RESTART` / `WEBRTC_SIGNAL_ERROR` | WebRTC connection and signaling |
+| `WEBRTC_ICE_FAILED` / `WEBRTC_ICE_RESTART` / `WEBRTC_ICE_RECONNECT_REQUIRED` / `WEBRTC_SIGNAL_ERROR` | WebRTC connection, ICE recovery, and signaling |
 | `WEBRTC_SIGNAL_WS_OPEN` / `WEBRTC_SIGNAL_WS_CLOSE` / `WEBRTC_SIGNAL_WS_ERROR` | WebRTC signaling WebSocket events |
 | `WEBRTC_AUDIO_MUTED` | WebRTC audio track exists but the browser reports it muted/no audio packets |
 | `WS_RAW_FALLBACK_ERROR` / `AUDIO_FALLBACK` / `VIDEO_DECODE_ERROR` | ws-raw pipeline diagnostics |
@@ -801,6 +813,210 @@ unless `evaluationMode: 'always'` is configured.
 Use [docs/performance-baseline.md](./performance-baseline.md) for the current
 default budgets and remaining profiling evidence.
 
+## Diagnostics Plugin
+
+Diagnostics are optional and intended for support, QA, and product debug
+surfaces. The plugin listens to public player events and exposes a snapshot plus
+JSON export. It does not control playback, reconnect, quality, or source
+selection.
+
+```typescript
+import { createDiagnosticsPlugin } from 'fyraplayer/plugins/diagnostics';
+
+let diagnostics: DiagnosticsHandle | undefined;
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'webrtc', url: 'https://example.com/live/whep' }],
+  plugins: [
+    createDiagnosticsPlugin({
+      maxEvents: 200,
+      onHandle: (handle) => {
+        diagnostics = handle;
+      },
+      onSnapshot: (snapshot) => {
+        console.debug(snapshot.state, snapshot.tech, snapshot.latestNetwork?.code);
+      }
+    })
+  ]
+});
+
+// Support export button:
+const json = diagnostics?.exportJson();
+```
+
+The snapshot includes:
+
+- current player state, active Tech, current source, and source index;
+- current quality state when available;
+- latest `stats`, `network`, `qos`, and `error` payloads;
+- reconnect attempt/exhaustion counters;
+- WebRTC ICE state, signaling stage, and audio-muted clue when observed;
+- buffer level and fMP4 pending queue clues when present;
+- bounded recent event history.
+
+For a built-in visual support surface, enable the debug panel wrapper:
+
+```typescript
+import { createDebugPanelPlugin } from 'fyraplayer/plugins/diagnostics';
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'hls', url: 'https://example.com/live.m3u8' }],
+  plugins: [
+    createDebugPanelPlugin({
+      target: '.player-shell',
+      maxEvents: 200
+    })
+  ]
+});
+```
+
+The panel is intentionally lightweight. It shows state, Tech, source, URL,
+quality, FPS/bitrate, buffer/pending clues, latest network/QoS codes,
+reconnect counters, ICE state, recent event count, and buttons for JSON export
+and clearing the in-memory event history. Product applications can hide this
+panel in production and use `createDiagnosticsPlugin()` directly for custom
+support consoles.
+
+## Auth Signing And Recovery
+
+Commercial streams are usually not public bare URLs. Use the optional auth
+middleware helper to inject headers, credentials, bearer or custom tokens, and
+URL signatures before a source is loaded or before WebRTC WHEP/WHIP signaling
+runs:
+
+```typescript
+import { FyraPlayer } from 'fyraplayer';
+import {
+  createAuthRecoveryPlugin,
+  createAuthSigningMiddleware
+} from 'fyraplayer/plugins/auth';
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'hls', url: 'https://example.com/live.m3u8' }],
+  middleware: createAuthSigningMiddleware({
+    headers: { 'x-project': 'demo' },
+    credentials: 'include',
+    token: async () => ({
+      token: await getAccessToken(),
+      expiresAt: Date.now() + 55_000
+    }),
+    signUrl: ({ url }) => signPlaybackUrl(url),
+    refreshHeaders: ({ headers }) => ({
+      ...headers,
+      'x-request-id': crypto.randomUUID()
+    })
+  }),
+  plugins: [
+    createAuthRecoveryPlugin({
+      maxRetries: 1,
+      cooldownMs: 5000,
+      refresh: () => refreshAccessToken()
+    })
+  ]
+});
+```
+
+By default the helper runs in both `request` and `signal` middleware stages.
+Use `kinds: ['request']` or `kinds: ['signal']` to narrow the scope. Token
+injection defaults to `Authorization: Bearer <token>`; set `tokenHeader` and
+`tokenPrefix: ''` for custom raw-token schemes.
+
+The resulting `source.request` config is consumed by:
+
+- HLS: headers and credentials for hls.js XHR/fetch requests;
+- direct HTTP fMP4: headers and credentials for `fetch`;
+- WebRTC WHEP/WHIP signaling: headers and credentials for signaling `fetch`;
+- DASH: custom headers are passed to dash.js; credentials remain adapter/browser
+  dependent and need real deployment validation before being promised.
+
+This helper is middleware, not a runtime plugin passed through `plugins`,
+because the current `PluginContext` cannot register middleware after
+`FyraPlayer` construction. That boundary keeps auth/signing policy optional
+without expanding core playback.
+
+`createAuthRecoveryPlugin()` is the runtime recovery companion. By default it
+listens for public `network` or `error` payloads that clearly carry HTTP
+`401` or `403`, calls the optional `refresh()` hook, then reloads the current
+source through `player.switchSource(currentIndex)`. That reload runs the normal
+resolver and auth/signing middleware chain again, so refreshed tokens and URL
+signatures are applied without adding auth policy to the core player.
+
+Recovery is intentionally narrow:
+
+- default matching is only explicit `401` / `403`;
+- product integrations can pass `match(trigger, context)` for custom backend
+  payloads such as `{ code: 'TOKEN_EXPIRED' }`;
+- `maxRetries`, `cooldownMs`, and in-flight guards prevent retry storms;
+- `onRecovery` receives `attempt`, `success`, `failed`, and `skipped` phases;
+- the plugin emits stable `network.code` values:
+  `AUTH_RECOVERY_ATTEMPT`, `AUTH_RECOVERY_SUCCESS`,
+  `AUTH_RECOVERY_FAILED`, and `AUTH_RECOVERY_SKIPPED`.
+
+This is not a universal auth backend. The application still owns token storage,
+refresh endpoints, cookie policy, source resolution semantics, and whether a
+non-HTTP signal should count as token expiry.
+
+## Backend Recording API Plugin
+
+FyraPlayer does not implement browser-side local recording. For monitoring,
+VMS, and live operations, prefer server-side recording and connect the UI
+recording toggle to `createRecordingApiPlugin()`:
+
+```typescript
+import { FyraPlayer } from 'fyraplayer';
+import { createRecordingApiPlugin, type RecordingApiHandle } from 'fyraplayer/plugins/recording-api';
+import { createUiComponentsPlugin } from 'fyraplayer/plugins/ui-components';
+
+let recording: RecordingApiHandle | undefined;
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'hls', url: 'https://example.com/live.m3u8' }],
+  plugins: [
+    createRecordingApiPlugin({
+      startUrl: 'https://api.example.com/recordings/start',
+      stopUrl: ({ recordingId }) => `https://api.example.com/recordings/${recordingId}/stop`,
+      statusUrl: 'https://api.example.com/recordings/status',
+      headers: () => ({ Authorization: `Bearer ${getToken()}` }),
+      credentials: 'include',
+      onHandle: (handle) => {
+        recording = handle;
+      }
+    }),
+    createUiComponentsPlugin({
+      target: '.player-shell',
+      showRecordingButton: true,
+      onRecordToggle: ({ recording: requested }) =>
+        requested ? recording?.start() : recording?.stop()
+    })
+  ]
+});
+```
+
+The plugin emits typed `recording` events with status, active flag, source,
+Tech, recording id, session id, response, and structured error fields. It only
+calls the configured backend endpoints. It does not use `captureStream()`,
+`MediaRecorder`, canvas recording, or browser file storage.
+
+Recording error events include `code` plus `error` details when available:
+
+| Code | Meaning |
+|---|---|
+| `RECORDING_HTTP_ERROR` | Backend returned a non-2xx status. Includes status, status text, endpoint, action, and a bounded response body summary. |
+| `RECORDING_TIMEOUT` | Backend call exceeded `timeoutMs`. |
+| `RECORDING_ABORTED` | In-flight request was aborted by plugin teardown or a newer recording call. |
+| `RECORDING_REQUEST_ERROR` | Fetch or another request-layer failure occurred. |
+| `RECORDING_PARSE_ERROR` | Backend response succeeded but parsing failed. |
+| `RECORDING_CONFIG_ERROR` | Required endpoint is missing or the handle is used after destroy. |
+
+`RecordingApiError` is thrown from `start()`, `stop()`, and `status()` failures.
+Its `info` field matches the `PlayerRecordingErrorInfo` shape emitted on the
+`recording` event, so products can show concise UI feedback while exporting the
+same object for diagnostics.
+
 ## Storage And Reconnect Plugins
 
 Utility plugins are optional and lifecycle-safe:
@@ -815,7 +1031,15 @@ const player = new FyraPlayer({
   plugins: [
     createStoragePlugin({
       key: 'fyra:lastSource',
-      restoreSource: true
+      preferencesKey: 'fyra:preferences',
+      restoreSource: true,
+      persistSource: true,
+      persistVolume: true,
+      persistMuted: true,
+      persistPlaybackRate: true,
+      persistQuality: true,
+      persistLowLatency: true,
+      video: '#video'
     }),
     createReconnectPlugin({
       logNetwork: false,
@@ -831,6 +1055,125 @@ const player = new FyraPlayer({
 exports. Prefer the factory functions for production integrations so callbacks,
 logging, and storage keys are explicit. Both factories return plugin lifecycles
 that detach listeners during Player destroy/plugin unregister.
+
+Storage preference notes:
+
+- `key` remains the legacy source-index key for backwards compatibility.
+- `preferencesKey` stores structured playback preferences as JSON.
+- Volume, muted state, playback speed, quality mode, low-latency preference, and
+  source index are opt-in so products can decide what should persist.
+- UI controls emit `preference` events for volume, muted state, playback speed,
+  quality selection, and source selection; non-UI integrations can emit the same
+  event on the core bus through their own plugin.
+- `persistQuality` reapplies the saved quality after `ready`; unsupported Techs
+  ignore the restore attempt.
+- `persistLowLatency` mutates HLS source objects before load and on preference
+  updates. Treat it as an app preference for demo/product presets, not as proof
+  that every stream should run in LL-HLS mode.
+
+## UI Product Controls
+
+`createUiComponentsPlugin()` is still optional, but it now includes the product
+UI baseline for interruption/reconnect states, preference-friendly controls, a
+diagnostics entry point, screenshot feedback, and an optional recording toggle
+hook:
+
+```typescript
+import {
+  createUiComponentsPlugin,
+  type UiRecordToggleEvent,
+  type UiScreenshotEvent
+} from 'fyraplayer/plugins/ui-components';
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'hls', url: 'https://example.com/live.m3u8' }],
+  plugins: [
+    createUiComponentsPlugin({
+      target: '.player-shell',
+      showStatusOverlay: true,
+      onRetry: () => player.play(),
+      onDiagnostics: ({ player }) => {
+        console.log(player.getState());
+      },
+      onScreenshot: (event: UiScreenshotEvent) => {
+        console.log(event.filename, event.width, event.height);
+      },
+      showRecordingButton: true,
+      onRecordToggle: (event: UiRecordToggleEvent) => {
+        console.log(event.recording ? 'recording requested' : 'recording stopped');
+      }
+    })
+  ]
+});
+```
+
+The status layer shows generic stream interruption text, network/retry details
+when available, and a retry button after reconnect exhaustion. It deliberately
+stays generic instead of trying to classify live/VOD because the public source
+contract does not expose a universal live flag for every Tech yet.
+
+The diagnostics button is shown automatically when `onDiagnostics` is provided,
+or explicitly with `showDiagnosticsButton: true`. Screenshot uses the browser
+canvas path, downloads a PNG, and calls `onScreenshot` with the captured `Blob`,
+dimensions, filename, player, and video element. Cross-origin streams can still
+block canvas capture unless the media response and element CORS mode allow it.
+
+`showRecordingButton` only exposes a UI toggle and calls `onRecordToggle`; it
+does not implement recording by itself. Products should connect that hook to
+`createRecordingApiPlugin()` or another backend recording adapter. Browser-side
+front-end recording is intentionally out of scope for this project.
+
+## WebRTC WHEP/WHIP Hardening Notes
+
+WebRTC sources can pass STUN/TURN and signaling timeout settings directly:
+
+```typescript
+const source = {
+  type: 'webrtc',
+  url: 'https://example.com/live/whep',
+  iceServers: [
+    { urls: 'stun:stun.example.com:3478' },
+    { urls: 'turn:turn.example.com:3478?transport=tcp', username: 'user', credential: 'secret' }
+  ],
+  forceRelay: true,
+  signal: {
+    type: 'whep',
+    url: 'https://example.com/live/whep',
+    timeoutMs: 15000,
+    iceGatheringTimeoutMs: 5000
+  }
+};
+```
+
+`timeoutMs` bounds the WHEP/WHIP signaling POST. `iceGatheringTimeoutMs`
+bounds local ICE gathering before posting the current SDP offer. Non-2xx WHEP
+responses, signaling timeouts, answer SDP failures, and ICE gathering timeout
+warnings are normalized into `network.code` values such as
+`WEBRTC_WHEP_HTTP_ERROR`, `WEBRTC_WHEP_TIMEOUT`,
+`WEBRTC_WHEP_ANSWER_ERROR`, and `WEBRTC_WHEP_ICE_GATHERING_TIMEOUT`.
+
+`iceServers` is passed directly into `RTCPeerConnection`. Set
+`forceRelay: true` when the deployment requires TURN-only media, such as restricted
+enterprise networks or TCP relay validation. FyraPlayer does not own TURN
+credentials or rotation; product middleware should resolve short-lived TURN
+servers before constructing the WebRTC source.
+
+ICE recovery behavior is split by severity:
+
+- `iceConnectionState: "disconnected"` emits `WEBRTC_ICE_STATE`, waits for a
+  short reconnect grace period, calls `restartIce()` when available, then emits
+  fatal `WEBRTC_ICE_RECONNECT_REQUIRED` if the browser did not recover. The
+  player-level reconnect path reloads the source so WHEP/WHIP can renegotiate.
+- `iceConnectionState: "failed"` emits fatal `WEBRTC_ICE_FAILED` immediately.
+  WHEP/WHIP one-shot signaling still relies on the player reload path for a
+  fresh offer/answer exchange.
+
+This contract is covered by TypeScript/Jest tests. Real deployment promotion
+still requires browser evidence for an Opus-capable audio path, TURN/relay
+connectivity, controlled MediaMTX interruption recovery, Edge published-stream
+playback, and long-run behavior. Edge abnormal-response handling is already
+covered for MediaMTX WHEP `404 no stream is available`.
 
 ## 格式检测工具
 
@@ -976,7 +1319,15 @@ function render() {
 
 ## 版本变更
 
-### v0.2.0 (当前)
+### v1.0.0 (当前)
+- **定位**: 首个商业基线 SDK 版本，支持范围以 `docs/supported-scenarios.md` 和 `docs/release-1.0-readiness.md` 为准。
+- **新增**: 诊断/Debug Panel、鉴权/签名/恢复、播放偏好、后端录制 API、性能监控、IIFE 发布包和长稳运行工具。
+- **增强**: WebRTC WHEP/WHIP 超时、HTTP 错误、SDP 错误、ICE gathering、ICE 断开/失败恢复诊断。
+- **增强**: HLS/DASH 质量状态与手动/自动清晰度控制。
+- **增强**: direct fMP4 HTTP/WS MSE 路径的有界队列、quota cleanup/retry 和本地 ffmpeg fixture 验证。
+- **边界**: DRM、字幕、广告/埋点、前端录制、GB28181 服务端栈、PTZ 设备执行、PSV/Cesium 具体渲染器均保持插件化、后端化或外部包边界。
+
+### v0.2.0
 - **重构**: 拆分 `tech-hlsdash` 为独立的 `tech-hls` 和 `tech-dash`
 - **新增**: `tech-fmp4` 支持无清单的 fMP4 直播流 (HTTP/WS + MSE)
 - **新增**: 格式检测工具 `formatDetector`

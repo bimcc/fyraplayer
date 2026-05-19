@@ -15,6 +15,10 @@ const NETWORK_CODE_BY_TYPE: Record<string, PlayerNetworkCode> = {
   'connect-timeout': 'CONNECT_TIMEOUT',
   'autoplay-blocked': 'AUTOPLAY_BLOCKED',
   'metadata-timeout': 'METADATA_TIMEOUT',
+  'auth-recovery-attempt': 'AUTH_RECOVERY_ATTEMPT',
+  'auth-recovery-success': 'AUTH_RECOVERY_SUCCESS',
+  'auth-recovery-failed': 'AUTH_RECOVERY_FAILED',
+  'auth-recovery-skipped': 'AUTH_RECOVERY_SKIPPED',
   'video-error': 'VIDEO_ERROR',
   'hls-warning': 'HLS_WARNING',
   'hls-fatal': 'HLS_FATAL',
@@ -35,10 +39,16 @@ const NETWORK_CODE_BY_TYPE: Record<string, PlayerNetworkCode> = {
   'ice-failed': 'WEBRTC_ICE_FAILED',
   'ice-restart': 'WEBRTC_ICE_RESTART',
   'ice-restart-failed': 'WEBRTC_ICE_RESTART_FAILED',
+  'ice-reconnect-required': 'WEBRTC_ICE_RECONNECT_REQUIRED',
   'signal-error': 'WEBRTC_SIGNAL_ERROR',
   error: 'WEBRTC_SIGNAL_ERROR',
   'parse-error': 'WEBRTC_SIGNAL_PARSE_ERROR',
   'ws-error': 'WEBRTC_SIGNAL_WS_ERROR',
+  'whep-http-error': 'WEBRTC_WHEP_HTTP_ERROR',
+  'whep-fetch-error': 'WEBRTC_SIGNAL_ERROR',
+  'whep-timeout': 'WEBRTC_WHEP_TIMEOUT',
+  'whep-answer-error': 'WEBRTC_WHEP_ANSWER_ERROR',
+  'whep-ice-gathering-timeout': 'WEBRTC_WHEP_ICE_GATHERING_TIMEOUT',
   'webrtc-audio-muted': 'WEBRTC_AUDIO_MUTED',
   'offer-timeout': 'WEBRTC_OFFER_TIMEOUT',
   'offer-error': 'WEBRTC_OFFER_ERROR',
@@ -68,6 +78,7 @@ const WEBRTC_SIGNAL_CODE_BY_TYPE: Record<string, PlayerNetworkCode> = {
 
 const FATAL_EVENT_TYPES = new Set([
   'ice-failed',
+  'ice-reconnect-required',
   'connect-timeout',
   'ws-fallback-error',
   'gb-fallback-error',
@@ -75,6 +86,10 @@ const FATAL_EVENT_TYPES = new Set([
   'fmp4-ws-closed',
   'fatal',
   'signal-error',
+  'whep-http-error',
+  'whep-fetch-error',
+  'whep-timeout',
+  'whep-answer-error',
   'error',
   'offer-timeout',
   'reconnect-exhausted'
@@ -96,6 +111,7 @@ const WARNING_EVENT_TYPES = new Set([
   'abr-fallback-error',
   'ice-restart-failed',
   'webrtc-audio-muted',
+  'whep-ice-gathering-timeout',
   'webcodecs-config-unsupported',
   'webcodecs-fallback'
 ]);
@@ -152,6 +168,14 @@ function normalizeNetworkMessage(evt: NetworkEventPayload): string {
   if (typeof evt.message === 'string' && evt.message.length > 0) return evt.message;
 
   switch (evt.type) {
+    case 'whep-http-error':
+      return `WHEP/WHIP HTTP error (${evt.status ?? 'unknown'})`;
+    case 'whep-timeout':
+      return `WHEP/WHIP signaling timeout (${evt.timeoutMs || 15000}ms)`;
+    case 'whep-answer-error':
+      return 'WHEP/WHIP answer SDP failed to apply';
+    case 'whep-ice-gathering-timeout':
+      return `WHEP/WHIP ICE gathering timed out (${evt.timeoutMs || 5000}ms); posting current local SDP`;
     case 'disconnect':
       return `连接断开 (状态: ${evt.state || 'unknown'})`;
     case 'ice-failed':
@@ -195,6 +219,14 @@ function normalizeNetworkMessage(evt: NetworkEventPayload): string {
       return '自动播放被浏览器阻止，请点击播放';
     case 'metadata-timeout':
       return '视频元数据加载超时';
+    case 'auth-recovery-attempt':
+      return `Auth recovery attempt ${evt.attempt ?? 'unknown'}/${evt.maxRetries ?? 'unknown'}`;
+    case 'auth-recovery-success':
+      return 'Auth recovery reloaded the current source';
+    case 'auth-recovery-failed':
+      return `Auth recovery failed: ${evt.reason || 'unknown'}`;
+    case 'auth-recovery-skipped':
+      return `Auth recovery skipped: ${evt.reason || 'unknown'}`;
     case 'catchup':
       return `追帧: 丢弃 ${evt.dropped} 帧，保留 ${evt.kept} 帧 (模式: ${evt.mode})`;
     case 'jitter':
@@ -205,6 +237,8 @@ function normalizeNetworkMessage(evt: NetworkEventPayload): string {
       return `正在重启 ICE: ${evt.reason || 'unknown'}`;
     case 'ice-restart-failed':
       return 'ICE 重启失败';
+    case 'ice-reconnect-required':
+      return evt.message || 'WebRTC ICE did not recover; reloading source';
     case 'webrtc-audio-muted':
       return 'WebRTC audio track is present but muted; check source codec and server transcoding';
     case 'ws-open':

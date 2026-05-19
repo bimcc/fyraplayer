@@ -24,7 +24,7 @@ Move out of core:
 - analytics/reporting destinations;
 - auth/signing/server URL conversion;
 - metadata parsing and business semantics;
-- DRM, subtitles, ads, recording, screenshots;
+- DRM, subtitles, ads, browser-side recording, screenshots;
 - renderer integrations such as PSV/Cesium;
 - vendor-specific stream-server behavior unless exposed through a generic adapter.
 
@@ -36,13 +36,16 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 
 | Capability | Current Form | Location | Notes |
 |---|---|---|---|
-| UI controls | `createUiComponentsPlugin()` | `src/ui/shell.ts`, `src/plugins/ui-components.ts` | Explicit plugin entry; `PlayerOptions.ui` is not an active configuration surface |
-| Storage | `storagePlugin`, `createStoragePlugin()` | `src/plugins/storage.ts` | Persists last source index with lifecycle cleanup and bounded restore |
+| UI controls | `createUiComponentsPlugin()` | `src/ui/shell.ts`, `src/plugins/ui-components.ts` | Explicit plugin entry with quality/source controls, interruption status layer, retry button, preference events, diagnostics entry, screenshot feedback, and recording toggle hook; `PlayerOptions.ui` is not an active configuration surface |
+| Storage/preferences | `storagePlugin`, `createStoragePlugin()` | `src/plugins/storage.ts` | Persists last source index plus opt-in volume, mute, speed, quality, and low-latency preferences with lifecycle cleanup and bounded restore |
 | Metrics | `metricsPlugin`, `createMetricsPlugin()` | `src/plugins/metrics.ts` | Reporter-based plugin factory; default export remains console/debug compatible |
 | Performance monitor | `createPerformanceMonitorPlugin()` | `src/plugins/performance.ts` | Optional budget/sampling plugin; emits `PERFORMANCE_BUDGET` QoS warnings without changing playback |
 | Reconnect logs | `reconnectPlugin`, `createReconnectPlugin()` | `src/plugins/reconnect.ts` | Optional diagnostics callbacks/logging with lifecycle cleanup; not reconnect policy owner |
+| Diagnostics snapshot/export/debug panel | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | `src/plugins/diagnostics.ts` | Optional support/QA surface that collects state, source, Tech, stats, network, QoS, retry and ICE clues, with a lightweight DOM panel when enabled |
+| Auth/signing/recovery | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | `src/plugins/auth.ts` | Optional request/signal middleware helper plus runtime recovery plugin for explicit 401/403 or custom expiry matchers |
 | Source resolver | `createSourceResolverMiddleware()` | `src/plugins/engines/sourceResolver.ts` | Converts `auto` sources through `EngineFactory` into primary/fallback `Source` objects |
 | Metadata parser | `createMetadataPlugin()` | `src/plugins/metadata/KlvBridge.ts` | Optional parser bridge for KLV/SEI/private-data business semantics |
+| Generic render outputs | `CanvasFrameBuffer`, `BaseTarget` | `src/render/` | Generic video/canvas bridge helpers only; PSV/Cesium/map/panorama adapters stay external |
 | Third-party Techs | `PluginContext.techs.register()` | `src/types.ts`, `src/player.ts`, `src/core/techManager.ts` | Controlled plugin API for custom Tech registration, replacement, tech-order insertion, and teardown |
 | Custom plugins | `PluginCtor` | `src/types.ts` | Supports lifecycle with optional `destroy()` |
 
@@ -56,8 +59,8 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 | Stream server engines | `EngineFactory`, engine classes, `createSourceResolverMiddleware()` | Keep URL conversion optional; middleware is the standard player integration pattern |
 | Middleware | `request/signal/control/resolve` entries | Keep as core extension point; provide common plugin factories |
 | Tech registration | Built-ins plus `PluginContext.techs.register()` | Keep third-party Techs plugin-owned; use module augmentation for custom `TechName`/`Source` types |
-| Render targets | `render/` abstractions plus external PSV/Cesium docs | Keep external renderers as plugins/adapters |
-| GB28181 gateway control | Built-in adapter Tech | Keep as thin invite/control adapter; full SIP/RTP/PS server behavior belongs in backend or external gateway packages |
+| Render targets | `render/` abstractions plus external PSV/Cesium docs and `docs/render-bridges.md` | Keep external renderers as plugins/adapters |
+| GB28181 gateway control / PTZ | Built-in adapter Tech | Keep as thin invite/control adapter. `player.control('gb:ptz')` submits UI/business intent plus session context to the gateway; full SIP/RTP/PS, GB PTZ XML/SIP MESSAGE, ONVIF/vendor SDK mapping, permissions, and device execution state belong in backend or external gateway packages |
 
 ---
 
@@ -66,15 +69,15 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 | Plugin | Priority | Status | Why Plugin |
 |---|---|---:|---|
 | Analytics/Reporter | P1 | partial | Metrics and performance reporter hooks exist; deployment-specific exporters are still external |
-| Error UX / Error Codes | P1 | todo | Core should emit structured errors; products decide display/reporting |
+| Error UX / Error Codes | P1 | partial | Core emits structured errors and diagnostics can export them; products still decide final display/reporting |
 | Source Resolver | P1 | done | Engine URL conversion and fallback chains are vendor/project-specific |
-| Auth / Signing | P1 | todo | Token, cookie, and URL signing policies are business-specific |
-| Playback Preferences | P2 | partial | Volume, mute, speed, source, and quality persistence are optional UX; quality API exists, persistence remains plugin work |
+| Auth / Signing | P1 | done | Middleware helper exists for headers, credentials, token injection, URL signing, and refreshed headers; recovery plugin can refresh app-owned auth state and reload current source on explicit 401/403 or custom matcher |
+| Playback Preferences | P2 | done | Volume, mute, speed, source, quality, and low-latency preference persistence are optional storage plugin features |
 | Metadata Parser | P2 | done | KLV, SEI, ID3, and private data semantics differ by domain; `createMetadataPlugin()` keeps parsing optional |
-| Debug Panel | P2 | todo | Useful for development, too heavy/noisy for core |
+| Debug Panel | P1 | partial | Lightweight diagnostics panel exists; richer branded support-console UX remains product UI work |
 | Performance Monitor | P2 | done | Sampling/budget rules are optional and product-tunable |
-| Screenshot / Recording | P2 | todo | Product feature, not required for playback |
-| Render Target Bridge | P2 | todo | PSV/Cesium/canvas integrations should stay optional |
+| Screenshot / Recording | P2 | done for current scope | UI screenshot download/feedback and recording toggle hook exist; backend recording API plugin supports start/stop/status, structured recording events, and normalized backend errors. Browser-side recording, permissions, storage, retention, and privacy policy stay out of scope/product-owned |
+| Render Target Bridge | P2 | done for player package boundary | `docs/render-bridges.md` documents external bridge ownership and supported video/canvas/event/metadata outputs; concrete PSV/Cesium/map adapters remain external |
 | DRM | P3 | deferred | Requires EME/license/vendor config; not current focus |
 | Subtitles/Text Tracks | P3 | deferred | Important later, but should not block playback stabilization |
 | Ads / SSAI / CSAI | P3 | deferred | Product/business feature; separate lifecycle and compliance concerns |
@@ -98,6 +101,12 @@ interface PluginContext {
 Implemented additions:
 
 - controlled `TechRegistry.register()` surface with unregister handles;
+- diagnostics/debug panel plugin entrypoints;
+- auth/signing middleware helper for construction-time middleware composition;
+- auth recovery plugin for explicit 401/403 or product-provided expiry matchers;
+- `preference` event for pluginized playback preference persistence;
+- UI action hooks for diagnostics, screenshot, and recording toggle;
+- backend recording API plugin handle/events and normalized backend error codes;
 
 Still recommended:
 
@@ -123,6 +132,11 @@ Do not expose mutable internal player state directly. Add narrow APIs only when 
 | PL-006 | P3 | Keep DRM and subtitles as plugin placeholders | No core implementation until playback baseline is stable |
 | PL-007 | P2 | done: add optional performance budget monitor | Consumers can track FPS/latency/backpressure budgets without core playback coupling |
 | PL-008 | P1 | done: add lifecycle-safe storage/reconnect plugin factories | Built-in utility plugins detach listeners on destroy |
+| PL-009 | P1 | done: add optional diagnostics snapshot/export/debug panel plugin | Support/QA can inspect current state and export recent evidence without parsing console output |
+| PL-010 | P1 | done: add auth/signing and recovery helpers | Commercial token/header/signature policies can be composed without core changes; optional recovery can refresh app-owned auth state and reload the current source without adding auth policy to core |
+| PL-011 | P2 | done: expand playback preference persistence | Volume/mute/speed/low-latency/quality preferences stay optional and scoped |
+| PL-012 | P2 | done for current capture scope; render bridges remain external | UI screenshot and recording-toggle hooks exist; backend recording API plugin support exists with structured errors; browser recording stays out of scope; PSV/Cesium/map/panorama integrations stay out of core |
+| PL-013 | P2 | done: document render bridge boundary | `docs/render-bridges.md` defines the bridge contract without adding renderer dependencies to core |
 
 ---
 

@@ -10,21 +10,29 @@ This document is the long-term tracking baseline for moving FyraPlayer from an i
 
 ## 1. Current Position
 
-FyraPlayer currently has a good architectural direction and broad protocol coverage, but it should not yet be treated as a commercial-grade general-purpose player SDK.
+As of the 2026-05-19 1.0 closure, FyraPlayer is ready to be positioned as a
+controlled commercial-baseline player SDK for the scenarios documented in
+`docs/supported-scenarios.md` and `docs/release-1.0-readiness.md`.
 
-Recommended positioning:
+This is a conservative 1.0 claim:
 
-- Suitable: internal validation, controlled project integration, protocol experiments, GB28181/WebRTC/HLS scenario hardening.
-- Not yet suitable: public commercial SDK promise, unattended production rollout across unknown streams/browsers, DRM-protected consumer media delivery.
-- Current commercial baseline is summarized in `docs/supported-scenarios.md`.
+- Suitable: controlled commercial product integration, documented HLS/DASH/MP4
+  playback, ws-raw MSE fallback, optional UI/diagnostics/auth/storage/recording
+  plugins, MediaMTX HLS/WHEP deployments with matching evidence, and SDK
+  integration through ESM or IIFE.
+- Conditional: broader WebRTC deployments, TURN relay, controlled interruption
+  recovery, project-specific direct fMP4 streams, GB28181 gateway integrations,
+  and external PSV/Cesium/map/panorama bridges.
+- Not in 1.0 scope: DRM, subtitles/text tracks, ads/business analytics,
+  browser-side recording, full GB28181 server stack, PTZ device execution, and
+  unattended rollout across unknown streams/browsers.
+- Current commercial baseline is summarized in `docs/supported-scenarios.md`;
+  dated evidence is maintained in `docs/playback-verification-matrix.md`.
 
-Primary blockers found on 2026-05-16:
-
-- Build and test are not reproducible in the current workspace.
-- Public API, docs, and implementation have drift.
-- Core playback paths need stronger lifecycle, observability, and long-run stability guarantees.
-- ws-raw/WebCodecs path is valuable but still experimental as a commercial primary path.
-- Browser/runtime compatibility matrix is not yet formalized.
+Historical blockers found on 2026-05-16 are kept in the review log. The build,
+test, public API, plugin lifecycle, release, and documentation blockers have
+been addressed for 1.0. Browser/runtime matrix expansion and some live-stream
+hardening items remain active follow-ups rather than release blockers.
 
 ---
 
@@ -79,24 +87,44 @@ Status values:
 | CR-002 | P0 | done | TypeScript | Restore strict `tsc -p tsconfig.json` success | No implicit `any`; third-party package types resolve |
 | CR-003 | P0 | done | API Consistency | Align docs and public API for `currentTime`, UI options, events, and exports | README/docs examples compile against package exports |
 | CR-004 | P0 | done | Release Hygiene | Define package entrypoints and bundle contract | `exports`, `dist`, examples, and docs agree |
-| CR-005 | P1 | doing | Test Matrix | Add browser/manual verification matrix for core protocols | Matrix covers Chrome/Edge/Safari where applicable, with stream URLs and expected events |
-| CR-006 | P1 | doing | WebRTC/Reconnect | Harden session lifecycle, ready/error semantics, reconnect and stats | Chrome + local MediaMTX WHEP startup/stats/destroy-recreate are verified; Player reconnect same-Tech retry and pending timer clearing are unit-covered; real disconnect/reconnect, Edge, and long-run cases remain pending |
+| CR-005 | P1 | doing | Test Matrix | Add browser/manual verification matrix for core protocols | Matrix covers Chrome/Edge/Safari where applicable, with stream URLs and expected events. Edge 148 smoke evidence now exists for HLS, HLS fMP4/CMAF, DASH, MP4, MediaMTX HLS on custom port `28888`, MediaMTX WHEP published-stream playback on custom port `28889`, and WHEP 404 handling; Safari/Firefox still need records |
+| CR-006 | P1 | doing | WebRTC/Reconnect | Harden session lifecycle, ready/error semantics, reconnect and stats | Chrome + local MediaMTX WHEP startup/stats/destroy-recreate are verified; Player reconnect same-Tech retry and pending timer clearing are unit-covered; optional UI now shows generic stream-interruption/reconnect copy; one real browser ICE disconnected -> reconnect recovery was observed; Edge WHEP server-abnormal-response handling, published-stream playback, and 30-minute WHEP long-run are verified; controlled OBS/MediaMTX stop-start interruption and TURN relay remain pending |
 | CR-007 | P1 | done | HLS/DASH | Normalize ready/error/level/stats semantics and HLS live config boundaries | `ready` means playable or explicitly documented; error recovery behavior is tested; normal HLS is explicitly buffered while LL-HLS remains opt-in |
-| CR-008 | P1 | doing | fMP4 | Add buffer queue backpressure and quota policy | `pendingBuffers` has bounded memory behavior under slow/blocked SourceBuffer |
+| CR-008 | P1 | done | fMP4 | Add buffer queue backpressure and quota policy | `pendingBuffers` has bounded memory behavior under slow/blocked SourceBuffer, unit coverage verifies overflow and quota cleanup/retry; real-stream evidence remains tracked separately in `CR-020` |
 | CR-009 | P1 | done | ws-raw | Decide commercial path for experimental pipeline vs MSE fallback | Default behavior and experimental contract are documented and tested |
 | CR-010 | P1 | done | GB28181 | Define server-gateway adapter boundary for invite/bye/ptz/query and standard FLV/TS playback URLs | Unit adapter contract is covered; real backend/device verification remains tracked in `CR-005` |
 | CR-011 | P1 | done | Observability | Standardize error codes, network events, metrics, and QoS payloads | Consumers can handle events without parsing console output |
 | CR-012 | P1 | done | UI/Plugin | Make UI integration explicit and lifecycle-safe | UI is plugin-only and shell lifecycle cleanup is verified |
-| CR-013 | P2 | doing | Performance | Profile WebCodecs/canvas/WebGL render paths | Budget monitor and target thresholds are documented; real long-run/browser profiling evidence remains pending |
+| CR-013 | P2 | doing | Performance | Profile WebCodecs/canvas/WebGL render paths | Budget monitor, target thresholds, 30-minute sampling procedure, `pnpm long-run:browser` CDP runner, and `pnpm long-run:assert` report gate are documented. Edge WHEP 30-minute run passed; Edge HLS stayed playable for 30 minutes but strict zero-error assertion failed due to 3 recovered hls.js fatal/reconnect events |
 | CR-014 | P2 | done | Docs | Add "known limitations" and "supported scenarios" docs | Users can tell what is stable, experimental, or unsupported |
 | CR-015 | P3 | deferred | DRM | Keep DRM as plugin placeholder and Tech adapter design | EME integration can be added without changing core player shape |
 | CR-016 | P3 | deferred | Subtitles | Keep subtitles/text-tracks as plugin placeholder | HLS/DASH/native text tracks can be exposed later without blocking core work |
 | CR-017 | P1 | done | Plugins | Align plugin boundaries with `docs/pluginization-map.md` | Core/plugin split is documented before new feature work expands |
 | CR-018 | P1 | done | Quality/ABR | Expose HLS/DASH quality state and manual/auto selection through public API and UI | `getQualityState()` / `setQualityLevel()` are typed, tested, documented, wired into the optional UI selector, and browser-verified on multi-rendition HLS/DASH |
+| CR-019 | P1 | doing | WebRTC Commercial Hardening | Complete Opus audio, ICE recovery, STUN/TURN config, WHEP timeout/error handling, and server-abnormal response evidence | WHEP timeout / non-2xx / answer / ICE-gathering diagnostics, STUN/TURN API docs, unit-covered ICE disconnected/failed semantics, Chrome WHEP audio RTP delivery, one real ICE disconnected recovery, Chrome + Edge WHEP 404 handling, Edge WHEP published-stream playback, and Edge 30-minute WHEP long-run evidence exist; controlled MediaMTX stop-start interruption, TURN relay, and Opus speaker-output validation for the current Edge setup remain pending |
+| CR-020 | P1 | doing | fMP4 Real Stream Evidence | Promote direct HTTP/WS fMP4 from conditional only after browser evidence | HTTP direct fMP4 now has a unit-covered non-blocking load/background pump contract and bounded append queue; dated browser evidence exists for a local ffmpeg fixture server, including Chrome manual playback and a 10-minute Edge long-run. Keep collecting project-specific HTTP/WS fMP4 streams before making it a broad core selling point |
+| CR-021 | P1 | done | Diagnostics / Debug UX | Convert structured `network`, `qos`, `stats`, player state, source, Tech, retry and ICE clues into product-readable diagnostics | Optional diagnostics plugin exposes snapshot/export callbacks and an optional lightweight panel without core playback coupling |
+| CR-022 | P1 | done | Auth / Signing | Add pluginized request signing and token refresh helpers | Middleware helper injects request/signal headers, credentials, tokens, signed URLs, and refreshed headers; recovery plugin refreshes app-owned auth state and reloads current source on explicit 401/403 or custom matcher, with retry/cooldown guards and normalized recovery events |
+| CR-023 | P2 | done | Playback Preferences | Expand storage plugin beyond last source | Volume, mute, playback speed, low-latency preference, quality mode, and last source can be persisted with scoped keys and lifecycle cleanup |
+| CR-024 | P2 | done | Commercial UI Controls | Move from usable UI plugin toward product-ready controls | Optional UI has generic interruption/reconnect status, retry, quality/source controls, preference events, diagnostics entry hook, screenshot feedback, and recording toggle hook; product-specific visual polish remains app-owned |
+| CR-025 | P2 | done | Release / Integration Experience | Prepare SDK consumption assets | ESM/plugin entrypoints, all-in-one CDN/IIFE bundle script, minimal IIFE demo, changelog/release notes, version compatibility policy, migration notes, and release checklist exist in `README.md`, `docs/sdk-release-integration.md`, and `CHANGELOG.md` |
+| CR-026 | P2 | done | Render Bridges | Keep PSV/Cesium/map/panorama integrations outside core but documented | `docs/render-bridges.md` defines the external bridge boundary, supported video/canvas/event/metadata outputs, PSV/Cesium ownership, cleanup checklist, and public API smoke covers `CanvasFrameBuffer` / `BaseTarget` |
+| CR-027 | P2 | done | Screenshot / Recording | Provide optional capture utilities | UI screenshot feedback exists; backend recording API plugin supports start/stop/status, typed events, normalized errors, and lifecycle cleanup; browser-side recording remains intentionally out of scope |
+| CR-028 | P3 | deferred | Ads / Business Analytics | Keep SSAI/CSAI and business event exporters out of current focus | Placeholder exists; not part of current core stabilization work |
 
 ---
 
 ## 5. Commercial Readiness Gates
+
+### 1.0 Gate Summary
+
+For `1.0.0`, Gates A and C are closed for the package/release contract. Gate B
+is closed only for the scenarios explicitly marked verified in
+`docs/supported-scenarios.md`; conditional protocol/browser combinations stay
+tracked under `CR-005`, `CR-006`, `CR-013`, `CR-019`, and `CR-020`. Gate D is
+implemented for diagnostics, auth/signing, preferences, UI controls, recording
+API hook, release integration, and render bridge boundaries, while DRM,
+subtitles, ads, and analytics remain deferred.
 
 ### Gate A: Engineering Baseline
 
@@ -129,14 +157,68 @@ Required before commercial SDK positioning:
 
 Only after Gates A-C:
 
+- Diagnostics/debug panel plugin.
+- Auth/signing/token refresh plugin.
+- Playback preferences plugin expansion.
+- Commercial UI controls and capture utilities.
+- CDN/IIFE bundle and release notes workflow.
+- External render bridges for PSV/Cesium/map/panorama integrations.
 - DRM plugin.
 - Subtitle/text track plugin.
-- Advanced analytics/reporting plugins.
+- Advanced ads and analytics/reporting plugins.
 - Enterprise-specific integrations.
 
 ---
 
-## 6. Deferred Plugin Placeholders
+## 6. Commercial Product Path
+
+The current commercial path is:
+
+1. WebRTC commercial hardening (`CR-019`)
+   - Opus-capable audio chain evidence.
+   - Browser evidence for ICE `failed` / `disconnected` recovery with MediaMTX
+     interruption; the code-level recovery contract is already unit-covered.
+   - STUN/TURN relay browser evidence; configuration examples and API
+     documentation already exist.
+   - WHEP timeout, non-2xx response, malformed SDP, ICE-gathering timeout, and server exception handling evidence.
+
+2. Direct fMP4 evidence (`CR-020`)
+   - The project now has unit coverage and bounded backpressure/quota behavior.
+   - The user has reported a real direct fMP4 stream can play.
+   - Do not promote fMP4 as a commercial selling point until a dated browser record captures the real stream, Tech selection, stats, and 10-30 minute bounded-buffer behavior.
+   - If fMP4 is not a headline product capability, keep it `conditional`.
+
+3. Product diagnostics (`CR-021`)
+   - Baseline is implemented through `createDiagnosticsPlugin()` and `createDebugPanelPlugin()`.
+   - Current surface includes `network.code`, `qos.code`, `stats`, current state, Tech, source, quality, ICE/retry clues, buffer fields, recent events, panel clear, and JSON export.
+   - Keep it optional so production apps can disable panel UI while still collecting diagnostics.
+
+4. Commercial stream access (`CR-022`)
+   - Baseline is implemented through `createAuthSigningMiddleware()` and `createAuthRecoveryPlugin()`.
+   - Request headers, signed URLs, cookies/credentials, token injection, and refreshed headers belong in middleware helpers.
+   - Token-expiry recovery is optional and narrow: it defaults to explicit HTTP `401` / `403`, can be customized with `match()`, calls an app-owned `refresh()` hook, and reloads the current source so resolver/auth middleware runs again.
+   - Product code still owns token storage, refresh endpoints, cookie policy, and backend-specific expiry semantics.
+   - Core should keep only the middleware/request config and public event contracts.
+
+5. Playback preferences and UI (`CR-023`, `CR-024`)
+   - Baseline preference persistence is implemented through `createStoragePlugin()`.
+   - Persisted fields: volume, muted state, playback speed, low-latency preference, quality mode, and last source.
+   - Optional UI now emits preference events and includes a generic error/reconnect status layer with retry action.
+   - UI baseline also exposes diagnostics entry, screenshot success/failure feedback, and a recording toggle hook.
+   - Rich branded product styling and full recording implementation remain optional product/plugin work.
+
+6. SDK release and integration (`CR-025`, `CR-026`, `CR-027`)
+   - SDK release/integration baseline is implemented through ESM exports, plugin subpath exports, all-in-one browser IIFE bundle generation, a minimal IIFE demo, changelog notes, compatibility policy, migration notes, and a release checklist.
+   - Render bridge boundary is documented in `docs/render-bridges.md`: FyraPlayer provides video/canvas/event/metadata outputs, while PSV/Cesium/map/panorama adapters remain external.
+   - Screenshot feedback stays in the UI shell; backend recording stays in an optional plugin.
+
+7. Deferred product extensions (`CR-015`, `CR-016`, `CR-028`)
+   - DRM and subtitles remain plugin placeholders.
+   - SSAI/CSAI ads and business analytics exporters are not current priorities.
+
+---
+
+## 7. Deferred Plugin Placeholders
 
 ### DRM Plugin Placeholder
 
@@ -180,7 +262,7 @@ Notes:
 
 ---
 
-## 7. Review Log
+## 8. Review Log
 
 ### 2026-05-16 Review
 
@@ -527,7 +609,7 @@ Result:
 
 Summary:
 
-- Advanced `CR-008` from `todo` to `doing`.
+- Closed `CR-008` for the code-level fMP4 backpressure/quota policy.
 - Added `BufferPolicy.fmp4` with bounded queue and quota controls:
   - `maxPendingSegments`
   - `maxPendingBytes`
@@ -547,8 +629,33 @@ Validation:
 
 Remaining:
 
-- Browser verification for real fMP4 sources is still pending in `CR-005`.
-- If a project-specific fMP4 source becomes available, record bounded-buffer behavior in `docs/playback-verification-matrix.md` and then consider closing `CR-008`.
+- Browser verification for real direct HTTP/WS fMP4 sources is now partially proven in `CR-020` via a local ffmpeg fixture server. The Apple HLS fMP4/CMAF sample only validates HLS Tech, not direct `FMP4Tech`.
+- If a project-specific fMP4 source becomes available, record its stream shape and bounded-buffer behavior in `docs/playback-verification-matrix.md` before promoting direct fMP4 beyond the current fixture-backed support claim.
+
+### 2026-05-19 fMP4 HTTP Lifecycle Hardening Pass
+
+Summary:
+
+- Advanced `CR-020` from code-contract-only to dated browser evidence.
+- Added a local ffmpeg-backed direct fMP4 fixture server for repeatable browser validation. It serves `fmp4test.mp4` as a looping fragmented MP4 at `/stream.fmp4` and exposes `/healthz`.
+- Fixed HTTP direct fMP4 load semantics: after the HTTP response and MSE
+  `SourceBuffer` are ready, `FMP4Tech.load()` resolves and pumps the response
+  body in the background. Long-lived live responses no longer keep
+  `player.init()` / source switching pending until the stream ends.
+- Added codec-string overrides to `FMP4Source` so direct fMP4 fixtures can use exact `avc1.4d401f/mp4a.40.2` MIME hints instead of a guessed default.
+- Kept existing bounded append queue and quota cleanup behavior intact.
+- Added a regression test that uses a never-ending HTTP body and verifies load resolves, `ready` fires, and the first chunk appends through the background pump.
+
+Validation:
+
+- `cmd /c pnpm exec jest tests/fmp4-tech.test.ts --runInBand`: passed, 1 suite / 5 tests.
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm bundle:examples`: passed.
+- Edge direct fMP4 10-minute long-run passed: `pnpm long-run:browser -- --url http://127.0.0.1:3000/basic.html --source-url http://127.0.0.1:18080/stream.fmp4 --source-type fmp4 --duration 10m --interval 10s --out .fyra-long-run\ffmpeg-fmp4-edge-10m.json --fail-on-error --expect-live`. Summary: `tech=fmp4`, `readyState=4`, `960x540`, currentTime `0.001774 -> 599.913408`, 62 samples, 17,981 total / 3 dropped frames, heap +1.53 MiB, DOM stable, 0 error events, 0 fatal network events.
+
+Remaining:
+
+- Direct HTTP/WS fMP4 now has browser evidence for a local ffmpeg-backed fixture. Project-specific stream shapes still need their own records before broader promotion.
 
 ### 2026-05-17 HLS/DASH Semantics Closure
 
@@ -906,7 +1013,630 @@ Result:
 
 ---
 
-## 8. How To Update This Document
+### 2026-05-18 Interruption UI And fMP4 HLS Test Source Pass
+
+Summary:
+
+- Added a generic interruption status in the optional UI shell:
+  - reconnect attempt: `视频流中断，正在重新连接...`;
+  - reconnect exhausted: `视频流中断，请刷新或重试`;
+  - generic fatal interruption before retry: `视频流中断，正在尝试恢复...`.
+- The wording is intentionally not split by live/VOD yet. HLS/DASH live status is Tech/manifest specific, while only direct `FMP4Source` currently has an explicit `isLive` field. A generic message avoids wrong classification until the public Source/Tech contract grows a stable live-state flag.
+- Added `Apple HLS fMP4/CMAF sample` to the demo preset list with:
+  - `type: 'hls'`;
+  - URL `https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8`.
+- Clarified that this Apple stream validates HLS playback with fMP4/CMAF segments, not the no-manifest direct `FMP4Tech` path.
+- Documented that prior Chrome local-origin testing hit CORS on the Apple sample; CORS should be logged as an environment limitation, not confused with direct fMP4 support.
+- Documented 30-minute live-run acceptance as tool-assisted sampling plus manual observation. Manual watching is useful for subjective smoothness/audio, but commercial acceptance requires sampled evidence for memory, media element count, dropped frames, state, and reconnect behavior.
+- Added a demo-page sampling helper under `window.fyraLongRun` so manual browser runs can collect 5-10 second JSON samples without a separate automation dependency.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest tests/ui-components.test.ts tests/player.test.ts --runInBand`: passed, 2 suites / 18 tests.
+- `pnpm bundle:examples`: passed.
+- `pnpm check:sources`: passed, verified 17 example sources.
+- Full follow-up verification passed: `pnpm exec jest --runInBand` (21 suites / 106 tests), `pnpm build`, `pnpm check:public-api`, `pnpm check:exports` (22 package export files), and `git diff --check`.
+
+Remaining:
+
+- Controlled MediaMTX interruption evidence still needs a dated run: stop/restart OBS or MediaMTX, verify reconnect events, observe the UI message, and record whether WebRTC recovers without refreshing.
+- 30-minute HLS and WebRTC long-run evidence remains under `CR-006` / `CR-013`.
+
+---
+
+### 2026-05-18 Commercial Product Path And Diagnostics Plugin Pass
+
+Summary:
+
+- Consolidated the commercial product path into explicit roadmap items:
+  - `CR-019` WebRTC commercial hardening;
+  - `CR-020` direct fMP4 real-stream evidence;
+  - `CR-021` diagnostics/debug UX;
+  - `CR-022` auth/signing/token refresh;
+  - `CR-023` playback preferences;
+  - `CR-024` commercial UI controls;
+  - `CR-025` release/integration experience;
+  - `CR-026` external render bridges;
+  - `CR-027` screenshot/recording;
+  - `CR-028` deferred ads/business analytics.
+- Updated `docs/pluginization-map.md` so diagnostics, auth/signing, preferences, capture, and render bridges stay optional rather than core playback requirements.
+- Updated `docs/supported-scenarios.md`:
+  - direct fMP4 is no longer described as having no user real-stream signal; the user has reported a direct fMP4 stream plays;
+  - commercial support still remains conditional until dated browser evidence records the real stream, active Tech, stats, and bounded-buffer behavior;
+  - WebRTC broader support still needs TURN/STUN relay, controlled interruption,
+    Edge published-stream playback, and long-run evidence. Opus RTP and one ICE
+    recovery path were verified later on Chrome; WHEP abnormal-response handling
+    is now verified on Chrome and Edge.
+- Added `createDiagnosticsPlugin()` as an optional support/QA plugin:
+  - captures current state, active Tech, current source/index, quality state;
+  - tracks latest `stats`, `network`, `qos`, and `error`;
+  - tracks reconnect attempts/exhaustion, ICE state, WebRTC audio-muted clue, buffer level, fMP4 pending queue clues;
+  - keeps a bounded recent event history;
+  - exposes `snapshot()`, `exportJson()`, and `clear()`.
+- Exported diagnostics through both `fyraplayer/plugins/diagnostics` and aggregated `fyraplayer/plugins`.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest tests/diagnostics-plugin.test.ts --runInBand`: passed, 1 suite / 2 tests.
+- `pnpm check:public-api`: passed.
+- Full follow-up verification passed: `pnpm exec jest --runInBand` (22 suites / 108 tests), `pnpm build`, `pnpm bundle:examples`, `pnpm check:sources` (17 example sources), `pnpm check:exports` (24 package export files), and `git diff --check`.
+
+Remaining:
+
+- Expand the lightweight Debug Panel into a branded product support console only if a product requires it.
+- Add deployment-specific auth backend examples only when a real auth service contract exists.
+- Record the user's working direct fMP4 stream in `docs/playback-verification-matrix.md`.
+- Continue `CR-019` WebRTC Opus/TURN/ICE/WHEP hardening.
+
+---
+
+### 2026-05-18 Debug Panel And Auth Signing Middleware Pass
+
+Summary:
+
+- Completed the `CR-021` baseline by adding a lightweight visual debug panel on top of diagnostics:
+  - state, Tech, source, URL, quality, FPS/bitrate, buffer/pending clues;
+  - latest network/QoS code, reconnect counters, ICE state, recent event count;
+  - JSON export and clear buttons;
+  - lifecycle cleanup removes the panel on player/plugin destroy.
+- Added `createDebugPanelPlugin()` as a convenience wrapper around `createDiagnosticsPlugin({ panel })`.
+- Started `CR-022` with `createAuthSigningMiddleware()`:
+  - supports request/signal middleware stages;
+  - injects static headers, credentials, bearer or custom token headers, signed URLs, refreshed headers, and token expiry callback;
+  - writes the resulting headers/credentials into `source.request`.
+- Wired request config into playback paths:
+  - HLS hls.js XHR/fetch requests use headers and credentials;
+  - direct HTTP fMP4 fetch uses headers and credentials;
+  - WebRTC WHEP/WHIP signaling fetch uses headers and credentials;
+  - DASH custom headers are passed to dash.js, while credentials need deployment validation before being promised.
+- Exported both features through direct plugin subpaths and the aggregated `fyraplayer/plugins` entry.
+- Updated API, support, pluginization, roadmap, and verification docs.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest tests/diagnostics-plugin.test.ts tests/auth-plugin.test.ts tests/player.test.ts --runInBand`: passed, 3 suites / 23 tests.
+- `pnpm check:public-api`: passed.
+
+Remaining:
+
+- `CR-022` still needed a narrow runtime recovery helper at this point; it was closed later with `createAuthRecoveryPlugin()`.
+- `CR-024` diagnostics entry, screenshot feedback, and recording hooks were completed in the later UI hook pass; product-specific visual polish remains app-owned.
+
+---
+
+### 2026-05-18 Playback Preferences And UI Controls Pass
+
+Summary:
+
+- Completed the `CR-023` baseline in `createStoragePlugin()`:
+  - keeps the legacy source-index key for backwards compatibility;
+  - adds a structured `preferencesKey`;
+  - optionally persists and restores source index, volume, muted state, playback speed, quality mode, and low-latency preference;
+  - reapplies quality after `ready` and ignores unsupported Techs;
+  - keeps all listeners lifecycle-clean on plugin destroy.
+- Added a typed `preference` event to the public player event map.
+- Updated the optional UI shell so user changes emit preference events for:
+  - volume;
+  - muted state;
+  - playback speed;
+  - quality selection;
+  - source selection.
+- Advanced `CR-024` from todo to doing:
+  - added a generic interruption/reconnect status layer;
+  - shows network/retry detail when available;
+  - exposes a retry button after reconnect exhaustion;
+  - moved UI DOM listeners into the existing cleanup tracker to avoid duplicated listeners after reattach.
+- Updated API, support, pluginization, roadmap, and verification docs.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest --runTestsByPath tests/ui-components.test.ts tests/storage-reconnect-plugin.test.ts tests/player.test.ts --runInBand`: passed, 3 suites / 24 tests.
+- `pnpm check:public-api`: passed.
+- Full follow-up validation passed: `pnpm exec jest --runInBand` (23 suites / 114 tests), `pnpm build`, `pnpm bundle:examples`, `pnpm check:exports` (26 package export files), `pnpm check:sources` (17 example sources), and `git diff --check`.
+
+Remaining:
+
+- Full recording remains `CR-027` product/plugin work; the UI hook is not a recorder.
+- Preference persistence is local storage only; cross-device/account sync belongs in a product integration plugin.
+
+---
+
+### 2026-05-18 UI Diagnostics Screenshot Recording Hook Pass
+
+Summary:
+
+- Completed the `CR-024` UI baseline:
+  - diagnostics button can call product-provided `onDiagnostics`;
+  - screenshot button now downloads a PNG, shows success/failure status, and calls `onScreenshot` with `Blob`, dimensions, filename, player, and video;
+  - optional recording button calls `onRecordToggle`, updates active UI only after the hook succeeds, and shows failure feedback when the product hook fails;
+  - optional diagnostics/recording controls stay hidden when disabled, including after responsive layout changes.
+- Exported `UiActionContext`, `UiScreenshotEvent`, and `UiRecordToggleEvent` through `fyraplayer/plugins/ui-components`.
+- Updated API, support, pluginization, roadmap, and verification docs.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest --runTestsByPath tests/ui-components.test.ts tests/storage-reconnect-plugin.test.ts tests/player.test.ts --runInBand`: passed, 3 suites / 25 tests.
+- `pnpm check:public-api`: passed.
+- Full follow-up validation passed: `pnpm exec jest --runInBand` (23 suites / 114 tests), `pnpm build`, `pnpm bundle:examples`, `pnpm check:exports` (26 package export files), `pnpm check:sources` (17 example sources), and `git diff --check`.
+
+Remaining:
+
+- `CR-027` still needs backend-specific recording API documentation, status/error shaping, storage/retention policy, and manual browser validation for the toggle flow.
+- Product-specific branded control styling remains application work on top of the optional UI shell.
+
+---
+
+### 2026-05-18 Recording API And WHEP/WHIP Hardening Pass
+
+Summary:
+
+- Added `createRecordingApiPlugin()` as the backend recording control path:
+  - start/stop/status HTTP endpoints;
+  - typed `recording` bus events and imperative handle;
+  - lifecycle cleanup with abortable requests;
+  - no browser-side `captureStream()` / `MediaRecorder` implementation.
+- Added WebRTC WHEP/WHIP hardening:
+  - signaling `timeoutMs`;
+  - `iceGatheringTimeoutMs`;
+  - normalized `network.code` values for WHEP HTTP failure, signaling timeout, answer SDP failure, and ICE gathering timeout.
+- Added a minimal IIFE demo asset for SDK consumption.
+- Updated API, support, pluginization, roadmap, and verification docs.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest tests/recording-plugin.test.ts tests/webrtc-signaling.test.ts tests/webrtc-tech-stats.test.ts --runInBand`: passed, 3 suites / 10 tests.
+- `pnpm check:public-api`: passed.
+
+Remaining:
+
+- `CR-019` still needs real browser evidence for the new WHEP diagnostics and Opus/TURN/recovery scenarios.
+- `CR-027` remains backend recording API only; a browser recorder is intentionally not planned.
+
+---
+
+### 2026-05-18 SDK Release Integration Closure Pass
+
+Summary:
+
+- Closed `CR-025` for the current SDK consumption baseline.
+- Added the release/integration entry to `README.md`.
+- Expanded `docs/sdk-release-integration.md` with:
+  - public package entrypoints;
+  - plugin subpath guidance;
+  - all-in-one browser IIFE consumption path;
+  - release checklist;
+  - version policy and migration boundaries.
+- Kept conditional protocol/product items separate from the SDK release claim.
+
+Validation:
+
+- `pnpm check:release`: passed, including all Jest suites, public API check, export contract, example-source contract, ESM build, and IIFE bundle generation.
+- Browser IIFE smoke on `http://127.0.0.1:4188/examples/minimal-iife.html`: `window.FyraPlayerSDK` exposed `FyraPlayer`, UI, recording API, diagnostics, auth/signing, storage, and performance plugin factories; minimal demo reached `playing`.
+
+Remaining:
+
+- `CR-019` still needs real browser evidence for Opus/TURN/ICE recovery and the new WHEP abnormal-response diagnostics.
+- `CR-020` still needs dated direct fMP4 browser evidence before direct fMP4 can be promoted beyond conditional.
+- `CR-026` still needed a consolidated render-bridge boundary document at this point; it was closed later with `docs/render-bridges.md`.
+- `CR-027` remains backend recording API only; browser-side recording is intentionally out of scope.
+
+---
+
+### 2026-05-18 Recording API Error Contract Closure Pass
+
+Summary:
+
+- Closed `CR-027` for the current non-browser-recording scope.
+- Added `RecordingApiError`, `PlayerRecordingCode`, and
+  `PlayerRecordingErrorInfo` to make backend recording failures product-readable.
+- Normalized recording backend failures into stable codes:
+  - `RECORDING_HTTP_ERROR`;
+  - `RECORDING_TIMEOUT`;
+  - `RECORDING_ABORTED`;
+  - `RECORDING_REQUEST_ERROR`;
+  - `RECORDING_PARSE_ERROR`;
+  - `RECORDING_CONFIG_ERROR`.
+- Kept recording as a backend API hook. No browser `MediaRecorder`,
+  `captureStream()`, local storage, or retention policy was added.
+- Updated API, support, pluginization, roadmap, and verification docs.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest tests/recording-plugin.test.ts --runInBand`: passed, 1 suite / 4 tests.
+
+Remaining:
+
+- Product backends still own storage location, retention policy, audit trail,
+  permissions, and exact start/stop/status endpoint semantics.
+- Manual UI-to-backend recording validation should be done with the target VMS
+  backend when available.
+
+---
+
+### 2026-05-18 Auth Recovery Plugin Closure Pass
+
+Summary:
+
+- Closed `CR-022` for the current commercial stream-access baseline.
+- Added `createAuthRecoveryPlugin()` beside `createAuthSigningMiddleware()`:
+  - default recovery matcher only treats explicit HTTP `401` / `403` as auth expiry;
+  - products can provide a custom `match()` for backend-specific expiry payloads;
+  - optional `refresh()` lets the app update token/cookie/signing state before reload;
+  - the plugin reloads the current source with `player.switchSource(currentIndex)`, so source resolver and auth/signing middleware run again;
+  - retry count, cooldown, in-flight guard, and destroy cleanup prevent recovery storms;
+  - recovery emits stable `network.code` values:
+    `AUTH_RECOVERY_ATTEMPT`, `AUTH_RECOVERY_SUCCESS`,
+    `AUTH_RECOVERY_FAILED`, and `AUTH_RECOVERY_SKIPPED`.
+- Updated public API smoke coverage and docs for the direct auth subpath,
+  aggregate plugin entry, and IIFE bundle export path.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm exec jest tests/auth-plugin.test.ts --runInBand`: passed, 1 suite / 8 tests.
+- `pnpm check:public-api`: passed.
+- `pnpm check:exports`: passed, verified 28 package export files.
+
+Remaining:
+
+- Product integrations still own token storage, refresh endpoint semantics,
+  cookie policy, signed URL expiry windows, and whether non-HTTP signals should
+  be interpreted as auth expiry.
+- Add a real backend auth recovery browser/manual evidence row when a target
+  service is available.
+
+---
+
+### 2026-05-18 Render Bridge Boundary Closure Pass
+
+Summary:
+
+- Closed `CR-026` for the FyraPlayer package boundary.
+- Added `docs/render-bridges.md` as the canonical external renderer contract:
+  - FyraPlayer owns playback, Tech selection, reconnect, quality, stats,
+    diagnostics, metadata events, and generic video/canvas outputs;
+  - PSV, Cesium, map, panorama, GIS, UAV visualization, camera models, and
+    WebGL scene management remain external bridge/package responsibilities;
+  - documented the supported bridge outputs: `HTMLVideoElement`, player
+    events, playback API, metadata events, `CanvasFrameBuffer`, `BaseTarget`,
+    and diagnostics snapshots;
+  - documented a renderer-agnostic bridge lifecycle pattern and a verification
+    checklist for nonblank texture, source switch, cleanup, CORS/canvas, and
+    long-run resource checks.
+- Kept existing PSV/Cesium/livepano documents as scenario-specific supplements.
+- Added public API smoke coverage for `CanvasFrameBuffer` and `BaseTarget` so
+  external bridges can rely on those generic helper exports.
+
+Validation:
+
+- `cmd /c pnpm check:public-api`: passed.
+
+Remaining:
+
+- Actual PSV/Cesium/map/panorama bridge implementations and browser evidence
+  belong in the owning renderer packages or application repositories.
+- Cross-origin canvas/video texture behavior still needs real CDN validation in
+  the product environment before renderer support is promised.
+
+---
+
+### 2026-05-18 WebRTC ICE Recovery Contract Pass
+
+Summary:
+
+- Advanced `CR-019` without requiring a live MediaMTX interruption run.
+- Hardened WebRTC ICE recovery semantics:
+  - `iceConnectionState: "disconnected"` now starts a short recovery grace
+    period, calls `restartIce()` when available, then emits fatal
+    `WEBRTC_ICE_RECONNECT_REQUIRED` so the player-level reconnect reloads the
+    source and renegotiates WHEP/WHIP;
+  - `iceConnectionState: "connected"` / `"completed"` cancels the pending
+    recovery timer;
+  - `iceConnectionState: "failed"` emits fatal `WEBRTC_ICE_FAILED` directly
+    and relies on player reconnect instead of pretending local `restartIce()`
+    alone can recover one-shot WHEP/WHIP signaling.
+- Added public API smoke coverage for WebRTC `iceServers`, `forceRelay`,
+  signaling `timeoutMs`, `iceGatheringTimeoutMs`, and WebRTC
+  `playoutDelayHintMs`.
+- Documented the STUN/TURN, TURN-only relay, and ICE recovery boundary in
+  `docs/api.md`.
+
+Validation:
+
+- `cmd /c pnpm exec jest tests/webrtc-tech-stats.test.ts tests/webrtc-signaling.test.ts tests/player.test.ts --runInBand`: passed, 3 suites / 29 tests.
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm check:public-api`: passed.
+
+Remaining:
+
+- `CR-019` still needs real browser evidence for TURN relay, controlled
+  MediaMTX interruption/reconnect, Edge published-stream playback, and
+  long-run behavior.
+- WHEP/WHIP abnormal-response diagnostics are unit-covered; record a browser
+  evidence row when a controllable backend test endpoint is available.
+
+---
+
+### 2026-05-18 Local MediaMTX WHEP Audio And Recovery Evidence
+
+Summary:
+
+- Ran Chrome browser evidence against the user's live MediaMTX endpoint:
+  `http://127.0.0.1:8889/live/test/whep`.
+- Served FyraPlayer examples from `http://127.0.0.1:4191/basic.html`.
+- Kept the browser video muted during the run so playback audio would not be
+  captured back into OBS.
+- Verified WHEP startup:
+  - player reached `ready`;
+  - video `readyState=4`, `currentTime=10.002s`, `1280x720`;
+  - media element had no error;
+  - audio and video tracks were both `live` and `muted=false`.
+- Verified browser audio RTP delivery:
+  - RTCStats showed inbound audio codec payload `111` with Opus-compatible
+    parameters (`minptime=10;useinbandfec=1`);
+  - inbound audio packets/bytes were increasing.
+- Observed one real browser ICE recovery:
+  - ICE entered `disconnected`;
+  - player emitted `WEBRTC_ICE_RESTART`,
+    `WEBRTC_ICE_RECONNECT_REQUIRED`, then `RECONNECT_ATTEMPT 1/5`;
+  - the source reloaded, ICE moved `checking -> connected`, and playback
+    recovered to `playing`, `readyState=4`, `currentTime=37.176s`,
+    `1280x720`, audio/video tracks `live`, around 30fps, RTT 1ms, packet loss
+    0.
+- Later clean-tab retry returned MediaMTX `404` / `no stream is available on
+  path 'live/test'`. FyraPlayer normalized this as `WEBRTC_WHEP_HTTP_ERROR`,
+  retried through the player reconnect policy, and ended with
+  `RECONNECT_EXHAUSTED`. This is correct abnormal-response handling, not a
+  player regression.
+
+Validation:
+
+- Browser evidence recorded in `docs/playback-verification-matrix.md`.
+- `cmd /c pnpm bundle:examples`: passed before the browser run.
+
+Remaining:
+
+- Controlled OBS/MediaMTX stop-start interruption test is still pending because
+  this run observed a spontaneous ICE disconnected/reconnect, not a scripted
+  publishing interruption.
+- TURN relay, Edge published-stream playback, and 30-minute long-run WebRTC
+  evidence remain pending.
+- Speaker-output listening was intentionally skipped during OBS publishing to
+  avoid audio feedback; audio validation here is RTP/track/stat evidence.
+
+---
+
+### 2026-05-19 Edge CDP And PTZ Boundary Pass
+
+Summary:
+
+- Ran Edge 148.0.3967.70 headless CDP smoke tests against the local examples
+  page at `http://127.0.0.1:4192/basic.html`.
+- Verified Edge playback for:
+  - HLS demo through `hls` Tech at `1280x720`, `readyState=4`, 0 dropped
+    frames, and no fatal network/error events;
+  - Apple HLS fMP4/CMAF sample through `hls` Tech at `768x432`, 24 ABR levels,
+    0 dropped frames, and one non-fatal `HLS_WARNING bufferSeekOverHole`;
+  - DASH BBB through `dash` Tech at `768x432`, quality state with 5
+    representations, 0 dropped frames, and no fatal events;
+  - MP4 demo through `file` Tech at `480x270`, 0 dropped frames, and no fatal
+    events.
+- Verified Edge WHEP abnormal-response handling while MediaMTX reported
+  `404 no stream is available on path 'live/test'`:
+  `WEBRTC_WHEP_HTTP_ERROR`, `WEBRTC_SIGNAL_ERROR`, and reconnect attempts 1/5
+  through 5/5 were emitted. This is not Edge WHEP playback-success evidence.
+- Clarified PTZ ownership:
+  - `player.control('gb:ptz', payload)` remains a thin player control hook;
+  - real PTZ command translation, permissions, state, ONVIF/vendor SDK/GB XML
+    handling, and device execution results belong to the backend gateway.
+
+Validation:
+
+- Browser evidence recorded in `docs/playback-verification-matrix.md`.
+- Support state updated in `docs/supported-scenarios.md`.
+- PTZ boundary updated in `docs/gb28181.md`, `docs/api.md`, and
+  `docs/pluginization-map.md`.
+
+Remaining:
+
+- Edge WHEP with an actively published MediaMTX stream still needs a dated
+  playback-success row.
+- Controlled OBS/MediaMTX stop-start interruption, TURN relay, and 30-minute
+  WebRTC long-run evidence remain open under `CR-006`, `CR-013`, and `CR-019`.
+- Direct HTTP/WS fMP4 remains `CR-020`; the Apple sample validates HLS with
+  fMP4/CMAF segments, not direct `FMP4Tech`.
+
+---
+
+### 2026-05-19 Browser Long-Run Runner Pass
+
+Summary:
+
+- Added `checks/browser-long-run.mjs` and `pnpm long-run:browser`.
+- Added `checks/browser-long-run-assert.mjs` and `pnpm long-run:assert` so
+  long-run JSON reports can be checked by explicit gates instead of only being
+  reviewed manually.
+- The runner starts the examples Vite server, launches Edge or Chrome through
+  CDP, waits for the demo app to bind controls, selects a preset or loads a
+  custom `--source-url` / `--source-type`, drives `window.fyraLongRun`, and
+  writes a JSON report under `.fyra-long-run/`.
+- The report includes samples, player events, final video state, DOM counts,
+  frame counters, memory fields when available, resource-event clues, and a
+  summarized pass/fail surface for playable/currentTime/frame/drop/memory/DOM
+  checks.
+- The assertion tool validates sample count, sampled duration, observed Tech,
+  final playable state, media-time advance, fatal/error events, dropped-frame
+  ratio, JS heap growth when available, DOM media element growth, and optional
+  live end/stall rules.
+- `.fyra-long-run/` is ignored by git so long-run artifacts do not get
+  committed accidentally.
+
+Validation:
+
+- Smoke command passed on Edge 148 with local MP4:
+  `pnpm long-run:browser -- --browser-path "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --source-url "/testvideo/Rec%200017.mp4" --source-type file --duration 8s --interval 2s --out .fyra-long-run\smoke-local-mp4-edge.json --fail-on-error`.
+- Result: 6 samples, `file` Tech, `playing`, `readyState=4`, media time
+  advanced from 0 to 7.2666s, `1920x1200`, 217 total / 9 dropped frames, DOM
+  counts stable, no fatal network or error events.
+- The smoke report passed `pnpm long-run:assert` with `--require-tech file`,
+  `--min-samples 2`, `--min-current-time-advance-sec 1`, and
+  `--max-memory-growth-mb 64`.
+- Evidence recorded in `docs/playback-verification-matrix.md`.
+
+Remaining:
+
+- This closes the tool gap for `CR-013`, but not the commercial evidence gap.
+  A real 30-minute run against representative HLS/WebRTC/fMP4 streams still
+  needs to be recorded before `CR-013` can close.
+- MediaMTX WebRTC long-run should use `--expect-live` and a 5 second interval.
+
+### 2026-05-19 Edge MediaMTX Custom-Port Evidence Pass
+
+Summary:
+
+- Verified the user's current MediaMTX custom-port setup:
+  - RTMP listener `21935`
+  - HLS listener `28888`
+  - WebRTC/WHEP listener `28889`
+  - API listener `9997`
+- MediaMTX API reported `live/test` ready with RTMP source and tracks `H264`
+  + `MPEG-4 Audio`.
+- Ran Edge 148 headless CDP evidence through `pnpm long-run:browser` and
+  `pnpm long-run:assert`.
+
+Validation:
+
+- HLS `http://127.0.0.1:28888/live/test/index.m3u8` passed a 30 second live
+  run: 8 samples, `hls` Tech, `playing`, `readyState=4`, `1280x720`,
+  currentTime advanced `12.066999 -> 39.770447`, 837 total / 2 dropped frames,
+  DOM stable, no error or fatal network events. Assertion passed with
+  `--require-tech hls --expect-live --min-samples 6
+  --min-current-time-advance-sec 20 --max-memory-growth-mb 64`.
+- WHEP `http://127.0.0.1:28889/live/test/whep` passed a 30 second live run:
+  8 samples, `webrtc` Tech, ICE `checking -> connected`, `playing`,
+  `readyState=4`, `1280x720`, currentTime advanced `0 -> 30.021`, 901 total /
+  4 dropped frames, RTT 1ms, packet loss 0, host/UDP candidate path, DOM stable,
+  no error or fatal network events. Assertion passed with `--require-tech
+  webrtc --expect-live --min-samples 6 --min-current-time-advance-sec 20
+  --max-memory-growth-mb 64`.
+
+Boundary:
+
+- The WHEP report emitted `WEBRTC_AUDIO_MUTED`; the active MediaMTX source
+  reported `MPEG-4 Audio`. This is recorded as an ingest/transcoding boundary,
+  not a playback failure. Opus speaker-output validation remains separate.
+- These are 30 second evidence runs. They reduce Edge published-stream risk but
+  do not close the 30-minute long-run requirement under `CR-013` / `CR-019`.
+
+### 2026-05-19 Edge MediaMTX 30-Minute Long-Run Pass
+
+Summary:
+
+- Ran concurrent Edge headless CDP 30-minute live checks against the user's
+  custom-port MediaMTX setup:
+  - HLS `http://127.0.0.1:28888/live/test/index.m3u8`
+  - WHEP `http://127.0.0.1:28889/live/test/whep`
+- Fixed Player state synchronization from the native `HTMLVideoElement`
+  `play` / `playing` / `pause` / `ended` events so diagnostics and long-run
+  samples do not remain stuck at `ready` while the video is actually playing.
+
+Validation:
+
+- WHEP passed the strict 30-minute assertion:
+  - 362 samples over 1800s;
+  - `webrtc` Tech, final `readyState=4`, `1280x720`;
+  - currentTime advanced `0 -> 1662.559`;
+  - 46512 total / 2663 dropped frames, about 5.73%;
+  - heap +0.38 MiB, DOM stable, no public error events;
+  - one ICE disconnected/reconnect-required/reconnect-attempt sequence
+    recovered without ending playback.
+- HLS completed 30 minutes and stayed playable, but did not pass the strict
+  zero-error gate:
+  - 182 samples over 1800s;
+  - `hls` Tech, final `readyState=4`, `1280x720`;
+  - currentTime advanced `12.079772 -> 1665.27961`;
+  - 48180 total / 490 dropped frames, about 1.02%;
+  - heap +5.21 MiB, DOM stable, not ended;
+  - 3 hls.js fatal events (`audioTrackLoadTimeOut`, `levelLoadError`) triggered
+    3 reconnect attempts and playback recovered.
+- Player state sync tests passed:
+  `cmd /c pnpm exec jest tests/player.test.ts tests/ui-components.test.ts
+  tests/storage-reconnect-plugin.test.ts --runInBand`.
+- TypeScript validation passed:
+  `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`.
+
+Boundary:
+
+- WHEP 30-minute evidence can now be counted under `CR-019`, with TURN,
+  controlled stop-start interruption, and current-setup Opus speaker-output
+  validation still open.
+- HLS long-run is useful recovery evidence, but should remain active until a
+  zero-fatal 30-minute run or an intentional hls.js fatal/recovery acceptance
+  policy is defined.
+
+---
+
+### 2026-05-19 1.0 Commercial Baseline Closure
+
+Summary:
+
+- Prepared `1.0.0` as the first controlled commercial-baseline release.
+- Added `docs/release-1.0-readiness.md` to capture the architecture review,
+  included scope, explicit non-scope, evidence summary, release gate, and
+  post-1.0 follow-up list.
+- Updated README, API docs, supported-scenarios, SDK release docs, changelog,
+  performance baseline, and review-alignment docs so release claims match the
+  implementation and evidence.
+
+Release boundary:
+
+- 1.0 is acceptable for controlled product integration against the verified
+  support matrix.
+- 1.0 is not a promise of unconditional support for every browser, protocol,
+  backend, and stream shape.
+- Remaining live-stream evidence items stay active under `CR-005`, `CR-006`,
+  `CR-013`, `CR-019`, and `CR-020`.
+
+Post-1.0 focus:
+
+- WebRTC TURN relay, controlled MediaMTX interruption/reconnect, and current
+  Edge Opus speaker-output evidence.
+- HLS 30-minute zero-fatal retest or a documented recovered-fatal acceptance
+  policy.
+- Safari/Firefox verification rows.
+- Project-specific direct HTTP/WS fMP4 evidence.
+- Real backend evidence for auth recovery and recording API integration.
+
+---
+
+## 9. How To Update This Document
 
 When work is done:
 

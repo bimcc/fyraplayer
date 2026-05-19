@@ -13,6 +13,8 @@ type Fmp4TechHarness = {
   on(event: string, handler: (event: unknown) => void): void;
 };
 
+type FetchMock = jest.Mock<Promise<Response>, [string, RequestInit?]>;
+
 class FakeTimeRanges {
   constructor(private readonly ranges: Array<[number, number]>) {}
 
@@ -35,18 +37,103 @@ class FakeSourceBuffer {
   public removed: Array<[number, number]> = [];
   public buffered = new FakeTimeRanges([[0, 60]]);
   public appendError: Error | null = null;
+  public mode: 'segments' | 'sequence' = 'segments';
+  private listeners = new Map<string, Array<() => void>>();
+
+  addEventListener(type: string, handler: () => void): void {
+    const handlers = this.listeners.get(type) ?? [];
+    handlers.push(handler);
+    this.listeners.set(type, handlers);
+  }
+
+  private emit(type: string): void {
+    for (const handler of this.listeners.get(type) ?? []) handler();
+  }
 
   appendBuffer(data: ArrayBuffer): void {
     if (this.appendError) {
       throw this.appendError;
     }
     this.appended.push(data);
+    this.updating = false;
+    queueMicrotask(() => this.emit('updateend'));
   }
 
   remove(start: number, end: number): void {
     this.removed.push([start, end]);
     this.updating = true;
   }
+}
+
+class FakeMediaSource {
+  public readyState: 'closed' | 'open' | 'ended' = 'closed';
+  public sourceBuffer = new FakeSourceBuffer();
+  private listeners = new Map<string, Array<() => void>>();
+
+  static isTypeSupported(): boolean {
+    return true;
+  }
+
+  addEventListener(type: string, handler: () => void): void {
+    const handlers = this.listeners.get(type) ?? [];
+    handlers.push(handler);
+    this.listeners.set(type, handlers);
+    if (type === 'sourceopen') {
+      queueMicrotask(() => {
+        this.readyState = 'open';
+        this.emit('sourceopen');
+      });
+    }
+  }
+
+  addSourceBuffer(): SourceBuffer {
+    return this.sourceBuffer as unknown as SourceBuffer;
+  }
+
+  removeSourceBuffer(): void {
+    this.sourceBuffer = new FakeSourceBuffer();
+  }
+
+  endOfStream(): void {
+    this.readyState = 'ended';
+  }
+
+  private emit(type: string): void {
+    for (const handler of this.listeners.get(type) ?? []) handler();
+  }
+}
+
+function installBrowserFmp4Mocks(): void {
+  (globalThis as unknown as { MediaSource: typeof MediaSource }).MediaSource = FakeMediaSource as unknown as typeof MediaSource;
+  (globalThis as unknown as { URL: typeof URL }).URL = {
+    ...URL,
+    createObjectURL: jest.fn(() => 'blob:fmp4-test'),
+    revokeObjectURL: jest.fn()
+  } as unknown as typeof URL;
+}
+
+function createReadableFetch(chunks: Uint8Array[], options?: { neverDone?: boolean }): FetchMock {
+  const queue = [...chunks];
+  const reader = {
+    read: jest.fn(() => {
+      const value = queue.shift();
+      if (value) {
+        return Promise.resolve({ value, done: false });
+      }
+      if (options?.neverDone) {
+        return new Promise<ReadableStreamReadResult<Uint8Array>>(() => {});
+      }
+      return Promise.resolve({ value: undefined, done: true });
+    }),
+    releaseLock: jest.fn()
+  };
+
+  return jest.fn(async (_url: string, _init?: RequestInit) => ({
+    ok: true,
+    body: {
+      getReader: () => reader
+    }
+  }) as unknown as Response);
 }
 
 function createTech(options?: {
@@ -82,6 +169,51 @@ function quotaError(): Error {
 }
 
 describe('FMP4Tech backpressure and quota policy', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test('resolves HTTP load after response headers and keeps streaming chunks in the background', async () => {
+    const originalMediaSource = (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource;
+    const originalUrl = globalThis.URL;
+    const originalFetch = globalThis.fetch;
+    installBrowserFmp4Mocks();
+    const fetchMock = createReadableFetch([new Uint8Array([1, 2, 3])], { neverDone: true });
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+    const tech = new FMP4Tech();
+    const readyEvents: unknown[] = [];
+    tech.on('ready', (event) => readyEvents.push(event));
+    const video = {
+      src: '',
+      srcObject: null,
+      load: jest.fn(),
+      videoWidth: 0,
+      videoHeight: 0,
+      currentTime: 0
+    } as unknown as HTMLVideoElement;
+
+    try {
+      await expect(tech.load({
+        type: 'fmp4',
+        url: 'https://example.com/live/fmp4',
+        transport: 'http',
+        codec: 'h264',
+        preferTech: 'fmp4'
+      }, { video })).resolves.toBeUndefined();
+
+      await Promise.resolve();
+      const mediaSource = (tech as unknown as { mediaSource: FakeMediaSource }).mediaSource;
+      expect(readyEvents).toHaveLength(1);
+      expect(fetchMock).toHaveBeenCalledWith('https://example.com/live/fmp4', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      expect(mediaSource.sourceBuffer.appended).toHaveLength(1);
+    } finally {
+      (globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch;
+      (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource = originalMediaSource;
+      (globalThis as unknown as { URL: typeof URL }).URL = originalUrl;
+      await tech.destroy();
+    }
+  });
+
   test('drops oldest queued segments when pending queue exceeds the configured segment limit', () => {
     const { tech, sourceBuffer, network, buffers } = createTech({
       buffer: { fmp4: { maxPendingSegments: 2, maxPendingBytes: Number.MAX_SAFE_INTEGER } }

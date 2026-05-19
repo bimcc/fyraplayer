@@ -9,6 +9,7 @@ testvideo/
 /dist/
 /node_modules/
 /coverage/
+/.fyra-long-run/
 *.log
 *.tmp
 *.tsbuildinfo

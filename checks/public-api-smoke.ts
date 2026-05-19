@@ -8,18 +8,42 @@ import {
   type PlayerLevelSwitchEvent,
   type PlayerNetworkCode,
   type PlayerNetworkEvent,
+  type PlayerPreferenceEvent,
   type PlayerQosCode,
   type PlayerQosEvent,
+  type PlayerRecordingCode,
+  type PlayerRecordingErrorInfo,
   type QualityLevel,
   type QualityState,
   type PluginCtor,
   type Gb28181Source,
   type Source,
   type Tech,
+  type WebRTCSource,
   type WSRawSource,
+  BaseTarget,
+  CanvasFrameBuffer,
 } from 'fyraplayer';
 import { createMetadataPlugin, KlvBridge, type MetadataPluginOptions } from 'fyraplayer/plugins/metadata';
 import { createMetricsPlugin, metricsPlugin, type MetricsPluginOptions } from 'fyraplayer/plugins/metrics';
+import {
+  createDebugPanelPlugin,
+  createDiagnosticsPlugin,
+  type DebugPanelPluginOptions,
+  type DiagnosticsHandle,
+  type DiagnosticsPluginOptions,
+  type DiagnosticsSnapshot,
+} from 'fyraplayer/plugins/diagnostics';
+import {
+  createAuthRecoveryPlugin,
+  createAuthSigningMiddleware,
+  defaultAuthRecoveryMatcher,
+  getAuthRecoveryStatus,
+  type AuthRecoveryEvent,
+  type AuthRecoveryPluginOptions,
+  type AuthSigningPluginOptions,
+  type AuthTokenResult,
+} from 'fyraplayer/plugins/auth';
 import {
   createPerformanceMonitorPlugin,
   DEFAULT_PERFORMANCE_BUDGET,
@@ -30,7 +54,13 @@ import {
 } from 'fyraplayer/plugins/performance';
 import { createReconnectPlugin, reconnectPlugin, type ReconnectPluginOptions } from 'fyraplayer/plugins/reconnect';
 import { createStoragePlugin, storagePlugin, type StoragePluginOptions } from 'fyraplayer/plugins/storage';
-import { createUiComponentsPlugin } from 'fyraplayer/plugins/ui-components';
+import {
+  createUiComponentsPlugin,
+  type UiActionContext,
+  type UiComponentsOptions,
+  type UiRecordToggleEvent,
+  type UiScreenshotEvent,
+} from 'fyraplayer/plugins/ui-components';
 import {
   createSourceResolverMiddleware,
   engineUrlsToResolvedSources,
@@ -41,14 +71,32 @@ import {
 import {
   createSourceResolverMiddleware as createSourceResolverMiddlewareFromPlugins,
   engineUrlsToResolvedSources as engineUrlsToResolvedSourcesFromPlugins,
+  createAuthRecoveryPlugin as createAuthRecoveryPluginFromPlugins,
+  createAuthSigningMiddleware as createAuthSigningMiddlewareFromPlugins,
+  createDebugPanelPlugin as createDebugPanelPluginFromPlugins,
   createPerformanceMonitorPlugin as createPerformanceMonitorPluginFromPlugins,
+  createDiagnosticsPlugin as createDiagnosticsPluginFromPlugins,
   createReconnectPlugin as createReconnectPluginFromPlugins,
+  createRecordingApiPlugin as createRecordingApiPluginFromPlugins,
   createStoragePlugin as createStoragePluginFromPlugins,
+  type AuthSigningPluginOptions as AuthSigningPluginOptionsFromPlugins,
+  type AuthRecoveryPluginOptions as AuthRecoveryPluginOptionsFromPlugins,
+  type DebugPanelPluginOptions as DebugPanelPluginOptionsFromPlugins,
+  type DiagnosticsPluginOptions as DiagnosticsPluginOptionsFromPlugins,
   type PerformanceMonitorOptions as PerformanceMonitorOptionsFromPlugins,
+  type RecordingApiPluginOptions as RecordingApiPluginOptionsFromPlugins,
   type ReconnectPluginOptions as ReconnectPluginOptionsFromPlugins,
   type SourceResolverMiddlewareOptions as SourceResolverMiddlewareOptionsFromPlugins,
   type StoragePluginOptions as StoragePluginOptionsFromPlugins,
 } from 'fyraplayer/plugins';
+import {
+  RecordingApiError,
+  createRecordingApiPlugin,
+  type RecordingApiHandle,
+  type RecordingApiPluginOptions,
+  type RecordingApiResponse,
+} from 'fyraplayer/plugins/recording';
+import { createRecordingApiPlugin as createRecordingApiPluginFromAlias } from 'fyraplayer/plugins/recording-api';
 import { Demuxer, type DemuxerCallbacks } from 'fyraplayer/techs/wsRaw/demuxer';
 
 declare module 'fyraplayer' {
@@ -98,9 +146,41 @@ const player = new FyraPlayer({
       target: '.player-shell',
       showLog: false,
       poster: '/poster.jpg',
+      showStatusOverlay: true,
+      onRetry: async () => undefined,
+      onDiagnostics: (context: UiActionContext) => {
+        context.video.paused.valueOf();
+      },
+      onScreenshot: (event: UiScreenshotEvent) => {
+        event.filename.toString();
+      },
+      showRecordingButton: true,
+      onRecordToggle: (event: UiRecordToggleEvent) => {
+        event.recording.valueOf();
+      },
     }),
   ],
 });
+
+const uiOptions: UiComponentsOptions = {
+  target: '.player-shell',
+  showStatusOverlay: true,
+  onRetry: () => player.play(),
+  showDiagnosticsButton: true,
+  onDiagnostics: ({ player: uiPlayer }) => {
+    uiPlayer.getState().toString();
+  },
+  onScreenshot: ({ blob, width, height }) => {
+    blob.size.toFixed();
+    width.toFixed();
+    height.toFixed();
+  },
+  showRecordingButton: true,
+  onRecordToggle: ({ recording }) => {
+    recording.valueOf();
+  },
+};
+createUiComponentsPlugin(uiOptions);
 
 const resolverOptions: SourceResolverMiddlewareOptions = {
   defaultEngine: 'mediamtx',
@@ -154,6 +234,16 @@ player.on('levelSwitch', (evt: PlayerLevelSwitchEvent | undefined) => {
   evt?.tech?.toString();
   evt?.bitrateKbps?.toFixed();
   evt?.height?.toFixed();
+});
+
+player.on('preference', (evt: PlayerPreferenceEvent) => {
+  evt.key.toString();
+  evt.source?.toString();
+});
+player.on('recording', (evt) => {
+  evt.status.toString();
+  evt.recordingId?.toString();
+  evt.tech?.toString();
 });
 
 player.currentTime.toFixed();
@@ -226,14 +316,63 @@ const fmp4BufferPolicy: FMP4BufferPolicy = {
 const bufferPolicy: BufferPolicy = {
   maxBufferMs: 12_000,
   fmp4: fmp4BufferPolicy,
+  playoutDelayHintMs: 250,
 };
 bufferPolicy.fmp4?.overflowStrategy?.toString();
+bufferPolicy.playoutDelayHintMs?.toFixed();
+
+const hardenedWebrtcSource: WebRTCSource = {
+  type: 'webrtc',
+  url: 'https://example.com/live/whep',
+  iceServers: [
+    { urls: 'stun:stun.example.com:3478' },
+    { urls: 'turn:turn.example.com:3478?transport=tcp', username: 'demo', credential: 'secret' },
+  ],
+  forceRelay: true,
+  signal: {
+    type: 'whep',
+    url: 'https://example.com/live/whep',
+    timeoutMs: 15_000,
+    iceGatheringTimeoutMs: 5_000,
+  },
+};
+hardenedWebrtcSource.iceServers?.length.toFixed();
+hardenedWebrtcSource.forceRelay?.valueOf();
+if (hardenedWebrtcSource.signal?.type === 'whep') {
+  hardenedWebrtcSource.signal.timeoutMs?.toFixed();
+  hardenedWebrtcSource.signal.iceGatheringTimeoutMs?.toFixed();
+}
 
 const callbacks: DemuxerCallbacks = {
   onPrivateData: (_pid, data, _pts) => data.byteLength,
 };
 const demuxer = new Demuxer({ format: 'ts', callbacks });
 demuxer.demux(new ArrayBuffer(0));
+
+class ExternalRenderTarget extends BaseTarget {
+  public attached: HTMLVideoElement | undefined;
+  attach(video: HTMLVideoElement): void {
+    this.attached = video;
+  }
+  detach(): void {
+    this.attached = undefined;
+  }
+  render(time: number): void {
+    time.toFixed();
+  }
+  destroy(): void {
+    this.detach();
+  }
+}
+const renderTarget = new ExternalRenderTarget();
+renderTarget.attach(document.createElement('video'));
+renderTarget.render(0);
+renderTarget.detach();
+renderTarget.destroy();
+const canvasFrameBuffer = new CanvasFrameBuffer();
+canvasFrameBuffer.getCanvas().width.toFixed();
+canvasFrameBuffer.getCaptureStream(30)?.getTracks().length.toFixed();
+canvasFrameBuffer.destroy();
 
 const metadataPluginOptions: MetadataPluginOptions<{ pts: number }> = {
   parse: (event) => ({ pts: event.pts }),
@@ -254,6 +393,64 @@ const metricsOptions: MetricsPluginOptions = {
 };
 createMetricsPlugin(metricsOptions);
 metricsPlugin;
+
+let diagnosticsHandle: DiagnosticsHandle | undefined;
+const diagnosticsOptions: DiagnosticsPluginOptions = {
+  maxEvents: 100,
+  onHandle: (handle) => {
+    diagnosticsHandle = handle;
+  },
+  onSnapshot: (snapshot: DiagnosticsSnapshot) => {
+    snapshot.state?.toString();
+    snapshot.tech?.toString();
+    snapshot.latestNetwork?.code?.toString();
+    snapshot.latestStats?.fps?.toFixed();
+  },
+  onEvent: (record, snapshot) => {
+    record.type.toString();
+    snapshot.recent.length.toFixed();
+  },
+};
+createDiagnosticsPlugin(diagnosticsOptions);
+const diagnosticsOptionsFromPlugins: DiagnosticsPluginOptionsFromPlugins = diagnosticsOptions;
+createDiagnosticsPluginFromPlugins(diagnosticsOptionsFromPlugins);
+diagnosticsHandle?.exportJson();
+
+const debugPanelOptions: DebugPanelPluginOptions = {
+  target: '.player-shell',
+  maxEvents: 50,
+};
+createDebugPanelPlugin(debugPanelOptions);
+const debugPanelOptionsFromPlugins: DebugPanelPluginOptionsFromPlugins = debugPanelOptions;
+createDebugPanelPluginFromPlugins(debugPanelOptionsFromPlugins);
+
+const authOptions: AuthSigningPluginOptions = {
+  headers: { 'x-app': 'demo' },
+  credentials: 'include',
+  token: async (): Promise<AuthTokenResult> => ({ token: 'demo', expiresAt: Date.now() + 60_000 }),
+  signUrl: ({ url }) => `${url}?sig=ok`,
+  refreshHeaders: ({ headers }) => ({ ...headers, 'x-refresh': '1' }),
+};
+const authMiddleware = createAuthSigningMiddleware(authOptions);
+authMiddleware.map((entry) => entry.kind.toString());
+const authOptionsFromPlugins: AuthSigningPluginOptionsFromPlugins = authOptions;
+createAuthSigningMiddlewareFromPlugins(authOptionsFromPlugins);
+const authRecoveryOptions: AuthRecoveryPluginOptions = {
+  maxRetries: 1,
+  cooldownMs: 1000,
+  match: (trigger) => defaultAuthRecoveryMatcher(trigger),
+  refresh: async ({ sourceIndex }) => {
+    sourceIndex.toFixed();
+  },
+  onRecovery: (event: AuthRecoveryEvent) => {
+    event.phase.toString();
+    event.status?.toFixed();
+  },
+};
+createAuthRecoveryPlugin(authRecoveryOptions);
+getAuthRecoveryStatus({ response: { status: 401 } })?.toFixed();
+const authRecoveryOptionsFromPlugins: AuthRecoveryPluginOptionsFromPlugins = authRecoveryOptions;
+createAuthRecoveryPluginFromPlugins(authRecoveryOptionsFromPlugins);
 
 const performanceBudget: PerformanceBudget = {
   minFps: DEFAULT_PERFORMANCE_BUDGET.minFps,
@@ -281,7 +478,15 @@ createPerformanceMonitorPluginFromPlugins(performanceOptionsFromPlugins);
 
 const storageOptions: StoragePluginOptions = {
   key: 'fyra:lastSource',
+  preferencesKey: 'fyra:preferences',
   restoreSource: true,
+  persistSource: true,
+  persistVolume: true,
+  persistMuted: true,
+  persistPlaybackRate: true,
+  persistQuality: true,
+  persistLowLatency: true,
+  video: '#video',
 };
 createStoragePlugin(storageOptions);
 const storageOptionsFromPlugins: StoragePluginOptionsFromPlugins = storageOptions;
@@ -298,3 +503,35 @@ createReconnectPlugin(reconnectOptions);
 const reconnectOptionsFromPlugins: ReconnectPluginOptionsFromPlugins = reconnectOptions;
 createReconnectPluginFromPlugins(reconnectOptionsFromPlugins);
 reconnectPlugin;
+
+let recordingHandle: RecordingApiHandle | undefined;
+const recordingOptions: RecordingApiPluginOptions = {
+  startUrl: 'https://example.com/recording/start',
+  stopUrl: ({ recordingId }) => `https://example.com/recording/${recordingId ?? 'current'}/stop`,
+  statusUrl: 'https://example.com/recording/status',
+  headers: ({ action }) => ({ 'x-recording-action': action }),
+  credentials: 'include',
+  buildBody: ({ source, tech }) => ({ sourceType: source?.type, tech }),
+  parseResponse: async (): Promise<RecordingApiResponse> => ({ recordingId: 'rec-1', status: 'recording' }),
+  onHandle: (handle) => {
+    recordingHandle = handle;
+  },
+  onEvent: (event) => {
+    event.status.toString();
+    event.code?.toString();
+  },
+};
+createRecordingApiPlugin(recordingOptions);
+createRecordingApiPluginFromAlias(recordingOptions);
+const recordingOptionsFromPlugins: RecordingApiPluginOptionsFromPlugins = recordingOptions;
+createRecordingApiPluginFromPlugins(recordingOptionsFromPlugins);
+recordingHandle?.isRecording();
+const recordingCode: PlayerRecordingCode = 'RECORDING_HTTP_ERROR';
+recordingCode.toString();
+const recordingErrorInfo: PlayerRecordingErrorInfo = {
+  code: recordingCode,
+  message: 'recording failed',
+  action: 'start',
+  status: 403,
+};
+new RecordingApiError(recordingErrorInfo).info.code.toString();

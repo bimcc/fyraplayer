@@ -81,6 +81,7 @@ export class DASHTech extends AbstractTech {
     this.dash = dashjs.MediaPlayer().create();
     
     // Configure ABR settings
+    const requestHeaders = source.request?.headers;
     this.dash.updateSettings({
       streaming: {
         abr: {
@@ -92,7 +93,14 @@ export class DASHTech extends AbstractTech {
         liveCatchup: {
           enabled: true,
           mode: 'liveCatchupModeDefault'
-        }
+        },
+        ...(requestHeaders
+          ? {
+              xhr: {
+                customHeaders: Object.entries(requestHeaders).map(([name, value]) => ({ name, value }))
+              }
+            }
+          : undefined)
       }
     });
     

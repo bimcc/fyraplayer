@@ -13134,6 +13134,10 @@ var NETWORK_CODE_BY_TYPE = {
   "connect-timeout": "CONNECT_TIMEOUT",
   "autoplay-blocked": "AUTOPLAY_BLOCKED",
   "metadata-timeout": "METADATA_TIMEOUT",
+  "auth-recovery-attempt": "AUTH_RECOVERY_ATTEMPT",
+  "auth-recovery-success": "AUTH_RECOVERY_SUCCESS",
+  "auth-recovery-failed": "AUTH_RECOVERY_FAILED",
+  "auth-recovery-skipped": "AUTH_RECOVERY_SKIPPED",
   "video-error": "VIDEO_ERROR",
   "hls-warning": "HLS_WARNING",
   "hls-fatal": "HLS_FATAL",
@@ -13154,10 +13158,16 @@ var NETWORK_CODE_BY_TYPE = {
   "ice-failed": "WEBRTC_ICE_FAILED",
   "ice-restart": "WEBRTC_ICE_RESTART",
   "ice-restart-failed": "WEBRTC_ICE_RESTART_FAILED",
+  "ice-reconnect-required": "WEBRTC_ICE_RECONNECT_REQUIRED",
   "signal-error": "WEBRTC_SIGNAL_ERROR",
   error: "WEBRTC_SIGNAL_ERROR",
   "parse-error": "WEBRTC_SIGNAL_PARSE_ERROR",
   "ws-error": "WEBRTC_SIGNAL_WS_ERROR",
+  "whep-http-error": "WEBRTC_WHEP_HTTP_ERROR",
+  "whep-fetch-error": "WEBRTC_SIGNAL_ERROR",
+  "whep-timeout": "WEBRTC_WHEP_TIMEOUT",
+  "whep-answer-error": "WEBRTC_WHEP_ANSWER_ERROR",
+  "whep-ice-gathering-timeout": "WEBRTC_WHEP_ICE_GATHERING_TIMEOUT",
   "webrtc-audio-muted": "WEBRTC_AUDIO_MUTED",
   "offer-timeout": "WEBRTC_OFFER_TIMEOUT",
   "offer-error": "WEBRTC_OFFER_ERROR",
@@ -13185,6 +13195,7 @@ var WEBRTC_SIGNAL_CODE_BY_TYPE = {
 };
 var FATAL_EVENT_TYPES = /* @__PURE__ */ new Set([
   "ice-failed",
+  "ice-reconnect-required",
   "connect-timeout",
   "ws-fallback-error",
   "gb-fallback-error",
@@ -13192,6 +13203,10 @@ var FATAL_EVENT_TYPES = /* @__PURE__ */ new Set([
   "fmp4-ws-closed",
   "fatal",
   "signal-error",
+  "whep-http-error",
+  "whep-fetch-error",
+  "whep-timeout",
+  "whep-answer-error",
   "error",
   "offer-timeout",
   "reconnect-exhausted"
@@ -13212,6 +13227,7 @@ var WARNING_EVENT_TYPES = /* @__PURE__ */ new Set([
   "abr-fallback-error",
   "ice-restart-failed",
   "webrtc-audio-muted",
+  "whep-ice-gathering-timeout",
   "webcodecs-config-unsupported",
   "webcodecs-fallback"
 ]);
@@ -13264,6 +13280,14 @@ function normalizeNetworkMessage(evt) {
   if (typeof evt.message === "string" && evt.message.length > 0)
     return evt.message;
   switch (evt.type) {
+    case "whep-http-error":
+      return `WHEP/WHIP HTTP error (${evt.status ?? "unknown"})`;
+    case "whep-timeout":
+      return `WHEP/WHIP signaling timeout (${evt.timeoutMs || 15e3}ms)`;
+    case "whep-answer-error":
+      return "WHEP/WHIP answer SDP failed to apply";
+    case "whep-ice-gathering-timeout":
+      return `WHEP/WHIP ICE gathering timed out (${evt.timeoutMs || 5e3}ms); posting current local SDP`;
     case "disconnect":
       return `\u8FDE\u63A5\u65AD\u5F00 (\u72B6\u6001: ${evt.state || "unknown"})`;
     case "ice-failed":
@@ -13307,6 +13331,14 @@ function normalizeNetworkMessage(evt) {
       return "\u81EA\u52A8\u64AD\u653E\u88AB\u6D4F\u89C8\u5668\u963B\u6B62\uFF0C\u8BF7\u70B9\u51FB\u64AD\u653E";
     case "metadata-timeout":
       return "\u89C6\u9891\u5143\u6570\u636E\u52A0\u8F7D\u8D85\u65F6";
+    case "auth-recovery-attempt":
+      return `Auth recovery attempt ${evt.attempt ?? "unknown"}/${evt.maxRetries ?? "unknown"}`;
+    case "auth-recovery-success":
+      return "Auth recovery reloaded the current source";
+    case "auth-recovery-failed":
+      return `Auth recovery failed: ${evt.reason || "unknown"}`;
+    case "auth-recovery-skipped":
+      return `Auth recovery skipped: ${evt.reason || "unknown"}`;
     case "catchup":
       return `\u8FFD\u5E27: \u4E22\u5F03 ${evt.dropped} \u5E27\uFF0C\u4FDD\u7559 ${evt.kept} \u5E27 (\u6A21\u5F0F: ${evt.mode})`;
     case "jitter":
@@ -13317,6 +13349,8 @@ function normalizeNetworkMessage(evt) {
       return `\u6B63\u5728\u91CD\u542F ICE: ${evt.reason || "unknown"}`;
     case "ice-restart-failed":
       return "ICE \u91CD\u542F\u5931\u8D25";
+    case "ice-reconnect-required":
+      return evt.message || "WebRTC ICE did not recover; reloading source";
     case "webrtc-audio-muted":
       return "WebRTC audio track is present but muted; check source codec and server transcoding";
     case "ws-open":
@@ -14017,27 +14051,84 @@ var WhipSignaling = class {
   async negotiate(pc) {
     const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true, iceRestart: true });
     await pc.setLocalDescription(offer);
-    await this.waitIceComplete(pc);
+    await this.waitIceComplete(pc, this.config.iceGatheringTimeoutMs ?? 5e3);
     const body = pc.localDescription?.sdp || "";
-    const headers = { "Content-Type": "application/sdp" };
+    const headers = { ...this.config.headers, "Content-Type": "application/sdp" };
     if (this.config.token)
       headers["Authorization"] = `Bearer ${this.config.token}`;
-    const res = await fetch(this.config.url, { method: "POST", headers, body });
-    if (!res.ok)
-      throw new Error(`WHIP POST failed: ${res.status}`);
+    const controller = new AbortController();
+    const timeoutMs = this.config.timeoutMs ?? 15e3;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(this.config.url, {
+        method: "POST",
+        headers,
+        body,
+        credentials: this.config.credentials,
+        signal: controller.signal
+      });
+    } catch (error) {
+      const isAbort = error instanceof DOMException && error.name === "AbortError";
+      this.config.onEvent?.({
+        type: isAbort ? "whep-timeout" : "whep-fetch-error",
+        fatal: true,
+        timeoutMs,
+        error
+      });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) {
+      const responseText = await res.text().catch(() => "");
+      this.config.onEvent?.({
+        type: "whep-http-error",
+        fatal: true,
+        status: res.status,
+        statusText: res.statusText,
+        responseText
+      });
+      throw new Error(`WHEP/WHIP POST failed: ${res.status}`);
+    }
     const answerSdp = await res.text();
-    await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    try {
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    } catch (error) {
+      this.config.onEvent?.({
+        type: "whep-answer-error",
+        fatal: true,
+        error
+      });
+      throw error;
+    }
   }
-  waitIceComplete(pc) {
+  waitIceComplete(pc, timeoutMs) {
     return new Promise((resolve) => {
       if (pc.iceGatheringState === "complete")
         return resolve();
+      let done = false;
+      const finish = (timedOut) => {
+        if (done)
+          return;
+        done = true;
+        clearTimeout(timer);
+        pc.removeEventListener("icegatheringstatechange", check);
+        if (timedOut) {
+          this.config.onEvent?.({
+            type: "whep-ice-gathering-timeout",
+            warning: true,
+            timeoutMs
+          });
+        }
+        resolve();
+      };
       const check = () => {
         if (pc.iceGatheringState === "complete") {
-          pc.removeEventListener("icegatheringstatechange", check);
-          resolve();
+          finish(false);
         }
       };
+      const timer = setTimeout(() => finish(true), timeoutMs);
       pc.addEventListener("icegatheringstatechange", check);
     });
   }
@@ -14214,8 +14305,17 @@ var WhipWhepAdapter = class {
     this.type = "whip/whep";
     this.sig = null;
   }
-  async setup(pc, src) {
-    this.sig = new WhipSignaling({ url: this.cfg.url, token: this.cfg.token, iceServers: src.iceServers });
+  async setup(pc, src, onEvent) {
+    this.sig = new WhipSignaling({
+      url: this.cfg.url,
+      token: this.cfg.token,
+      iceServers: src.iceServers,
+      headers: src.request?.headers,
+      credentials: src.request?.credentials,
+      timeoutMs: this.cfg.timeoutMs,
+      iceGatheringTimeoutMs: this.cfg.iceGatheringTimeoutMs,
+      onEvent
+    });
     pc.onicecandidate = null;
     await this.sig.negotiate(pc);
   }
@@ -14467,13 +14567,6 @@ var WebRTCTech = class extends AbstractTech {
       if (state === "failed") {
         this.bus.emit("network", { type: "ice-failed", fatal: true });
         this.clearIceReconnectTimer();
-        if (this.pc.restartIce) {
-          try {
-            this.pc.restartIce();
-          } catch (e2) {
-            console.warn("[webrtc] restartIce failed", e2);
-          }
-        }
       } else if (state === "connected" || state === "completed") {
         this.clearConnectTimeout();
         this.clearIceReconnectTimer();
@@ -14491,6 +14584,13 @@ var WebRTCTech = class extends AbstractTech {
     }
     if (!effectiveSignal)
       throw new Error("WebRTC signal config required");
+    if (effectiveSignal.type === "whip" || effectiveSignal.type === "whep") {
+      effectiveSignal = {
+        ...effectiveSignal,
+        timeoutMs: effectiveSignal.timeoutMs ?? this.reconnect?.timeoutMs ?? 15e3,
+        iceGatheringTimeoutMs: effectiveSignal.iceGatheringTimeoutMs ?? 5e3
+      };
+    }
     this.adapter = createSignalAdapter(effectiveSignal);
     await this.adapter.setup(this.pc, src, (evt) => {
       this.bus.emit("network", { ...evt, stage: "webrtc-signal" });
@@ -14725,7 +14825,7 @@ var WebRTCTech = class extends AbstractTech {
     }
   }
   startIceReconnectTimer(reason) {
-    if (!this.pc || typeof this.pc.restartIce !== "function")
+    if (!this.pc)
       return;
     const delay = Math.min(3e3, Math.max(800, this.reconnect?.baseDelayMs ?? 1500));
     this.clearIceReconnectTimer();
@@ -14736,13 +14836,22 @@ var WebRTCTech = class extends AbstractTech {
       const state = this.pc.iceConnectionState;
       if (state === "connected" || state === "completed")
         return;
-      try {
-        this.pc.restartIce();
-        this.bus.emit("network", { type: "ice-restart", reason });
-      } catch (e2) {
-        console.warn("[webrtc] restartIce failed", e2);
-        this.bus.emit("network", { type: "ice-restart-failed", error: e2 });
+      if (typeof this.pc.restartIce === "function") {
+        try {
+          this.pc.restartIce();
+          this.bus.emit("network", { type: "ice-restart", reason });
+        } catch (e2) {
+          console.warn("[webrtc] restartIce failed", e2);
+          this.bus.emit("network", { type: "ice-restart-failed", error: e2 });
+        }
       }
+      this.bus.emit("network", {
+        type: "ice-reconnect-required",
+        fatal: true,
+        reason,
+        state,
+        message: "WebRTC ICE did not recover before the reconnect grace period; reloading the source."
+      });
     }, delay);
   }
   startPacketLossMonitor() {
@@ -49598,6 +49707,23 @@ var HLSTech = class extends AbstractTech {
       debug: false,
       capLevelToPlayerSize: true,
       enableWorker: true,
+      xhrSetup: source.request ? (xhr) => {
+        const headers = source.request?.headers;
+        if (headers) {
+          Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+        }
+        if (source.request?.credentials === "include") {
+          xhr.withCredentials = true;
+        }
+      } : void 0,
+      fetchSetup: source.request ? (context, initParams) => new Request(context.url || source.url, {
+        ...initParams,
+        headers: {
+          ...initParams.headers,
+          ...source.request?.headers
+        },
+        credentials: source.request?.credentials ?? initParams.credentials
+      }) : void 0,
       ...buildHlsPlaybackConfig(source, this.buffer)
     };
     if (Hls.isSupported()) {
@@ -70478,6 +70604,7 @@ var DASHTech = class extends AbstractTech {
   async setupDash(source, video2, wc) {
     this.cleanup();
     this.dash = _().create();
+    const requestHeaders = source.request?.headers;
     this.dash.updateSettings({
       streaming: {
         abr: {
@@ -70489,7 +70616,12 @@ var DASHTech = class extends AbstractTech {
         liveCatchup: {
           enabled: true,
           mode: "liveCatchupModeDefault"
-        }
+        },
+        ...requestHeaders ? {
+          xhr: {
+            customHeaders: Object.entries(requestHeaders).map(([name, value]) => ({ name, value }))
+          }
+        } : void 0
       }
     });
     this.setupDashEventHandlers(video2);
@@ -70708,6 +70840,8 @@ var FMP4Tech = class extends AbstractTech {
     this.sourceBuffer = null;
     this.ws = null;
     this.abortController = null;
+    this.httpPumpPromise = null;
+    this.destroyed = false;
     this.pendingBuffers = [];
     this.pendingBytes = 0;
     this.isBufferUpdating = false;
@@ -70722,6 +70856,7 @@ var FMP4Tech = class extends AbstractTech {
     this.reconnect = opts.reconnect;
     this.metrics = opts.metrics;
     this.video = opts.video;
+    this.destroyed = false;
     if (source.type !== "fmp4") {
       throw new Error("FMP4Tech only supports fmp4 source type");
     }
@@ -70738,8 +70873,11 @@ var FMP4Tech = class extends AbstractTech {
     }
   }
   buildMimeType(source) {
-    const videoCodec = source.codec === "h265" ? "hvc1.1.6.L93.B0" : source.codec === "av1" ? "av01.0.04M.08" : "avc1.64001f";
-    const audioCodec = source.audioCodec === "opus" ? "opus" : source.audioCodec === "mp3" ? "mp3" : "mp4a.40.2";
+    if (source.mimeType) {
+      return source.mimeType;
+    }
+    const videoCodec = source.videoCodecString || (source.codec === "h265" ? "hvc1.1.6.L93.B0" : source.codec === "av1" ? "av01.0.04M.08" : "avc1.64001f");
+    const audioCodec = source.audioCodecString || (source.audioCodec === "opus" ? "opus" : source.audioCodec === "mp3" ? "mp3" : "mp4a.40.2");
     return `video/mp4; codecs="${videoCodec},${audioCodec}"`;
   }
   async setupMediaSource(video2) {
@@ -70774,7 +70912,12 @@ var FMP4Tech = class extends AbstractTech {
   async startHttpFetch(url) {
     this.abortController = new AbortController();
     try {
-      const response = await fetch(url, { signal: this.abortController.signal });
+      const request = this.source?.type === "fmp4" ? this.source.request : void 0;
+      const response = await fetch(url, {
+        signal: this.abortController.signal,
+        headers: request?.headers,
+        credentials: request?.credentials
+      });
       if (!response.ok) {
         throw new Error(`HTTP error: ${response.status}`);
       }
@@ -70782,22 +70925,44 @@ var FMP4Tech = class extends AbstractTech {
         throw new Error("ReadableStream not supported");
       }
       const reader = response.body.getReader();
-      while (true) {
+      const pumpPromise = this.pumpHttpReadableStream(reader);
+      this.httpPumpPromise = pumpPromise;
+      void pumpPromise.finally(() => {
+        if (this.httpPumpPromise === pumpPromise) {
+          this.httpPumpPromise = null;
+        }
+      });
+    } catch (err) {
+      const error = err;
+      if (error.name !== "AbortError") {
+        this.bus.emit("error", { type: "fetch-error", error: err });
+        this.bus.emit("network", { type: "fmp4-http-error", fatal: true });
+      }
+    }
+  }
+  async pumpHttpReadableStream(reader) {
+    try {
+      while (!this.destroyed) {
         const { value, done } = await reader.read();
         if (done) {
           this.endOfStream();
           break;
         }
         if (value) {
-          const chunk = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+          const chunk = value.slice().buffer;
           this.appendBuffer(chunk);
         }
       }
     } catch (err) {
       const error = err;
-      if (error.name !== "AbortError") {
+      if (!this.destroyed && error.name !== "AbortError") {
         this.bus.emit("error", { type: "fetch-error", error: err });
         this.bus.emit("network", { type: "fmp4-http-error", fatal: true });
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
       }
     }
   }
@@ -71045,11 +71210,13 @@ var FMP4Tech = class extends AbstractTech {
     this.cleanup();
   }
   cleanup() {
+    this.destroyed = true;
     this.resetPlaybackFpsSampler();
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
     }
+    this.httpPumpPromise = null;
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -73018,6 +73185,16 @@ function resolveVideoElement(el) {
 
 // src/player.ts
 var MEDIA_HAVE_CURRENT_DATA = 2;
+function mergeSourceRequestConfig(source, headers, credentials) {
+  const existing = source.request;
+  if (!existing && !headers && !credentials)
+    return void 0;
+  return {
+    ...existing,
+    ...headers ? { headers } : void 0,
+    ...credentials ? { credentials } : void 0
+  };
+}
 var FyraPlayer = class {
   constructor(opts) {
     this.bus = new EventBus();
@@ -73031,6 +73208,7 @@ var FyraPlayer = class {
     this.reconnectTimer = null;
     this.reconnectHealthSnapshot = null;
     this.techEventHandlers = /* @__PURE__ */ new Map();
+    this.videoEventHandlers = [];
     this.options = opts;
     this.techOrder = opts.techOrder ?? DEFAULT_TECH_ORDER;
     this.bufferPolicy = opts.buffer ?? DEFAULT_BUFFER_POLICY;
@@ -73042,6 +73220,7 @@ var FyraPlayer = class {
       this.videoEl.muted = opts.muted;
     if (opts.preload)
       this.videoEl.preload = opts.preload;
+    this.attachVideoStateEvents();
     this.dataChannelOpts = opts.dataChannel;
     opts.middleware?.forEach((m2) => this.middleware.use(m2));
     this.techManager.register("webrtc", new WebRTCTech());
@@ -73180,6 +73359,7 @@ var FyraPlayer = class {
     this.stopStatsTimer();
     this.clearReconnectTimer();
     this.detachTechEvents();
+    this.detachVideoStateEvents();
     await this.techManager.destroyCurrent();
     try {
       await this.pluginManager.unregisterAll();
@@ -73195,6 +73375,32 @@ var FyraPlayer = class {
     }
     this.reconnectAttempts = 0;
     this.state = "idle";
+  }
+  attachVideoStateEvents() {
+    const add = (event, handler) => {
+      this.videoEl.addEventListener?.(event, handler);
+      this.videoEventHandlers.push({ event, handler });
+    };
+    const markPlaying = () => {
+      if (this.state !== "loading" && this.state !== "error") {
+        this.state = "playing";
+      }
+    };
+    add("play", markPlaying);
+    add("playing", markPlaying);
+    add("pause", () => {
+      if (this.state === "playing")
+        this.state = "paused";
+    });
+    add("ended", () => {
+      this.state = "ended";
+    });
+  }
+  detachVideoStateEvents() {
+    for (const { event, handler } of this.videoEventHandlers) {
+      this.videoEl.removeEventListener?.(event, handler);
+    }
+    this.videoEventHandlers.length = 0;
   }
   /**
    * Invoke a tech-specific control action, passing through control middleware.
@@ -73303,9 +73509,12 @@ var FyraPlayer = class {
         url: source.url
       };
       const requestCtx = await this.middleware.run("request", middlewareCtx);
+      const requestSource = requestCtx.source;
+      const requestConfig = mergeSourceRequestConfig(requestSource, requestCtx.headers, requestCtx.credentials);
       const patchedSource = {
-        ...requestCtx.source,
-        url: requestCtx.url ?? requestCtx.source.url ?? source.url
+        ...requestSource,
+        url: requestCtx.url ?? requestCtx.source.url ?? source.url,
+        ...requestConfig ? { request: requestConfig } : void 0
       };
       const signalCtx = await this.middleware.run("signal", {
         ...requestCtx,
@@ -73313,9 +73522,12 @@ var FyraPlayer = class {
         tech: patchedSource.preferTech ?? this.techOrder[0],
         url: patchedSource.url
       });
+      const signalSource = signalCtx.source;
+      const signalRequestConfig = mergeSourceRequestConfig(signalSource, signalCtx.headers, signalCtx.credentials);
       const finalSource = {
-        ...signalCtx.source,
-        url: signalCtx.url ?? signalCtx.source.url ?? patchedSource.url
+        ...signalSource,
+        url: signalCtx.url ?? signalCtx.source.url ?? patchedSource.url,
+        ...signalRequestConfig ? { request: signalRequestConfig } : void 0
       };
       try {
         const loaded = await this.techManager.selectAndLoad([finalSource], this.techOrder, {
@@ -73653,6 +73865,55 @@ var UI_SHELL_STYLES = `
   }
   
   .spinner.show { display: block; }
+
+  .status-card {
+    position: absolute;
+    left: 50%;
+    top: calc(50% + 40px);
+    transform: translateX(-50%);
+    max-width: min(80%, 360px);
+    box-sizing: border-box;
+    display: none;
+    padding: 10px 12px;
+    border-radius: 4px;
+    background: rgba(17, 24, 39, 0.82);
+    color: #fff;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    pointer-events: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .status-card.show {
+    display: block;
+  }
+
+  .status-message {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+
+  .status-detail {
+    display: none;
+    margin-top: 4px;
+    color: rgba(255,255,255,0.72);
+    font-size: 10px;
+    line-height: 1.3;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .retry-btn {
+    display: none;
+    margin: 8px auto 0;
+    height: 28px;
+    min-width: 58px;
+    padding: 4px 10px;
+    border: 1px solid rgba(255,255,255,0.28);
+    background: rgba(255,255,255,0.12);
+    font-size: 12px;
+  }
   
   /* Big play button */
   .big-play { 
@@ -73827,6 +74088,11 @@ var UI_SHELL_STYLES = `
   
   button:active {
     transform: scale(0.92);
+  }
+
+  button.active {
+    background: rgba(239,68,68,0.32);
+    color: #fff;
   }
   
   /* Quality selector */
@@ -74094,6 +74360,11 @@ var UI_SHELL_HTML = `
     <div class="click-area" data-role="click-area"></div>
     <div class="overlay">
       <div class="spinner" data-role="spinner"></div>
+      <div class="status-card" data-role="status-card" aria-live="polite">
+        <div class="status-message" data-role="status-message"></div>
+        <div class="status-detail" data-role="status-detail"></div>
+        <button class="retry-btn" data-act="retry" data-role="retry" type="button">\u91CD\u8BD5</button>
+      </div>
       <div class="big-play" data-act="toggle-play">
         <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
       </div>
@@ -74125,6 +74396,12 @@ var UI_SHELL_HTML = `
         <button class="collapsible" data-act="shot" title="\u622A\u56FE">
           <svg class="icon" viewBox="0 0 24 24"><path d="M4 4h4l2-2h4l2 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>
         </button>
+        <button class="collapsible" data-act="diagnostics" title="\u8BCA\u65AD" style="display:none;">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v3H4V5zm0 5h10v3H4v-3zm0 5h16v3H4v-3zm12-5h4v3h-4v-3z"/></svg>
+        </button>
+        <button class="collapsible" data-act="record" title="\u5F55\u5236" style="display:none;">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
+        </button>
         <button class="collapsible" data-act="pip" title="\u753B\u4E2D\u753B">
           <svg class="icon" viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/></svg>
         </button>
@@ -74152,6 +74429,14 @@ var UI_SHELL_HTML = `
             <button data-act="shot" title="\u622A\u56FE">
               <svg class="icon" viewBox="0 0 24 24"><path d="M4 4h4l2-2h4l2 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>
               <span>\u622A\u56FE</span>
+            </button>
+            <button data-act="diagnostics" title="\u8BCA\u65AD">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v3H4V5zm0 5h10v3H4v-3zm0 5h16v3H4v-3zm12-5h4v3h-4v-3z"/></svg>
+              <span>\u8BCA\u65AD</span>
+            </button>
+            <button data-act="record" title="\u5F55\u5236">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
+              <span>\u5F55\u5236</span>
             </button>
             <button data-act="pip" title="\u753B\u4E2D\u753B">
               <svg class="icon" viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/></svg>
@@ -74187,23 +74472,36 @@ function getDuration(video2) {
 }
 function captureFrame(video2) {
   if (!video2)
-    return;
+    return Promise.resolve(null);
   const canvas = document.createElement("canvas");
   canvas.width = video2.videoWidth || 1280;
   canvas.height = video2.videoHeight || 720;
   const ctx = canvas.getContext("2d");
   if (!ctx)
-    return;
+    return Promise.resolve(null);
   ctx.drawImage(video2, 0, 0, canvas.width, canvas.height);
-  canvas.toBlob((blob) => {
-    if (!blob)
-      return;
-    const url = URL.createObjectURL(blob);
-    const a2 = document.createElement("a");
-    a2.href = url;
-    a2.download = `snapshot-${Date.now()}.png`;
-    a2.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1e3);
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        resolve(null);
+        return;
+      }
+      const ts = Date.now();
+      const filename = `snapshot-${ts}.png`;
+      const url = URL.createObjectURL(blob);
+      const a2 = document.createElement("a");
+      a2.href = url;
+      a2.download = filename;
+      a2.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1e3);
+      resolve({
+        blob,
+        width: canvas.width,
+        height: canvas.height,
+        filename,
+        ts
+      });
+    });
   });
 }
 async function toggleFullscreen(target) {
@@ -74564,6 +74862,10 @@ var FyraUiShell = class extends HTMLElement {
     this.logEnabled = false;
     this.duration = 0;
     this.loading = true;
+    this.showStatusOverlay = true;
+    this.showDiagnosticsButton = false;
+    this.showRecordingButton = false;
+    this.recording = false;
     this.host = null;
     this.shell = null;
     // UI Elements
@@ -74573,6 +74875,14 @@ var FyraUiShell = class extends HTMLElement {
       playBtn: null,
       timeLabel: null,
       spinner: null,
+      statusCard: null,
+      statusMessage: null,
+      statusDetail: null,
+      retryBtn: null,
+      diagnosticsBtn: null,
+      diagnosticsMenuBtn: null,
+      recordBtn: null,
+      recordMenuBtn: null,
       qualitySel: null,
       cover: null,
       speedBtn: null
@@ -74614,6 +74924,14 @@ var FyraUiShell = class extends HTMLElement {
       parts.push(`${level.bitrateKbps} kbps`);
     return parts.join(" ") || `Level ${level.index ?? level.id}`;
   }
+  emitPreference(key, value) {
+    this.bus?.emit("preference", {
+      key,
+      value,
+      source: "ui",
+      ts: Date.now()
+    });
+  }
   connectedCallback() {
   }
   disconnectedCallback() {
@@ -74652,6 +74970,12 @@ var FyraUiShell = class extends HTMLElement {
         this.host.style.position = "relative";
     }
     this.logEnabled = !!opts?.showLog;
+    this.showStatusOverlay = opts?.showStatusOverlay !== false;
+    this.onRetry = opts?.onRetry;
+    this.uiOptions = opts;
+    this.showDiagnosticsButton = opts?.showDiagnosticsButton ?? !!opts?.onDiagnostics;
+    this.showRecordingButton = opts?.showRecordingButton ?? false;
+    this.recording = false;
     this.initElements();
     const state = this.player?.getState?.();
     const isAlreadyPlaying = !this.video.paused && !this.video.ended && this.video.readyState >= 2;
@@ -74681,18 +75005,57 @@ var FyraUiShell = class extends HTMLElement {
       playBtn: this.shadowRoot?.querySelector(".btn-play"),
       timeLabel: this.shadowRoot?.querySelector(".time"),
       spinner: this.shadowRoot?.querySelector('[data-role="spinner"]'),
+      statusCard: this.shadowRoot?.querySelector('[data-role="status-card"]'),
+      statusMessage: this.shadowRoot?.querySelector('[data-role="status-message"]'),
+      statusDetail: this.shadowRoot?.querySelector('[data-role="status-detail"]'),
+      retryBtn: this.shadowRoot?.querySelector('[data-role="retry"]'),
+      diagnosticsBtn: this.shadowRoot?.querySelector('.bar [data-act="diagnostics"]'),
+      diagnosticsMenuBtn: this.shadowRoot?.querySelector('.more-menu [data-act="diagnostics"]'),
+      recordBtn: this.shadowRoot?.querySelector('.bar [data-act="record"]'),
+      recordMenuBtn: this.shadowRoot?.querySelector('.more-menu [data-act="record"]'),
       qualitySel: this.shadowRoot?.querySelector(".quality"),
       cover: this.shadowRoot?.querySelector('[data-role="cover"]'),
       speedBtn: this.shadowRoot?.querySelector('[data-act="speed"]')
     };
     this.shell = this.shadowRoot?.querySelector(".shell");
+    if (this.elements.diagnosticsBtn) {
+      this.elements.diagnosticsBtn.style.display = this.showDiagnosticsButton ? "" : "none";
+    }
+    if (this.elements.diagnosticsMenuBtn) {
+      this.elements.diagnosticsMenuBtn.style.display = this.showDiagnosticsButton ? "" : "none";
+    }
+    if (this.elements.recordBtn) {
+      this.elements.recordBtn.style.display = this.showRecordingButton ? "" : "none";
+    }
+    if (this.elements.recordMenuBtn) {
+      this.elements.recordMenuBtn.style.display = this.showRecordingButton ? "" : "none";
+    }
+    this.updateRecordingUi();
+  }
+  updateOptionalControlVisibility() {
+    const showCollapsible = this.isSmallMode ? "none" : "";
+    if (this.elements.diagnosticsBtn) {
+      this.elements.diagnosticsBtn.style.display = this.showDiagnosticsButton ? showCollapsible : "none";
+    }
+    if (this.elements.diagnosticsMenuBtn) {
+      this.elements.diagnosticsMenuBtn.style.display = this.showDiagnosticsButton ? "" : "none";
+    }
+    if (this.elements.recordBtn) {
+      this.elements.recordBtn.style.display = this.showRecordingButton ? showCollapsible : "none";
+    }
+    if (this.elements.recordMenuBtn) {
+      this.elements.recordMenuBtn.style.display = this.showRecordingButton ? "" : "none";
+    }
   }
   bindUi() {
+    const root = this.shadowRoot;
+    if (!root)
+      return;
     const progress = this.shadowRoot?.querySelector(".progress");
     const vol = this.shadowRoot?.querySelector(".vol");
     if (vol && this.video)
       vol.value = `${this.video.muted ? 0 : this.video.volume}`;
-    this.shadowRoot?.addEventListener("click", async (e2) => {
+    addDomListener(root, "click", async (e2) => {
       const btn = e2.target.closest("button") || e2.target.closest(".big-play");
       if (!btn)
         return;
@@ -74705,46 +75068,59 @@ var FyraUiShell = class extends HTMLElement {
         if (act === "pip")
           await togglePip(this.video);
         if (act === "shot")
-          captureFrame(this.video);
+          await this.captureScreenshot();
         if (act === "mute")
           this.handleMute();
+        if (act === "retry")
+          await this.retryPlayback();
+        if (act === "diagnostics")
+          await this.openDiagnostics();
+        if (act === "record")
+          await this.toggleRecording();
       } catch (err) {
         this.log(`[err] ${err}`);
       }
-    });
-    progress?.addEventListener("input", () => {
-      if (!this.video || !progress)
-        return;
-      if (!this.duration || !isFinite(this.duration))
-        return;
-      const pct = Number(progress.value) / 100;
-      if (!isFinite(pct))
-        return;
-      const clamped = Math.max(0, Math.min(1, pct));
-      this.video.currentTime = clamped * this.duration;
-    });
-    vol?.addEventListener("input", () => {
-      if (!this.video || !vol)
-        return;
-      this.video.volume = Number(vol.value);
-      this.video.muted = Number(vol.value) === 0;
-    });
-    this.elements.qualitySel?.addEventListener("change", () => {
-      if (!this.elements.qualitySel || !this.player)
-        return;
-      const value = this.elements.qualitySel.value;
-      const mode = this.elements.qualitySel.dataset.mode;
-      if (mode === "quality") {
-        const numericValue = Number(value);
-        const level = value === "auto" ? "auto" : Number.isNaN(numericValue) ? value : numericValue;
-        this.player.setQualityLevel(level).catch((e2) => this.log(`[quality] switch failed: ${e2}`));
-        return;
-      }
-      const idx = Number(value);
-      if (!Number.isNaN(idx)) {
-        this.player.switchSource(idx).catch((e2) => this.log(`[source] switch failed: ${e2}`));
-      }
-    });
+    }, this.eventCleanup);
+    if (progress)
+      addDomListener(progress, "input", () => {
+        if (!this.video || !progress)
+          return;
+        if (!this.duration || !isFinite(this.duration))
+          return;
+        const pct = Number(progress.value) / 100;
+        if (!isFinite(pct))
+          return;
+        const clamped = Math.max(0, Math.min(1, pct));
+        this.video.currentTime = clamped * this.duration;
+      }, this.eventCleanup);
+    if (vol)
+      addDomListener(vol, "input", () => {
+        if (!this.video || !vol)
+          return;
+        this.video.volume = Number(vol.value);
+        this.video.muted = Number(vol.value) === 0;
+        this.emitPreference("volume", this.video.volume);
+        this.emitPreference("muted", this.video.muted);
+      }, this.eventCleanup);
+    if (this.elements.qualitySel)
+      addDomListener(this.elements.qualitySel, "change", () => {
+        if (!this.elements.qualitySel || !this.player)
+          return;
+        const value = this.elements.qualitySel.value;
+        const mode = this.elements.qualitySel.dataset.mode;
+        if (mode === "quality") {
+          const numericValue = Number(value);
+          const level = value === "auto" ? "auto" : Number.isNaN(numericValue) ? value : numericValue;
+          this.emitPreference("quality", level);
+          this.player.setQualityLevel(level).catch((e2) => this.log(`[quality] switch failed: ${e2}`));
+          return;
+        }
+        const idx = Number(value);
+        if (!Number.isNaN(idx)) {
+          this.emitPreference("sourceIndex", idx);
+          this.player.switchSource(idx).catch((e2) => this.log(`[source] switch failed: ${e2}`));
+        }
+      }, this.eventCleanup);
   }
   bindEvents() {
     if (!this.video || !this.bus)
@@ -74756,20 +75132,26 @@ var FyraUiShell = class extends HTMLElement {
       onPause: () => this.updatePlayUi(false),
       onPlaying: () => {
         this.setBuffering(false);
+        this.setStatusMessage("");
         this.hideCover();
       },
       onWaiting: () => this.setBuffering(true),
-      onCanPlay: () => this.setBuffering(false)
+      onCanPlay: () => {
+        this.setBuffering(false);
+        this.setStatusMessage("");
+      }
     });
     bindBusEvents(this.bus, this.eventCleanup, {
       onReady: () => {
         this.setBuffering(false);
+        this.setStatusMessage("");
         this.updatePlayUi(false);
         this.hideCover();
         this.populateQuality();
       },
       onPlay: () => {
         this.setBuffering(false);
+        this.setStatusMessage("");
         this.updatePlayUi(true);
         this.hideCover();
       },
@@ -74785,6 +75167,20 @@ var FyraUiShell = class extends HTMLElement {
         const payloadRecord = this.asRecord(eventPayload);
         const severity = typeof payloadRecord?.severity === "string" ? payloadRecord.severity : void 0;
         const type = typeof payloadRecord?.type === "string" ? payloadRecord.type : void 0;
+        const code = typeof payloadRecord?.code === "string" ? payloadRecord.code : void 0;
+        const attempt = typeof payloadRecord?.attempt === "number" ? payloadRecord.attempt : void 0;
+        const maxRetries = typeof payloadRecord?.maxRetries === "number" ? payloadRecord.maxRetries : void 0;
+        const details = code ? `${code}${attempt !== void 0 ? ` ${attempt}/${maxRetries ?? "-"}` : ""}` : void 0;
+        if (type === "reconnect" || code === "RECONNECT_ATTEMPT") {
+          this.setBuffering(true);
+          this.setStatusMessage("\u89C6\u9891\u6D41\u4E2D\u65AD\uFF0C\u6B63\u5728\u91CD\u65B0\u8FDE\u63A5...", details, false);
+        } else if (type === "reconnect-exhausted" || code === "RECONNECT_EXHAUSTED") {
+          this.setBuffering(false);
+          this.setStatusMessage("\u89C6\u9891\u6D41\u4E2D\u65AD\uFF0C\u8BF7\u91CD\u8BD5", details, true);
+          this.updatePlayUi(false);
+        } else if (severity === "fatal") {
+          this.setStatusMessage("\u89C6\u9891\u6D41\u4E2D\u65AD\uFF0C\u6B63\u5728\u5C1D\u8BD5\u6062\u590D...", details, false);
+        }
         if (severity === "fatal" || type === "reconnect-exhausted") {
           this.setBuffering(false);
           this.updatePlayUi(false);
@@ -74935,6 +75331,7 @@ var FyraUiShell = class extends HTMLElement {
       if (moreWrap)
         moreWrap.style.display = "none";
     }
+    this.updateOptionalControlVisibility();
   }
   bindAutoHide() {
     if (!this.shell)
@@ -75000,11 +75397,91 @@ var FyraUiShell = class extends HTMLElement {
   handleMute() {
     toggleMute(this.video);
     this.updateVolumeUi();
+    if (this.video) {
+      this.emitPreference("muted", this.video.muted);
+      this.emitPreference("volume", this.video.volume);
+    }
+  }
+  async retryPlayback() {
+    try {
+      if (this.onRetry) {
+        await this.onRetry();
+      } else {
+        await this.player?.play();
+      }
+      this.setStatusMessage("");
+    } catch (err) {
+      this.log(`[retry] failed: ${err}`);
+    }
+  }
+  getActionContext() {
+    if (!this.player || !this.video)
+      return null;
+    return {
+      player: this.player,
+      video: this.video
+    };
+  }
+  async openDiagnostics() {
+    const context = this.getActionContext();
+    if (!context)
+      return;
+    await this.uiOptions?.onDiagnostics?.(context);
+    this.log("[ui] diagnostics opened");
+  }
+  async captureScreenshot() {
+    let result = null;
+    try {
+      result = await captureFrame(this.video);
+    } catch (err) {
+      this.setStatusMessage("\u622A\u56FE\u5931\u8D25", "SCREENSHOT_BLOCKED", false, true);
+      this.log(`[screenshot] capture failed: ${err}`);
+      return;
+    }
+    if (!result || !this.player || !this.video) {
+      this.setStatusMessage("\u622A\u56FE\u5931\u8D25", "SCREENSHOT_UNAVAILABLE", false, true);
+      return;
+    }
+    this.setStatusMessage("\u622A\u56FE\u5DF2\u4FDD\u5B58", `${result.width}x${result.height}`, false, true);
+    try {
+      await this.uiOptions?.onScreenshot?.({
+        ...result,
+        player: this.player,
+        video: this.video
+      });
+    } catch (err) {
+      this.log(`[screenshot] hook failed: ${err}`);
+    }
+  }
+  async toggleRecording() {
+    const context = this.getActionContext();
+    if (!context)
+      return;
+    const nextRecording = !this.recording;
+    try {
+      await this.uiOptions?.onRecordToggle?.({
+        ...context,
+        recording: nextRecording,
+        ts: Date.now()
+      });
+    } catch (err) {
+      this.setStatusMessage("\u5F55\u5236\u5931\u8D25", "RECORD_HOOK_FAILED", false, true);
+      this.log(`[record] hook failed: ${err}`);
+      return;
+    }
+    this.recording = nextRecording;
+    this.updateRecordingUi();
+    this.setStatusMessage(this.recording ? "\u5F55\u5236\u5DF2\u5F00\u59CB" : "\u5F55\u5236\u5DF2\u505C\u6B62", "", false, true);
+  }
+  updateRecordingUi() {
+    this.elements.recordBtn?.classList.toggle("active", this.recording);
+    this.elements.recordMenuBtn?.classList.toggle("active", this.recording);
   }
   setPlaybackSpeed(speed) {
     if (!this.video)
       return;
     this.video.playbackRate = speed;
+    this.emitPreference("playbackRate", speed);
     if (this.elements.speedBtn) {
       this.elements.speedBtn.textContent = `${speed}x`;
     }
@@ -75101,6 +75578,29 @@ var FyraUiShell = class extends HTMLElement {
     }
     if (this.elements.bigPlay) {
       this.elements.bigPlay.style.display = on ? "none" : this.video && this.video.paused ? "flex" : "none";
+    }
+  }
+  setStatusMessage(message, detail = "", retry = false, transient = false) {
+    if (!this.showStatusOverlay)
+      return;
+    const statusMessage = this.elements.statusMessage;
+    if (!statusMessage)
+      return;
+    statusMessage.textContent = message;
+    this.elements.statusCard?.classList.toggle("show", message.length > 0);
+    if (this.elements.statusDetail) {
+      this.elements.statusDetail.textContent = detail;
+      this.elements.statusDetail.style.display = detail ? "block" : "none";
+    }
+    if (this.elements.retryBtn) {
+      this.elements.retryBtn.style.display = retry ? "inline-flex" : "none";
+    }
+    if (transient && message) {
+      window.setTimeout(() => {
+        if (this.elements.statusMessage?.textContent === message) {
+          this.setStatusMessage("");
+        }
+      }, 1600);
     }
   }
   populateQuality() {
@@ -75223,10 +75723,13 @@ var sources_default = [
   { type: "hls", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8", lowLatency: false, preferTech: "hls" },
   { type: "hls", url: "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8", preferTech: "hls" },
   { type: "hls", url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", preferTech: "hls" },
+  // HLS with fMP4/CMAF segments. This is still played through the HLS Tech, not the direct fMP4 Tech.
   { type: "hls", url: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8", preferTech: "hls" },
   { type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false, preferTech: "hls" },
   { type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: true, preferTech: "hls" },
   { type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep", preferTech: "webrtc" },
+  // === Direct fMP4 测试流（无 m3u8/mpd 清单，走 FMP4Tech + MSE）===
+  { type: "fmp4", url: "/ffmpeg-fmp4/stream.fmp4", transport: "http", codec: "h264", audioCodec: "aac", videoCodecString: "avc1.4d401f", audioCodecString: "mp4a.40.2", isLive: true, preferTech: "fmp4" },
   // === DASH 测试流 ===
   { type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd", preferTech: "dash" },
   { type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd", preferTech: "dash" },
@@ -75278,6 +75781,12 @@ var uiStatus = "idle";
 var currentSrc = null;
 var useSkin = true;
 var hideNativeControls = false;
+var latestStatsEvent = null;
+var latestNetworkEvent = null;
+var latestQosEvent = null;
+var longRunStartedAt = 0;
+var longRunTimer = null;
+var longRunSamples = [];
 window.fyraPlayer = null;
 var CUSTOM_VALUE = "custom";
 if (!Array.from(typeSelect.options).some((o2) => o2.value === "webrtc-oven")) {
@@ -75288,9 +75797,16 @@ if (!Array.from(typeSelect.options).some((o2) => o2.value === "webrtc-oven")) {
 }
 var presetSources = [
   { label: "HLS demo", type: "hls", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8" },
+  { label: "Apple HLS fMP4/CMAF sample", type: "hls", url: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8" },
   { label: "MediaMTX HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false },
   { label: "MediaMTX LL-HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: true },
   { label: "MediaMTX WebRTC WHEP local (live/test)", type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep" },
+  {
+    label: "ffmpeg fMP4 HTTP local (stream.fmp4)",
+    type: "fmp4",
+    url: "/ffmpeg-fmp4/stream.fmp4",
+    fmp4: { transport: "http", codec: "h264", audioCodec: "aac", videoCodecString: "avc1.4d401f", audioCodecString: "mp4a.40.2", isLive: true }
+  },
   { label: "DASH bbb", type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd" },
   { label: "DASH sintel", type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd" },
   { label: "MP4 demo", type: "file", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4" },
@@ -75304,6 +75820,15 @@ sources_default?.forEach((s2, idx) => {
     type: s2.type,
     url: s2.url,
     lowLatency: s2.lowLatency,
+    fmp4: s2.type === "fmp4" ? {
+      transport: s2.transport,
+      codec: s2.codec,
+      audioCodec: s2.audioCodec,
+      mimeType: s2.mimeType,
+      videoCodecString: s2.videoCodecString,
+      audioCodecString: s2.audioCodecString,
+      isLive: s2.isLive
+    } : void 0,
     webCodecs: s2.webCodecs
   });
 });
@@ -75392,6 +75917,91 @@ ${text}` : text;
   } catch {
   }
 }
+function getActiveBufferedRange() {
+  if (!video || !video.buffered?.length)
+    return null;
+  const current = video.currentTime || 0;
+  for (let i3 = 0; i3 < video.buffered.length; i3 += 1) {
+    const start = video.buffered.start(i3);
+    const end = video.buffered.end(i3);
+    if (current >= start && current <= end) {
+      return { start, end, level: Math.max(0, end - current) };
+    }
+  }
+  const last = video.buffered.length - 1;
+  return {
+    start: video.buffered.start(last),
+    end: video.buffered.end(last),
+    level: Math.max(0, video.buffered.end(last) - current)
+  };
+}
+function collectLongRunSample() {
+  const qualityState = player?.getQualityState?.();
+  const playbackQuality = typeof video.getVideoPlaybackQuality === "function" ? video.getVideoPlaybackQuality() : null;
+  const memory = performance.memory;
+  const sample = {
+    ts: (/* @__PURE__ */ new Date()).toISOString(),
+    elapsedSec: longRunStartedAt ? Math.round((Date.now() - longRunStartedAt) / 1e3) : 0,
+    state: player?.getState?.() || uiStatus,
+    source: currentSrc ? { label: currentSrc.label, type: currentSrc.type, url: currentSrc.url, lowLatency: currentSrc.lowLatency } : null,
+    tech: qualityState?.tech || null,
+    quality: qualityState || null,
+    video: {
+      currentTime: video.currentTime,
+      readyState: video.readyState,
+      paused: video.paused,
+      ended: video.ended,
+      width: video.videoWidth,
+      height: video.videoHeight,
+      buffered: getActiveBufferedRange(),
+      totalFrames: playbackQuality?.totalVideoFrames,
+      droppedFrames: playbackQuality?.droppedVideoFrames
+    },
+    dom: {
+      video: document.querySelectorAll("video").length,
+      audio: document.querySelectorAll("audio").length,
+      uiShell: document.querySelectorAll("fyra-ui-shell").length
+    },
+    memory: memory ? {
+      usedJSHeapSize: memory.usedJSHeapSize,
+      totalJSHeapSize: memory.totalJSHeapSize,
+      jsHeapSizeLimit: memory.jsHeapSizeLimit
+    } : null,
+    lastStats: latestStatsEvent,
+    lastNetwork: latestNetworkEvent,
+    lastQos: latestQosEvent
+  };
+  longRunSamples.push(sample);
+  return sample;
+}
+function startLongRunSampling(intervalMs = 1e4) {
+  stopLongRunSampling();
+  longRunStartedAt = Date.now();
+  longRunSamples = [];
+  collectLongRunSample();
+  longRunTimer = window.setInterval(collectLongRunSample, Math.max(1e3, intervalMs));
+  appendLog(`long-run sampling started: interval=${Math.max(1e3, intervalMs)}ms`);
+  return longRunSamples;
+}
+function stopLongRunSampling() {
+  if (longRunTimer !== null) {
+    window.clearInterval(longRunTimer);
+    longRunTimer = null;
+  }
+  return longRunSamples;
+}
+window.fyraLongRun = {
+  start: startLongRunSampling,
+  stop: stopLongRunSampling,
+  sample: collectLongRunSample,
+  clear: () => {
+    longRunStartedAt = Date.now();
+    longRunSamples = [];
+    return longRunSamples;
+  },
+  getSamples: () => longRunSamples,
+  getJson: () => JSON.stringify(longRunSamples, null, 2)
+};
 function applyLowLatencyToggle(src) {
   if (!lowLatencyToggle)
     return src;
@@ -75449,6 +76059,23 @@ function toPlayerSource(src) {
     return { type: "hls", url: src.url, lowLatency: src.lowLatency, preferTech: "hls" };
   if (pick === "dash")
     return { type: "dash", url: src.url, preferTech: "dash" };
+  if (pick === "fmp4") {
+    const fmp4 = src.fmp4 || {};
+    const videoCodecString = fmp4.videoCodecString || (fmp4.codec === "h265" ? "hvc1.1.6.L93.B0" : fmp4.codec === "av1" ? "av01.0.04M.08" : "avc1.4d401f");
+    const audioCodecString = fmp4.audioCodecString || (fmp4.audioCodec === "opus" ? "opus" : fmp4.audioCodec === "mp3" ? "mp3" : "mp4a.40.2");
+    return {
+      type: "fmp4",
+      url: src.url,
+      transport: fmp4.transport || (src.url.toLowerCase().startsWith("ws") ? "ws" : "http"),
+      codec: fmp4.codec || "h264",
+      audioCodec: fmp4.audioCodec || "aac",
+      mimeType: fmp4.mimeType,
+      videoCodecString,
+      audioCodecString,
+      isLive: fmp4.isLive ?? true,
+      preferTech: "fmp4"
+    };
+  }
   if (pick === "ws-raw")
     return { type: "ws-raw", url: src.url, codec: "h264", transport: "flv", preferTech: "ws-raw" };
   if (pick === "gb28181") {
@@ -75502,6 +76129,8 @@ function detectType(url) {
     return "hls";
   if (lower.endsWith(".mpd"))
     return "dash";
+  if (lower.endsWith(".fmp4") || lower.includes("/fmp4/") || lower.includes("stream.fmp4"))
+    return "fmp4";
   if (lower.endsWith(".flv"))
     return "ws-raw";
   if (lower.startsWith("ws://") || lower.startsWith("wss://"))
@@ -75517,6 +76146,7 @@ function bindPlayerEvents(p2) {
   p2.on("ended", () => setStatus("ended"));
   p2.on("error", (e2) => setStatus("error", `error: ${e2?.message || e2}`));
   p2.on("network", (evt) => {
+    latestNetworkEvent = evt;
     const msg = `network: ${JSON.stringify(evt)}`;
     appendLog(msg);
     if (evt?.type === "reconnect") {
@@ -75533,6 +76163,7 @@ function bindPlayerEvents(p2) {
     }
   });
   p2.on("qos", (evt) => {
+    latestQosEvent = evt;
     if (evt?.code || evt?.type) {
       const code = evt?.code || evt?.type || "qos";
       appendLog(`qos[${code}]: ${JSON.stringify(evt)}`);
@@ -75540,6 +76171,7 @@ function bindPlayerEvents(p2) {
   });
   p2.on("buffer", () => setStatus("loading", "buffering..."));
   p2.on("stats", ({ stats }) => {
+    latestStatsEvent = stats;
     if (!stats)
       return;
     statsEl.textContent = `bitrate: ${stats.bitrateKbps || "-"} kbps | fps: ${stats.fps || "-"} | res: ${stats.width || "-"}x${stats.height || "-"}`;

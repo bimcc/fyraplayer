@@ -2,6 +2,12 @@
 
 通用低延迟 Web 播放器，支持 WebRTC、LL-HLS/DASH、WebSocket+WebCodecs 等多种播放技术，采用插件/中间件架构设计。
 
+## 1.0 商业基线
+
+FyraPlayer `1.0.0` 定位为可控场景下的商业基线 SDK：核心播放、插件生命周期、公共导出、示例、发布检查和主要浏览器证据已经收口。支持范围以 [支持场景与已知限制](./docs/supported-scenarios.md)、[播放验证矩阵](./docs/playback-verification-matrix.md) 和 [1.0 发布就绪复盘](./docs/release-1.0-readiness.md) 为准。
+
+当前 1.0 不承诺所有浏览器、所有协议、所有后端组合的无条件支持。WebRTC TURN/受控中断恢复、项目专用 direct fMP4、Safari/Firefox 完整矩阵、DRM、字幕、广告/埋点、前端录制、GB28181 服务端栈和 PTZ 设备执行均按文档继续跟进或保持插件/后端边界。
+
 ## 特性
 
 - **多播放技术**: WebRTC (OME/WHIP/WHEP)、WS-raw (WebCodecs, FLV/TS)、HLS/DASH、fMP4、GB28181 网关适配、本地文件
@@ -244,15 +250,21 @@ player.on('metadata', (evt) => {
 
 - [商业化成熟度路线图](./docs/commercial-readiness-roadmap.md)：当前商业级差距、优先级、验收门槛和延期插件占位。
 - [插件化边界地图](./docs/pluginization-map.md)：已插件化能力、候选插件、核心边界和插件 API 后续方向。
+- [渲染桥边界](./docs/render-bridges.md)：PSV/Cesium/map/panorama 适配器的外部化方案和通用视频/画布输出契约。
 - [支持场景与已知限制](./docs/supported-scenarios.md)：当前可对外承诺的场景、实验项和明确边界。
 - [播放验证矩阵](./docs/playback-verification-matrix.md)：真实浏览器/协议验证范围、样例流、场景和证据记录。
 - [性能基线](./docs/performance-baseline.md)：可选性能预算插件、默认阈值和后续 profiling 证据状态。
+- [SDK 发布与集成](./docs/sdk-release-integration.md)：ESM、插件子路径、IIFE/CDN 包、发布检查清单和迁移规则。
+- [1.0 发布就绪复盘](./docs/release-1.0-readiness.md)：正式 1.0 前的架构、功能、证据、风险和后续任务复盘。
 - [代码审查对齐文档](./docs/review-alignment.md)：历史审查结论、已完成整改和复审记录。
 - [P0 执行清单](./docs/p0-execution-checklist.md)：第一批正确性修复的执行与验收记录。
 
 ## 脚本
 
 - `pnpm build` — 构建到 `dist/`
+- `pnpm build:release` — 构建 ESM 包并生成浏览器 IIFE 包
+- `pnpm bundle:iife` — 生成 `dist/fyraplayer.iife.js`
+- `pnpm check:release` — 运行发布前自检流水线
 - `pnpm check:sources` — 校验 `examples/sources.js` 的示例源结构
 - `pnpm check:public-api` — 校验 README/API 关键公共用法可通过 TypeScript 编译
 - `pnpm check:exports` — 清理并重建 `dist/`，校验 `package.json` exports 指向的文件存在

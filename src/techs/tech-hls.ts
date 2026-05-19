@@ -92,6 +92,28 @@ export class HLSTech extends AbstractTech {
       debug: false,
       capLevelToPlayerSize: true,
       enableWorker: true,
+      xhrSetup: source.request
+        ? (xhr: XMLHttpRequest) => {
+            const headers = source.request?.headers;
+            if (headers) {
+              Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+            }
+            if (source.request?.credentials === 'include') {
+              xhr.withCredentials = true;
+            }
+          }
+        : undefined,
+      fetchSetup: source.request
+        ? (context: { url?: string }, initParams: RequestInit) =>
+            new Request(context.url || source.url, {
+              ...initParams,
+              headers: {
+                ...(initParams.headers as Record<string, string> | undefined),
+                ...source.request?.headers
+              },
+              credentials: source.request?.credentials ?? initParams.credentials
+            })
+        : undefined,
       ...buildHlsPlaybackConfig(source, this.buffer)
     };
     

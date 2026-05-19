@@ -412,3 +412,20 @@
   - `pnpm check:exports` passed, verifying 22 package export files.
   - `pnpm check:sources` passed, 14 example sources verified.
   - `git diff --check` passed.
+
+## 27. 1.0 Commercial Baseline Closure (2026-05-19)
+
+- The earlier "not commercial-grade yet" conclusion has been superseded for the
+  documented 1.0 baseline scope.
+- FyraPlayer can now be positioned as a controlled commercial-baseline SDK for
+  the verified scenarios in `docs/supported-scenarios.md`.
+- Added `docs/release-1.0-readiness.md` as the final release-readiness summary
+  for architecture, included scope, non-scope, evidence, and post-1.0 work.
+- Version metadata and release notes are aligned to `1.0.0`.
+- Remaining work is explicitly tracked instead of blocking 1.0: WebRTC TURN,
+  controlled MediaMTX interruption, current Edge Opus speaker-output evidence,
+  HLS zero-fatal 30-minute retest, Safari/Firefox rows, and project-specific
+  direct fMP4 evidence.
+- Deferred/plugin-owned scope remains unchanged: DRM, subtitles, ads/business
+  analytics, frontend recording, full GB28181 server stack, PTZ execution, and
+  concrete PSV/Cesium/map/panorama renderer implementations.

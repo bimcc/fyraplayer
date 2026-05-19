@@ -73,6 +73,55 @@ export const UI_SHELL_STYLES = `
   }
   
   .spinner.show { display: block; }
+
+  .status-card {
+    position: absolute;
+    left: 50%;
+    top: calc(50% + 40px);
+    transform: translateX(-50%);
+    max-width: min(80%, 360px);
+    box-sizing: border-box;
+    display: none;
+    padding: 10px 12px;
+    border-radius: 4px;
+    background: rgba(17, 24, 39, 0.82);
+    color: #fff;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    pointer-events: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .status-card.show {
+    display: block;
+  }
+
+  .status-message {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+
+  .status-detail {
+    display: none;
+    margin-top: 4px;
+    color: rgba(255,255,255,0.72);
+    font-size: 10px;
+    line-height: 1.3;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .retry-btn {
+    display: none;
+    margin: 8px auto 0;
+    height: 28px;
+    min-width: 58px;
+    padding: 4px 10px;
+    border: 1px solid rgba(255,255,255,0.28);
+    background: rgba(255,255,255,0.12);
+    font-size: 12px;
+  }
   
   /* Big play button */
   .big-play { 
@@ -247,6 +296,11 @@ export const UI_SHELL_STYLES = `
   
   button:active {
     transform: scale(0.92);
+  }
+
+  button.active {
+    background: rgba(239,68,68,0.32);
+    color: #fff;
   }
   
   /* Quality selector */
@@ -515,6 +569,11 @@ export const UI_SHELL_HTML = `
     <div class="click-area" data-role="click-area"></div>
     <div class="overlay">
       <div class="spinner" data-role="spinner"></div>
+      <div class="status-card" data-role="status-card" aria-live="polite">
+        <div class="status-message" data-role="status-message"></div>
+        <div class="status-detail" data-role="status-detail"></div>
+        <button class="retry-btn" data-act="retry" data-role="retry" type="button">重试</button>
+      </div>
       <div class="big-play" data-act="toggle-play">
         <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
       </div>
@@ -546,6 +605,12 @@ export const UI_SHELL_HTML = `
         <button class="collapsible" data-act="shot" title="截图">
           <svg class="icon" viewBox="0 0 24 24"><path d="M4 4h4l2-2h4l2 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>
         </button>
+        <button class="collapsible" data-act="diagnostics" title="诊断" style="display:none;">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v3H4V5zm0 5h10v3H4v-3zm0 5h16v3H4v-3zm12-5h4v3h-4v-3z"/></svg>
+        </button>
+        <button class="collapsible" data-act="record" title="录制" style="display:none;">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
+        </button>
         <button class="collapsible" data-act="pip" title="画中画">
           <svg class="icon" viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/></svg>
         </button>
@@ -573,6 +638,14 @@ export const UI_SHELL_HTML = `
             <button data-act="shot" title="截图">
               <svg class="icon" viewBox="0 0 24 24"><path d="M4 4h4l2-2h4l2 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>
               <span>截图</span>
+            </button>
+            <button data-act="diagnostics" title="诊断">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v3H4V5zm0 5h10v3H4v-3zm0 5h16v3H4v-3zm12-5h4v3h-4v-3z"/></svg>
+              <span>诊断</span>
+            </button>
+            <button data-act="record" title="录制">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
+              <span>录制</span>
             </button>
             <button data-act="pip" title="画中画">
               <svg class="icon" viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/></svg>

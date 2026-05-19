@@ -227,8 +227,21 @@ class WhipWhepAdapter implements WebRTCSignalAdapter {
 
   constructor(private cfg: Extract<WebRTCSignalConfig, { type: "whip" | "whep" }>) {}
 
-  async setup(pc: RTCPeerConnection, src: Extract<Source, { type: "webrtc" }>): Promise<void> {
-    this.sig = new WhipSignaling({ url: this.cfg.url, token: this.cfg.token, iceServers: src.iceServers });
+  async setup(
+    pc: RTCPeerConnection,
+    src: Extract<Source, { type: "webrtc" }>,
+    onEvent?: (evt: SignalAdapterEvent) => void
+  ): Promise<void> {
+    this.sig = new WhipSignaling({
+      url: this.cfg.url,
+      token: this.cfg.token,
+      iceServers: src.iceServers,
+      headers: src.request?.headers,
+      credentials: src.request?.credentials,
+      timeoutMs: this.cfg.timeoutMs,
+      iceGatheringTimeoutMs: this.cfg.iceGatheringTimeoutMs,
+      onEvent
+    });
     pc.onicecandidate = null; // no trickle
     await this.sig.negotiate(pc);
   }

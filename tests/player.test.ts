@@ -4,7 +4,8 @@ import { mockTechInstances, resetMockTechInstances } from './mocks/tech-base.js'
 (globalThis as any).window = { localStorage: null };
 
 function createVideoStub(): HTMLVideoElement {
-  return {
+  const listeners = new Map<string, Set<EventListener>>();
+  const video = {
     autoplay: false,
     muted: false,
     preload: 'none',
@@ -16,7 +17,23 @@ function createVideoStub(): HTMLVideoElement {
     paused: false,
     currentTime: 0,
     readyState: 0,
-    error: null
+    error: null,
+    addEventListener: (event: string, handler: EventListener) => {
+      const handlers = listeners.get(event) ?? new Set<EventListener>();
+      handlers.add(handler);
+      listeners.set(event, handlers);
+    },
+    removeEventListener: (event: string, handler: EventListener) => {
+      listeners.get(event)?.delete(handler);
+    },
+    dispatchEvent: (event: Event) => {
+      listeners.get(event.type)?.forEach((handler) => handler.call(video, event));
+      return true;
+    }
+  };
+  return {
+    ...video,
+    __listenerCount: (event: string) => listeners.get(event)?.size ?? 0
   } as unknown as HTMLVideoElement;
 }
 
@@ -215,6 +232,54 @@ describe('FyraPlayer P0/P1 regressions', () => {
     }
   });
 
+  test('normalizes WebRTC ICE reconnect-required as fatal and schedules player reconnect', async () => {
+    jest.useFakeTimers();
+    const player = new FyraPlayer({
+      video: createVideoStub(),
+      sources: [{ type: 'webrtc', url: 'https://origin/live/whep' }],
+      techOrder: ['webrtc'],
+      reconnect: { enabled: true, maxRetries: 1, baseDelayMs: 1000, maxDelayMs: 1000, jitter: 0 }
+    });
+
+    const received: any[] = [];
+    player.on('network', (event) => received.push(event));
+
+    try {
+      await player.init();
+
+      const webrtcTech = mockTechInstances.webrtc[0];
+      webrtcTech.emit('network', {
+        type: 'ice-reconnect-required',
+        fatal: true,
+        reason: 'ice-disconnected',
+        state: 'disconnected'
+      });
+
+      expect(received).toEqual([
+        expect.objectContaining({
+          type: 'ice-reconnect-required',
+          code: 'WEBRTC_ICE_RECONNECT_REQUIRED',
+          severity: 'fatal',
+          reason: 'ice-disconnected',
+          state: 'disconnected'
+        }),
+        expect.objectContaining({
+          type: 'reconnect',
+          code: 'RECONNECT_ATTEMPT',
+          severity: 'info',
+          attempt: 1,
+          maxRetries: 1
+        })
+      ]);
+
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(webrtcTech.loadCalls).toBe(2);
+    } finally {
+      await player.destroy();
+      jest.useRealTimers();
+    }
+  });
+
   test('captures ready emitted synchronously during tech load', async () => {
     const player = new FyraPlayer({
       video: createVideoStub(),
@@ -291,6 +356,35 @@ describe('FyraPlayer P0/P1 regressions', () => {
     expect(mockTechInstances.hls).toHaveLength(1);
 
     await player.destroy();
+  });
+
+  test('syncs player state from native video playback events and removes listeners on destroy', async () => {
+    const video = createVideoStub();
+    const player = new FyraPlayer({
+      video,
+      sources: [{ type: 'hls', url: 'https://origin/live.m3u8' }],
+      techOrder: ['hls']
+    });
+
+    await player.init();
+    const hlsTech = mockTechInstances.hls[0];
+    hlsTech.emit('ready');
+    expect(player.getState()).toBe('ready');
+
+    video.dispatchEvent(new Event('playing'));
+    expect(player.getState()).toBe('playing');
+
+    video.dispatchEvent(new Event('pause'));
+    expect(player.getState()).toBe('paused');
+
+    video.dispatchEvent(new Event('ended'));
+    expect(player.getState()).toBe('ended');
+
+    await player.destroy();
+    expect((video as unknown as { __listenerCount(event: string): number }).__listenerCount('playing')).toBe(0);
+    expect((video as unknown as { __listenerCount(event: string): number }).__listenerCount('play')).toBe(0);
+    expect((video as unknown as { __listenerCount(event: string): number }).__listenerCount('pause')).toBe(0);
+    expect((video as unknown as { __listenerCount(event: string): number }).__listenerCount('ended')).toBe(0);
   });
 
   test('exposes active tech quality state and forwards manual selection through middleware', async () => {

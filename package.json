@@ -1,6 +1,6 @@
 {
   "name": "fyraplayer",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Modern, extensible low-latency web player (WebRTC, LL-HLS, WS+WASM) with plugin/middleware architecture.",
   "type": "module",
   "packageManager": "pnpm@11.1.2",
@@ -44,6 +44,22 @@
       "import": "./dist/plugins/reconnect.js",
       "types": "./dist/plugins/reconnect.d.ts"
     },
+    "./plugins/recording": {
+      "import": "./dist/plugins/recording.js",
+      "types": "./dist/plugins/recording.d.ts"
+    },
+    "./plugins/recording-api": {
+      "import": "./dist/plugins/recording.js",
+      "types": "./dist/plugins/recording.d.ts"
+    },
+    "./plugins/diagnostics": {
+      "import": "./dist/plugins/diagnostics.js",
+      "types": "./dist/plugins/diagnostics.d.ts"
+    },
+    "./plugins/auth": {
+      "import": "./dist/plugins/auth.js",
+      "types": "./dist/plugins/auth.d.ts"
+    },
     "./plugins/storage": {
       "import": "./dist/plugins/storage.js",
       "types": "./dist/plugins/storage.d.ts"
@@ -59,10 +75,16 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "pnpm clean && tsc -p tsconfig.json",
+    "build:release": "pnpm build && pnpm bundle:iife",
     "check:public-api": "tsc -p tsconfig.public-api.json",
     "check:exports": "pnpm build && node checks/export-contract.mjs",
+    "check:release": "pnpm exec jest --runInBand && pnpm check:public-api && pnpm check:exports && pnpm check:sources && pnpm build:release",
     "check:sources": "node checks/sources-contract.mjs",
+    "serve:fmp4-fixture": "node checks/ffmpeg-fmp4-fixture.mjs",
+    "long-run:browser": "node checks/browser-long-run.mjs",
+    "long-run:assert": "node checks/browser-long-run-assert.mjs",
     "bundle:examples": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm",
+    "bundle:iife": "esbuild src/iife.ts --bundle --outfile=dist/fyraplayer.iife.js --platform=browser --format=iife --global-name=FyraPlayerSDK",
     "bundle:examples:watch": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm --watch",
     "dev": "concurrently \"pnpm bundle:examples:watch\" \"pnpm serve:examples\"",
     "serve:examples": "npx http-server examples -p 5173 -c-1",

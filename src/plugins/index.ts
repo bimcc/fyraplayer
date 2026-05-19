@@ -54,6 +54,45 @@ export {
   type ReconnectPluginOptions,
 } from './reconnect.js';
 
+// Backend recording API plugin
+export {
+  RecordingApiError,
+  createRecordingApiPlugin,
+  type RecordingApiContext,
+  type RecordingApiHandle,
+  type RecordingApiPluginOptions,
+  type RecordingApiResponse,
+} from './recording.js';
+
+// Diagnostics snapshot/export plugin
+export {
+  createDebugPanelPlugin,
+  createDiagnosticsPlugin,
+  type DebugPanelPluginOptions,
+  type DiagnosticsEventRecord,
+  type DiagnosticsEventType,
+  type DiagnosticsHandle,
+  type DiagnosticsPluginOptions,
+  type DiagnosticsSnapshot,
+} from './diagnostics.js';
+
+// Auth/signing middleware helpers
+export {
+  createAuthRecoveryPlugin,
+  createAuthSigningMiddleware,
+  defaultAuthRecoveryMatcher,
+  getAuthRecoveryStatus,
+  type AuthRecoveryContext,
+  type AuthRecoveryEvent,
+  type AuthRecoveryMatchContext,
+  type AuthRecoveryPhase,
+  type AuthRecoveryPluginOptions,
+  type AuthRecoveryTriggerType,
+  type AuthSigningContext,
+  type AuthSigningPluginOptions,
+  type AuthTokenResult,
+} from './auth.js';
+
 // Engine adapters (URL conversion for streaming servers)
 export {
   EngineFactory,

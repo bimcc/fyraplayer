@@ -11,6 +11,11 @@ export default defineConfig({
         target: 'http://localhost:3333',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ome/, '')
+      },
+      '/ffmpeg-fmp4': {
+        target: 'http://127.0.0.1:18080',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ffmpeg-fmp4/, '')
       }
     }
   },

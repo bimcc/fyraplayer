@@ -345,16 +345,11 @@ export class WebRTCTech extends AbstractTech {
       // Requirements 7.1: Emit ICE state events
       this.bus.emit("network", { type: "ice-state", state });
       if (state === "failed") {
-        // Requirements 7.2: Emit fatal event on ICE failure
+        // Requirements 7.2: Emit fatal event on ICE failure. Browser
+        // restartIce() still needs renegotiation, so the player-level reload is
+        // the reliable recovery path for WHEP/WHIP and most one-shot signaling.
         this.bus.emit("network", { type: "ice-failed", fatal: true });
         this.clearIceReconnectTimer();
-        if (this.pc.restartIce) {
-          try {
-            this.pc.restartIce();
-          } catch (e) {
-            console.warn("[webrtc] restartIce failed", e);
-          }
-        }
       } else if (state === "connected" || state === "completed") {
         this.clearConnectTimeout();
         this.clearIceReconnectTimer();
@@ -374,6 +369,13 @@ export class WebRTCTech extends AbstractTech {
     }
     
     if (!effectiveSignal) throw new Error("WebRTC signal config required");
+    if (effectiveSignal.type === 'whip' || effectiveSignal.type === 'whep') {
+      effectiveSignal = {
+        ...effectiveSignal,
+        timeoutMs: effectiveSignal.timeoutMs ?? this.reconnect?.timeoutMs ?? 15000,
+        iceGatheringTimeoutMs: effectiveSignal.iceGatheringTimeoutMs ?? 5000,
+      };
+    }
     this.adapter = createSignalAdapter(effectiveSignal);
     await this.adapter.setup(this.pc, src, (evt) => {
       this.bus.emit("network", { ...evt, stage: "webrtc-signal" });
@@ -627,7 +629,7 @@ export class WebRTCTech extends AbstractTech {
   }
 
   private startIceReconnectTimer(reason: string): void {
-    if (!this.pc || typeof this.pc.restartIce !== 'function') return;
+    if (!this.pc) return;
     const delay = Math.min(3000, Math.max(800, this.reconnect?.baseDelayMs ?? 1500));
     this.clearIceReconnectTimer();
     this.iceReconnectTimer = setTimeout(() => {
@@ -635,13 +637,22 @@ export class WebRTCTech extends AbstractTech {
       if (!this.pc) return;
       const state = this.pc.iceConnectionState;
       if (state === 'connected' || state === 'completed') return;
-      try {
-        this.pc.restartIce();
-        this.bus.emit("network", { type: "ice-restart", reason });
-      } catch (e) {
-        console.warn("[webrtc] restartIce failed", e);
-        this.bus.emit("network", { type: "ice-restart-failed", error: e });
+      if (typeof this.pc.restartIce === 'function') {
+        try {
+          this.pc.restartIce();
+          this.bus.emit("network", { type: "ice-restart", reason });
+        } catch (e) {
+          console.warn("[webrtc] restartIce failed", e);
+          this.bus.emit("network", { type: "ice-restart-failed", error: e });
+        }
       }
+      this.bus.emit("network", {
+        type: "ice-reconnect-required",
+        fatal: true,
+        reason,
+        state,
+        message: "WebRTC ICE did not recover before the reconnect grace period; reloading the source."
+      });
     }, delay);
   }
   

@@ -180,12 +180,108 @@ Implemented and verified:
 - `PERFORMANCE_BUDGET` QoS code in the public type contract.
 - Built-in HTML video FPS sampling regression test.
 - Local Chrome MediaMTX WHEP smoke stats were recorded with bitrate, FPS, RTT, packet loss, candidate type, transport, dropped frames, and resolution.
+- CDP browser long-run runner and JSON assertion gate.
+- Edge 30-minute MediaMTX WHEP run with stable DOM/heap and a passing assertion.
+- Edge 10-minute direct fMP4 fixture run with stable DOM/heap and no fatal events.
+- Edge 30-minute MediaMTX HLS run that stayed playable and recovered after hls.js fatal events, recorded as recovery evidence rather than a clean zero-fatal pass.
 
-Still pending:
+Still pending after 1.0:
 
-- Long-run memory and listener growth evidence.
-- Real fMP4 live stream bounded-buffer evidence.
-- Long-run MediaMTX/WebRTC performance evidence, including WebRTC audio validation with an Opus-capable ingest path.
-- Cross-browser performance records for Edge/Safari/Firefox.
+- HLS 30-minute zero-fatal retest or a documented recovered-fatal acceptance policy.
+- WebRTC audio validation with an Opus-capable ingest path and speaker-output evidence.
+- TURN relay and controlled interruption/reconnect performance evidence.
+- Project-specific direct HTTP/WS fMP4 stream evidence beyond the local fixture.
+- Safari/Firefox performance records.
 
 Track those pending records under `CR-005` and `CR-013` in `docs/commercial-readiness-roadmap.md`.
+
+---
+
+## 7. 30-Minute Long-Run Procedure
+
+Use tool-assisted sampling plus manual observation.
+
+Manual-only watching is acceptable for subjective notes such as perceived
+smoothness, audio/video sync, and whether the interruption prompt is readable,
+but it is not enough for commercial acceptance. The acceptance record needs
+sampled values so memory, media elements, dropped frames, and reconnect behavior
+can be compared across runs.
+
+Minimum sampling fields:
+
+- timestamp and elapsed seconds;
+- player `getState()`, current source type/URL, and current Tech when available;
+- video `currentTime`, `readyState`, `videoWidth`, `videoHeight`, paused/ended state;
+- buffered start/end for the active range when available;
+- `getVideoPlaybackQuality()` total and dropped frames when available;
+- DOM counts for `video`, `audio`, and `fyra-ui-shell`;
+- Chrome `performance.memory.usedJSHeapSize` when available;
+- latest `stats`, `network`, and `qos` events collected during the run.
+
+Sampling interval:
+
+- 5 seconds for interruption/reconnect runs;
+- 10 seconds for steady HLS/DASH/live long-run checks.
+
+Demo helper:
+
+- start: `window.fyraLongRun.start(10000)`;
+- stop: `window.fyraLongRun.stop()`;
+- manual sample: `window.fyraLongRun.sample()`;
+- export JSON: `window.fyraLongRun.getJson()`.
+
+Scripted runner:
+
+```bash
+pnpm long-run:browser -- --source "HLS demo" --duration 30m --interval 10s --out .fyra-long-run/hls-edge-30m.json
+pnpm long-run:assert -- .fyra-long-run/hls-edge-30m.json --require-tech hls --min-samples 150 --min-duration-sec 1740
+```
+
+The runner starts the examples Vite server, launches Edge by default, selects
+the requested demo preset or a custom `--source-url` / `--source-type`, drives
+`window.fyraLongRun`, and writes a JSON report with samples, events, final
+video state, DOM counts, frame counters, and a summary. Use `--browser chrome`
+or `--browser-path` for a specific browser binary. Use `--fail-on-error` in CI
+or QA automation when a non-playable result should fail the command.
+
+`pnpm long-run:assert` reads the JSON report produced by the runner or the
+manual `window.fyraLongRun.getJson()` export and applies machine-checkable
+acceptance gates. It checks sample count, sampled duration, final playable
+state, current-time advance, fatal/error events, dropped-frame ratio, JS heap
+growth when available, DOM media element growth, and optional live stall/end
+rules. Keep the assertion output with the dated verification row when closing a
+commercial long-run item.
+
+Useful variants:
+
+```bash
+pnpm long-run:browser -- --source "Apple HLS fMP4/CMAF sample" --duration 10m --interval 10s --out .fyra-long-run/apple-hls-fmp4-edge-10m.json
+pnpm long-run:assert -- .fyra-long-run/apple-hls-fmp4-edge-10m.json --require-tech hls --min-samples 50 --min-duration-sec 540
+pnpm serve:fmp4-fixture
+pnpm long-run:browser -- --url http://127.0.0.1:3000/basic.html --source-url http://127.0.0.1:18080/stream.fmp4 --source-type fmp4 --duration 10m --interval 10s --out .fyra-long-run/ffmpeg-fmp4-edge-10m.json --fail-on-error --expect-live
+pnpm long-run:assert -- .fyra-long-run/ffmpeg-fmp4-edge-10m.json --require-tech fmp4 --expect-live --min-samples 50 --min-duration-sec 540
+pnpm long-run:browser -- --source-url http://127.0.0.1:8888/live/test/index.m3u8 --source-type hls --duration 30m --interval 10s --out .fyra-long-run/mediamtx-hls-30m.json
+pnpm long-run:assert -- .fyra-long-run/mediamtx-hls-30m.json --require-tech hls --expect-live --min-samples 150 --min-duration-sec 1740
+pnpm long-run:browser -- --source "MediaMTX WebRTC WHEP local (live/test)" --duration 30m --interval 5s --expect-live --out .fyra-long-run/mediamtx-whep-30m.json
+pnpm long-run:assert -- .fyra-long-run/mediamtx-whep-30m.json --require-tech webrtc --expect-live --min-samples 300 --min-duration-sec 1740
+```
+
+For a MediaMTX instance using custom ports such as RTMP `21935`, HLS `28888`,
+and WebRTC/WHEP `28889`, use custom source URLs:
+
+```bash
+pnpm long-run:browser -- --source-url http://127.0.0.1:28888/live/test/index.m3u8 --source-type hls --duration 30m --interval 10s --out .fyra-long-run/mediamtx-hls-28888-edge-30m.json --fail-on-error --expect-live
+pnpm long-run:assert -- .fyra-long-run/mediamtx-hls-28888-edge-30m.json --require-tech hls --expect-live --min-samples 150 --min-duration-sec 1740
+pnpm long-run:browser -- --source-url http://127.0.0.1:28889/live/test/whep --source-type webrtc --duration 30m --interval 5s --out .fyra-long-run/mediamtx-whep-28889-edge-30m.json --fail-on-error --expect-live
+pnpm long-run:assert -- .fyra-long-run/mediamtx-whep-28889-edge-30m.json --require-tech webrtc --expect-live --min-samples 300 --min-duration-sec 1740
+```
+
+Pass criteria for the first commercial baseline run:
+
+- playback remains usable for 30 minutes or a reconnect recovers without page refresh;
+- media element and UI shell counts stay stable;
+- heap usage does not show unbounded growth after the initial warm-up;
+- dropped-frame ratio does not trend upward continuously;
+- no repeated fatal network loop remains unresolved;
+- manual note confirms there is no persistent audio/video desync or visible overlay stuck after recovery.
+- For direct fMP4 fixture testing, start `pnpm serve:fmp4-fixture` first. It serves `G:\MTX\fmp4test.mp4` as looping fragmented MP4 with CORS, which makes the browser evidence repeatable.

@@ -55,9 +55,16 @@ class MemoryStorage implements KeyValueStore {
   }
 }
 
+interface VideoStub {
+  volume: number;
+  muted: boolean;
+  playbackRate: number;
+}
+
 class PlayerStub implements PlayerAPI {
   currentTime = 0;
   readonly switchSource = jest.fn(async (_index: number) => undefined);
+  readonly setQualityLevel = jest.fn(async (_level?: number | string | 'auto') => undefined);
   private currentIndex = 0;
   private readonly handlers = new Map<string, Set<Handler>>();
 
@@ -67,7 +74,6 @@ class PlayerStub implements PlayerAPI {
   async pause(): Promise<void> {}
   async seek(): Promise<void> {}
   getQualityState() { return { supported: false, auto: true, current: null, levels: [] }; }
-  async setQualityLevel(): Promise<void> {}
   getState() { return 'idle' as const; }
   getSources(): Source[] { return this.sources; }
   getCurrentSource(): Source | undefined { return this.sources[this.currentIndex]; }
@@ -98,6 +104,10 @@ class PlayerStub implements PlayerAPI {
 
   emit(event: string): void {
     this.handlers.get(event)?.forEach((handler) => handler());
+  }
+
+  emitPayload(event: string, payload: unknown): void {
+    this.handlers.get(event)?.forEach((handler) => handler(payload));
   }
 
   setCurrentIndex(index: number): void {
@@ -161,6 +171,73 @@ describe('storage plugin lifecycle', () => {
 
   test('keeps backwards-compatible storagePlugin export', () => {
     expect(typeof storagePlugin).toBe('function');
+  });
+
+  test('restores and persists playback preferences when enabled', async () => {
+    const bus = new BusStub();
+    const storage = new MemoryStorage();
+    storage.setItem('prefs-key', JSON.stringify({
+      volume: 0.4,
+      muted: true,
+      playbackRate: 1.5,
+      quality: 'auto',
+      lowLatency: true,
+      sourceIndex: 1,
+    }));
+    const video: VideoStub = { volume: 1, muted: false, playbackRate: 1 };
+    const player = new PlayerStub([
+      { type: 'hls', url: 'https://example.com/one.m3u8', lowLatency: false },
+      { type: 'hls', url: 'https://example.com/two.m3u8', lowLatency: false },
+    ]);
+
+    const lifecycle = createStoragePlugin({
+      key: 'source-key',
+      preferencesKey: 'prefs-key',
+      video: video as HTMLVideoElement,
+      persistVolume: true,
+      persistMuted: true,
+      persistPlaybackRate: true,
+      persistQuality: true,
+      persistLowLatency: true,
+    })(createContext(player, bus, storage));
+
+    expect(video.volume).toBe(0.4);
+    expect(video.muted).toBe(true);
+    expect(video.playbackRate).toBe(1.5);
+    expect(player.getSources()).toEqual([
+      expect.objectContaining({ lowLatency: true }),
+      expect.objectContaining({ lowLatency: true }),
+    ]);
+    expect(player.switchSource).toHaveBeenCalledWith(1);
+
+    player.emit('ready');
+    await Promise.resolve();
+    expect(player.setQualityLevel).toHaveBeenCalledWith('auto');
+
+    player.emitPayload('preference', { key: 'volume', value: 0.75, source: 'ui' });
+    player.emitPayload('preference', { key: 'muted', value: false, source: 'ui' });
+    player.emitPayload('preference', { key: 'playbackRate', value: 2, source: 'ui' });
+    player.emitPayload('preference', { key: 'quality', value: 0, source: 'ui' });
+    player.emitPayload('preference', { key: 'lowLatency', value: false, source: 'ui' });
+    player.emitPayload('preference', { key: 'sourceIndex', value: 0, source: 'ui' });
+
+    expect(JSON.parse(storage.getItem('prefs-key') || '{}')).toEqual({
+      volume: 0.75,
+      muted: false,
+      playbackRate: 2,
+      quality: 0,
+      lowLatency: false,
+      sourceIndex: 0,
+    });
+    expect(storage.getItem('source-key')).toBe('0');
+    expect(player.getSources()).toEqual([
+      expect.objectContaining({ lowLatency: false }),
+      expect.objectContaining({ lowLatency: false }),
+    ]);
+
+    lifecycle?.destroy?.();
+    player.emitPayload('preference', { key: 'volume', value: 0.1, source: 'ui' });
+    expect(JSON.parse(storage.getItem('prefs-key') || '{}').volume).toBe(0.75);
   });
 });
 

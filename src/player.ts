@@ -24,6 +24,7 @@ import {
   PlayerOptions,
   PlayerState,
   Source,
+  SourceRequestConfig,
   Tech,
   TechRegistrationHandle,
   TechRegistrationOptions,
@@ -36,6 +37,20 @@ import { probeWebCodecs, WebCodecsSupport } from './utils/webcodecs.js';
 
 type EventHandler = (...args: unknown[]) => void;
 const MEDIA_HAVE_CURRENT_DATA = 2;
+
+function mergeSourceRequestConfig(
+  source: Source,
+  headers?: Record<string, string>,
+  credentials?: RequestCredentials
+): SourceRequestConfig | undefined {
+  const existing = source.request;
+  if (!existing && !headers && !credentials) return undefined;
+  return {
+    ...existing,
+    ...(headers ? { headers } : undefined),
+    ...(credentials ? { credentials } : undefined)
+  };
+}
 
 export class FyraPlayer implements PlayerAPI {
   private readonly options: PlayerOptions;
@@ -55,6 +70,7 @@ export class FyraPlayer implements PlayerAPI {
   private reconnectHealthSnapshot: { sourceIndex: number; techName: TechName | null; currentTime: number; readyState: number } | null = null;
   private dataChannelOpts: DataChannelOptions | undefined;
   private techEventHandlers: Map<EngineEvent, EventHandler> = new Map();
+  private readonly videoEventHandlers: Array<{ event: string; handler: EventListener }> = [];
 
   constructor(opts: PlayerOptions) {
     this.options = opts;
@@ -69,6 +85,7 @@ export class FyraPlayer implements PlayerAPI {
     if (typeof opts.autoplay === 'boolean') this.videoEl.autoplay = opts.autoplay;
     if (typeof opts.muted === 'boolean') this.videoEl.muted = opts.muted;
     if (opts.preload) this.videoEl.preload = opts.preload;
+    this.attachVideoStateEvents();
     this.dataChannelOpts = opts.dataChannel;
     // register middleware
     opts.middleware?.forEach((m) => this.middleware.use(m));
@@ -231,6 +248,7 @@ export class FyraPlayer implements PlayerAPI {
     this.stopStatsTimer();
     this.clearReconnectTimer();
     this.detachTechEvents();
+    this.detachVideoStateEvents();
     await this.techManager.destroyCurrent();
     try {
       await this.pluginManager.unregisterAll();
@@ -247,6 +265,33 @@ export class FyraPlayer implements PlayerAPI {
     }
     this.reconnectAttempts = 0;
     this.state = 'idle';
+  }
+
+  private attachVideoStateEvents(): void {
+    const add = (event: string, handler: EventListener) => {
+      this.videoEl.addEventListener?.(event, handler);
+      this.videoEventHandlers.push({ event, handler });
+    };
+    const markPlaying = () => {
+      if (this.state !== 'loading' && this.state !== 'error') {
+        this.state = 'playing';
+      }
+    };
+    add('play', markPlaying);
+    add('playing', markPlaying);
+    add('pause', () => {
+      if (this.state === 'playing') this.state = 'paused';
+    });
+    add('ended', () => {
+      this.state = 'ended';
+    });
+  }
+
+  private detachVideoStateEvents(): void {
+    for (const { event, handler } of this.videoEventHandlers) {
+      this.videoEl.removeEventListener?.(event, handler);
+    }
+    this.videoEventHandlers.length = 0;
   }
 
   /**
@@ -373,9 +418,12 @@ export class FyraPlayer implements PlayerAPI {
       // run request middleware once before load
       const requestCtx = await this.middleware.run('request', middlewareCtx);
       // apply middleware modifications
+      const requestSource = requestCtx.source as Source;
+      const requestConfig = mergeSourceRequestConfig(requestSource, requestCtx.headers, requestCtx.credentials);
       const patchedSource = {
-        ...(requestCtx.source as Source),
-        url: requestCtx.url ?? requestCtx.source.url ?? source.url
+        ...requestSource,
+        url: requestCtx.url ?? requestCtx.source.url ?? source.url,
+        ...(requestConfig ? { request: requestConfig } : undefined)
       } as Source;
       // run signal middleware (best-effort) before load
       const signalCtx = await this.middleware.run('signal', {
@@ -384,9 +432,12 @@ export class FyraPlayer implements PlayerAPI {
         tech: patchedSource.preferTech ?? this.techOrder[0],
         url: patchedSource.url
       });
+      const signalSource = signalCtx.source as Source;
+      const signalRequestConfig = mergeSourceRequestConfig(signalSource, signalCtx.headers, signalCtx.credentials);
       const finalSource = {
-        ...(signalCtx.source as Source),
-        url: signalCtx.url ?? signalCtx.source.url ?? patchedSource.url
+        ...signalSource,
+        url: signalCtx.url ?? signalCtx.source.url ?? patchedSource.url,
+        ...(signalRequestConfig ? { request: signalRequestConfig } : undefined)
       } as Source;
       try {
         const loaded = await this.techManager.selectAndLoad([finalSource], this.techOrder, {

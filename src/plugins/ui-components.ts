@@ -8,4 +8,9 @@ export { FyraUiShell, createUiComponentsPlugin } from '../ui/index.js';
 export { createUiComponentsPlugin as default } from '../ui/index.js';
 
 // Types
-export type { UiComponentsOptions } from '../ui/index.js';
+export type {
+  UiActionContext,
+  UiComponentsOptions,
+  UiRecordToggleEvent,
+  UiScreenshotEvent,
+} from '../ui/index.js';

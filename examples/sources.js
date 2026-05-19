@@ -4,10 +4,14 @@ export default [
   { type: 'hls', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8', lowLatency: false, preferTech: 'hls' },
   { type: 'hls', url: 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8', preferTech: 'hls' },
   { type: 'hls', url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', preferTech: 'hls' },
+  // HLS with fMP4/CMAF segments. This is still played through the HLS Tech, not the direct fMP4 Tech.
   { type: 'hls', url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8', preferTech: 'hls' },
   { type: 'hls', url: 'http://127.0.0.1:8888/live/test/index.m3u8', lowLatency: false, preferTech: 'hls' },
   { type: 'hls', url: 'http://127.0.0.1:8888/live/test/index.m3u8', lowLatency: true, preferTech: 'hls' },
   { type: 'webrtc', url: 'http://127.0.0.1:8889/live/test/whep', preferTech: 'webrtc' },
+
+  // === Direct fMP4 测试流（无 m3u8/mpd 清单，走 FMP4Tech + MSE）===
+  { type: 'fmp4', url: '/ffmpeg-fmp4/stream.fmp4', transport: 'http', codec: 'h264', audioCodec: 'aac', videoCodecString: 'avc1.4d401f', audioCodecString: 'mp4a.40.2', isLive: true, preferTech: 'fmp4' },
   
   // === DASH 测试流 ===
   { type: 'dash', url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd', preferTech: 'dash' },

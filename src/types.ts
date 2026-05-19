@@ -70,6 +70,13 @@ export interface MetadataDetectedEvent {
 interface BaseSourceFields {
   /** Fallback sources to try if this source fails */
   fallbacks?: Source[];
+  /** Optional request configuration applied by Techs that perform fetch/XHR signaling or media requests. */
+  request?: SourceRequestConfig;
+}
+
+export interface SourceRequestConfig {
+  headers?: Record<string, string>;
+  credentials?: RequestCredentials;
 }
 
 export type WebRTCSource = BaseSourceFields & {
@@ -102,10 +109,16 @@ export type FMP4Source = BaseSourceFields & {
   url: string;
   /** Transport method: http (fetch) or ws (WebSocket) */
   transport: 'http' | 'ws';
+  /** Exact MediaSource MIME type. Use when the stream profile is known, e.g. avc1.4d401f. */
+  mimeType?: string;
   /** Video codec hint for MSE initialization */
   codec?: 'h264' | 'h265' | 'av1';
+  /** Exact video codec string for MSE initialization. Overrides codec defaults. */
+  videoCodecString?: string;
   /** Audio codec hint */
   audioCodec?: 'aac' | 'opus' | 'mp3';
+  /** Exact audio codec string for MSE initialization. Overrides audioCodec defaults. */
+  audioCodecString?: string;
   /** Whether this is a live stream */
   isLive?: boolean;
   preferTech?: 'fmp4';
@@ -425,6 +438,7 @@ export interface MiddlewareContext {
   source: Source;
   tech: TechName;
   headers?: Record<string, string>;
+  credentials?: RequestCredentials;
   url?: string;
   action?: string;
   payload?: unknown;
@@ -455,6 +469,10 @@ export type PlayerNetworkCode =
   | 'CONNECT_TIMEOUT'
   | 'AUTOPLAY_BLOCKED'
   | 'METADATA_TIMEOUT'
+  | 'AUTH_RECOVERY_ATTEMPT'
+  | 'AUTH_RECOVERY_SUCCESS'
+  | 'AUTH_RECOVERY_FAILED'
+  | 'AUTH_RECOVERY_SKIPPED'
   | 'VIDEO_ERROR'
   | 'HLS_WARNING'
   | 'HLS_FATAL'
@@ -475,12 +493,17 @@ export type PlayerNetworkCode =
   | 'WEBRTC_ICE_FAILED'
   | 'WEBRTC_ICE_RESTART'
   | 'WEBRTC_ICE_RESTART_FAILED'
+  | 'WEBRTC_ICE_RECONNECT_REQUIRED'
   | 'WEBRTC_SIGNAL_ERROR'
   | 'WEBRTC_SIGNAL_PARSE_ERROR'
   | 'WEBRTC_SIGNAL_WS_OPEN'
   | 'WEBRTC_SIGNAL_WS_CLOSE'
   | 'WEBRTC_SIGNAL_WS_ERROR'
   | 'WEBRTC_SIGNAL_EVENT'
+  | 'WEBRTC_WHEP_HTTP_ERROR'
+  | 'WEBRTC_WHEP_TIMEOUT'
+  | 'WEBRTC_WHEP_ANSWER_ERROR'
+  | 'WEBRTC_WHEP_ICE_GATHERING_TIMEOUT'
   | 'WEBRTC_AUDIO_MUTED'
   | 'WEBRTC_OFFER_TIMEOUT'
   | 'WEBRTC_OFFER_ERROR'
@@ -650,6 +673,8 @@ export interface PlayerEventMap {
   network: [event: PlayerNetworkEvent | undefined];
   data: [payload?: unknown];
   metadata: [event: MetadataEvent | MetadataDetectedEvent];
+  preference: [event: PlayerPreferenceEvent];
+  recording: [event: PlayerRecordingEvent];
 }
 
 export type PlayerEventHandler<E extends keyof PlayerEventMap> = (...args: PlayerEventMap[E]) => void;
@@ -695,6 +720,62 @@ export interface PlayerAPI {
   getDetectedPrivateDataPids(): number[];
   /** Return detected SEI payload types for the active ws-raw tech. */
   getDetectedSeiTypes(): number[];
+}
+
+export interface PlayerPreferenceEvent {
+  key: 'volume' | 'muted' | 'playbackRate' | 'quality' | 'lowLatency' | 'sourceIndex' | string;
+  value: unknown;
+  source?: 'ui' | 'storage' | 'api' | string;
+  ts?: number;
+}
+
+export type PlayerRecordingStatus =
+  | 'idle'
+  | 'starting'
+  | 'recording'
+  | 'stopping'
+  | 'stopped'
+  | 'error';
+
+export type PlayerRecordingCode =
+  | 'RECORDING_HTTP_ERROR'
+  | 'RECORDING_TIMEOUT'
+  | 'RECORDING_ABORTED'
+  | 'RECORDING_REQUEST_ERROR'
+  | 'RECORDING_PARSE_ERROR'
+  | 'RECORDING_CONFIG_ERROR';
+
+export interface PlayerRecordingErrorInfo {
+  code: PlayerRecordingCode;
+  message: string;
+  action?: 'start' | 'stop' | 'status';
+  endpoint?: string;
+  status?: number;
+  statusText?: string;
+  body?: unknown;
+  timeoutMs?: number;
+  cause?: unknown;
+}
+
+export interface PlayerRecordingEvent {
+  type:
+    | 'recording-starting'
+    | 'recording-started'
+    | 'recording-stopping'
+    | 'recording-stopped'
+    | 'recording-status'
+    | 'recording-error';
+  status: PlayerRecordingStatus;
+  active: boolean;
+  source?: Source;
+  sourceIndex?: number;
+  tech?: TechName | null;
+  recordingId?: string;
+  sessionId?: string;
+  response?: unknown;
+  error?: PlayerRecordingErrorInfo | unknown;
+  code?: PlayerRecordingCode;
+  ts: number;
 }
 
 // UI and storage interfaces are placeholders for future extension
@@ -749,6 +830,10 @@ export type WebRTCSignalConfig =
       type: 'whip' | 'whep';
       url: string; // http(s)://... WHIP/WHEP endpoint
       token?: string;
+      /** Signaling fetch timeout. Defaults to the player reconnect timeout or 15000ms. */
+      timeoutMs?: number;
+      /** Maximum time to wait for ICE gathering before posting the SDP offer. Defaults to 5000ms. */
+      iceGatheringTimeoutMs?: number;
     };
 
 // eslint-disable-next-line @typescript-eslint/no-use-before-define

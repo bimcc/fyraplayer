@@ -21,22 +21,44 @@ export function getDuration(video: HTMLVideoElement | null): number {
   return NaN;
 }
 
-export function captureFrame(video: HTMLVideoElement | null): void {
-  if (!video) return;
+export interface CaptureFrameResult {
+  blob: Blob;
+  width: number;
+  height: number;
+  filename: string;
+  ts: number;
+}
+
+export function captureFrame(video: HTMLVideoElement | null): Promise<CaptureFrameResult | null> {
+  if (!video) return Promise.resolve(null);
   const canvas = document.createElement('canvas');
   canvas.width = video.videoWidth || 1280;
   canvas.height = video.videoHeight || 720;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) return Promise.resolve(null);
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  canvas.toBlob((blob) => {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `snapshot-${Date.now()}.png`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        resolve(null);
+        return;
+      }
+      const ts = Date.now();
+      const filename = `snapshot-${ts}.png`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      resolve({
+        blob,
+        width: canvas.width,
+        height: canvas.height,
+        filename,
+        ts,
+      });
+    });
   });
 }
 

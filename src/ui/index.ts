@@ -8,8 +8,11 @@ export { FyraUiShell, createUiComponentsPlugin } from './shell.js';
 
 // Types
 export type {
+  UiActionContext,
   UiComponentsOptions,
   UiElements,
+  UiRecordToggleEvent,
+  UiScreenshotEvent,
   UiShellElements,
   UiShellState,
   OriginalStyles,

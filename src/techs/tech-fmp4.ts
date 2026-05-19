@@ -37,6 +37,8 @@ export class FMP4Tech extends AbstractTech {
   private sourceBuffer: SourceBuffer | null = null;
   private ws: WebSocket | null = null;
   private abortController: AbortController | null = null;
+  private httpPumpPromise: Promise<void> | null = null;
+  private destroyed = false;
   private pendingBuffers: PendingFmp4Segment[] = [];
   private pendingBytes = 0;
   private isBufferUpdating = false;
@@ -61,6 +63,7 @@ export class FMP4Tech extends AbstractTech {
     this.reconnect = opts.reconnect;
     this.metrics = opts.metrics;
     this.video = opts.video;
+    this.destroyed = false;
 
     if (source.type !== 'fmp4') {
       throw new Error('FMP4Tech only supports fmp4 source type');
@@ -85,17 +88,23 @@ export class FMP4Tech extends AbstractTech {
   }
 
   private buildMimeType(source: FMP4Source): string {
-    const videoCodec = source.codec === 'h265' 
-      ? 'hvc1.1.6.L93.B0' 
-      : source.codec === 'av1'
-        ? 'av01.0.04M.08'
-        : 'avc1.64001f';
-    
-    const audioCodec = source.audioCodec === 'opus'
-      ? 'opus'
-      : source.audioCodec === 'mp3'
-        ? 'mp3'
-        : 'mp4a.40.2';
+    if (source.mimeType) {
+      return source.mimeType;
+    }
+
+    const videoCodec = source.videoCodecString
+      || (source.codec === 'h265'
+        ? 'hvc1.1.6.L93.B0'
+        : source.codec === 'av1'
+          ? 'av01.0.04M.08'
+          : 'avc1.64001f');
+
+    const audioCodec = source.audioCodecString
+      || (source.audioCodec === 'opus'
+        ? 'opus'
+        : source.audioCodec === 'mp3'
+          ? 'mp3'
+          : 'mp4a.40.2');
     
     return `video/mp4; codecs="${videoCodec},${audioCodec}"`;
   }
@@ -140,7 +149,12 @@ export class FMP4Tech extends AbstractTech {
     this.abortController = new AbortController();
     
     try {
-      const response = await fetch(url, { signal: this.abortController.signal });
+      const request = this.source?.type === 'fmp4' ? this.source.request : undefined;
+      const response = await fetch(url, {
+        signal: this.abortController.signal,
+        headers: request?.headers,
+        credentials: request?.credentials
+      });
       
       if (!response.ok) {
         throw new Error(`HTTP error: ${response.status}`);
@@ -151,8 +165,25 @@ export class FMP4Tech extends AbstractTech {
       }
       
       const reader = response.body.getReader();
-      
-      while (true) {
+      const pumpPromise = this.pumpHttpReadableStream(reader);
+      this.httpPumpPromise = pumpPromise;
+      void pumpPromise.finally(() => {
+        if (this.httpPumpPromise === pumpPromise) {
+          this.httpPumpPromise = null;
+        }
+      });
+    } catch (err) {
+      const error = err as ErrorWithName;
+      if (error.name !== 'AbortError') {
+        this.bus.emit('error', { type: 'fetch-error', error: err });
+        this.bus.emit('network', { type: 'fmp4-http-error', fatal: true });
+      }
+    }
+  }
+
+  private async pumpHttpReadableStream(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+    try {
+      while (!this.destroyed) {
         const { value, done } = await reader.read();
         
         if (done) {
@@ -161,15 +192,21 @@ export class FMP4Tech extends AbstractTech {
         }
         
         if (value) {
-          const chunk = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+          const chunk = value.slice().buffer;
           this.appendBuffer(chunk);
         }
       }
     } catch (err) {
       const error = err as ErrorWithName;
-      if (error.name !== 'AbortError') {
+      if (!this.destroyed && error.name !== 'AbortError') {
         this.bus.emit('error', { type: 'fetch-error', error: err });
         this.bus.emit('network', { type: 'fmp4-http-error', fatal: true });
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        /* ignore */
       }
     }
   }
@@ -466,12 +503,14 @@ export class FMP4Tech extends AbstractTech {
   }
 
   private cleanup(): void {
+    this.destroyed = true;
     this.resetPlaybackFpsSampler();
     // Abort HTTP fetch
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
     }
+    this.httpPumpPromise = null;
     
     // Close WebSocket
     if (this.ws) {

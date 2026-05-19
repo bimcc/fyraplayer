@@ -10,6 +10,15 @@ type PeerConnectionStub = Pick<RTCPeerConnection, 'getReceivers'> & {
   ontrack: ((event: RTCTrackEvent) => void) | null;
 };
 
+type PeerConnectionStateStub = Pick<RTCPeerConnection, 'getReceivers'> & {
+  ontrack: ((event: RTCTrackEvent) => void) | null;
+  onconnectionstatechange: (() => void) | null;
+  oniceconnectionstatechange: (() => void) | null;
+  connectionState: RTCPeerConnectionState;
+  iceConnectionState: RTCIceConnectionState;
+  restartIce?: jest.Mock<void, []>;
+};
+
 function reportFrom(stats: Array<Record<string, unknown>>): RTCStatsReport {
   const map = new Map<string, Record<string, unknown>>();
   stats.forEach((stat, index) => {
@@ -19,6 +28,10 @@ function reportFrom(stats: Array<Record<string, unknown>>): RTCStatsReport {
 }
 
 describe('WebRTCTech stats and lifecycle helpers', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   test('falls back to video element resolution when RTC track stats omit dimensions', async () => {
     const tech = new WebRTCTech();
     const video = {
@@ -151,6 +164,103 @@ describe('WebRTCTech stats and lifecycle helpers', () => {
         severity: 'warning',
       })
     );
-    jest.useRealTimers();
+  });
+
+  test('reconnects through player reload when ICE disconnected does not recover', () => {
+    jest.useFakeTimers();
+    const tech = new WebRTCTech();
+    const network = jest.fn();
+    const restartIce = jest.fn();
+    const pc: PeerConnectionStateStub = {
+      ontrack: null,
+      onconnectionstatechange: null,
+      oniceconnectionstatechange: null,
+      connectionState: 'connected',
+      iceConnectionState: 'connected',
+      restartIce,
+      getReceivers: () => [],
+    };
+
+    tech.on('network', network);
+    (tech as unknown as { pc: PeerConnectionStateStub }).pc = pc;
+    (tech as unknown as { reconnect: { baseDelayMs: number } }).reconnect = { baseDelayMs: 900 };
+    (tech as unknown as { bindTracks: () => void }).bindTracks();
+
+    pc.iceConnectionState = 'disconnected';
+    pc.oniceconnectionstatechange?.();
+    jest.advanceTimersByTime(899);
+
+    expect(restartIce).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(1);
+
+    expect(restartIce).toHaveBeenCalledTimes(1);
+    expect(network).toHaveBeenCalledWith(expect.objectContaining({ type: 'ice-state', state: 'disconnected' }));
+    expect(network).toHaveBeenCalledWith(expect.objectContaining({ type: 'ice-restart', reason: 'ice-disconnected' }));
+    expect(network).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'ice-reconnect-required',
+        fatal: true,
+        reason: 'ice-disconnected',
+        state: 'disconnected',
+      })
+    );
+  });
+
+  test('cancels pending ICE reconnect when ICE recovers before the grace period', () => {
+    jest.useFakeTimers();
+    const tech = new WebRTCTech();
+    const network = jest.fn();
+    const restartIce = jest.fn();
+    const pc: PeerConnectionStateStub = {
+      ontrack: null,
+      onconnectionstatechange: null,
+      oniceconnectionstatechange: null,
+      connectionState: 'connected',
+      iceConnectionState: 'connected',
+      restartIce,
+      getReceivers: () => [],
+    };
+
+    tech.on('network', network);
+    (tech as unknown as { pc: PeerConnectionStateStub }).pc = pc;
+    (tech as unknown as { reconnect: { baseDelayMs: number } }).reconnect = { baseDelayMs: 900 };
+    (tech as unknown as { bindTracks: () => void }).bindTracks();
+
+    pc.iceConnectionState = 'disconnected';
+    pc.oniceconnectionstatechange?.();
+    jest.advanceTimersByTime(400);
+    pc.iceConnectionState = 'connected';
+    pc.oniceconnectionstatechange?.();
+    jest.advanceTimersByTime(1000);
+
+    expect(restartIce).not.toHaveBeenCalled();
+    expect(network).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ice-reconnect-required' }));
+  });
+
+  test('emits fatal ICE failure without relying on restartIce-only recovery', () => {
+    const tech = new WebRTCTech();
+    const network = jest.fn();
+    const restartIce = jest.fn();
+    const pc: PeerConnectionStateStub = {
+      ontrack: null,
+      onconnectionstatechange: null,
+      oniceconnectionstatechange: null,
+      connectionState: 'connected',
+      iceConnectionState: 'connected',
+      restartIce,
+      getReceivers: () => [],
+    };
+
+    tech.on('network', network);
+    (tech as unknown as { pc: PeerConnectionStateStub }).pc = pc;
+    (tech as unknown as { bindTracks: () => void }).bindTracks();
+
+    pc.iceConnectionState = 'failed';
+    pc.oniceconnectionstatechange?.();
+
+    expect(network).toHaveBeenCalledWith(expect.objectContaining({ type: 'ice-state', state: 'failed' }));
+    expect(network).toHaveBeenCalledWith(expect.objectContaining({ type: 'ice-failed', fatal: true }));
+    expect(restartIce).not.toHaveBeenCalled();
   });
 });

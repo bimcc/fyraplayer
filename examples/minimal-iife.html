@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FyraPlayer IIFE Minimal Demo</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f3f4f6;
+        color: #111827;
+      }
+
+      .player-shell {
+        width: min(960px, 100%);
+        margin: 0 auto;
+        background: #000;
+      }
+
+      video {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="player-shell">
+      <video id="player" playsinline muted></video>
+    </div>
+
+    <script src="../dist/fyraplayer.iife.js"></script>
+    <script>
+      const { FyraPlayer, createUiComponentsPlugin } = window.FyraPlayerSDK;
+      const player = new FyraPlayer({
+        video: "#player",
+        autoplay: true,
+        muted: true,
+        sources: [
+          {
+            type: "hls",
+            url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8",
+            preferTech: "hls"
+          }
+        ],
+        plugins: [
+          createUiComponentsPlugin({
+            target: ".player-shell",
+            showStatusOverlay: true,
+            onRetry: () => player.play()
+          })
+        ]
+      });
+
+      player.on("ready", () => console.log("[fyra] ready"));
+      player.on("network", (event) => console.log("[fyra] network", event));
+      player.init().catch((error) => console.error("[fyra] init failed", error));
+      window.fyraPlayer = player;
+    </script>
+  </body>
+</html>

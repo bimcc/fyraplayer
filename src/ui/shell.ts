@@ -39,6 +39,12 @@ export class FyraUiShell extends HTMLElement {
   private logEnabled = false;
   private duration = 0;
   private loading = true;
+  private showStatusOverlay = true;
+  private onRetry: (() => void | Promise<void>) | undefined;
+  private showDiagnosticsButton = false;
+  private showRecordingButton = false;
+  private recording = false;
+  private uiOptions: UiComponentsOptions | undefined;
   private host: HTMLElement | null = null;
   private shell: HTMLElement | null = null;
 
@@ -49,6 +55,14 @@ export class FyraUiShell extends HTMLElement {
     playBtn: null,
     timeLabel: null,
     spinner: null,
+    statusCard: null,
+    statusMessage: null,
+    statusDetail: null,
+    retryBtn: null,
+    diagnosticsBtn: null,
+    diagnosticsMenuBtn: null,
+    recordBtn: null,
+    recordMenuBtn: null,
     qualitySel: null,
     cover: null,
     speedBtn: null,
@@ -95,6 +109,15 @@ export class FyraUiShell extends HTMLElement {
     if (level.height) parts.push(`${level.height}p`);
     if (level.bitrateKbps) parts.push(`${level.bitrateKbps} kbps`);
     return parts.join(' ') || `Level ${level.index ?? level.id}`;
+  }
+
+  private emitPreference(key: string, value: unknown): void {
+    this.bus?.emit('preference', {
+      key,
+      value,
+      source: 'ui',
+      ts: Date.now(),
+    });
   }
 
   constructor() {
@@ -159,6 +182,12 @@ export class FyraUiShell extends HTMLElement {
     }
 
     this.logEnabled = !!opts?.showLog;
+    this.showStatusOverlay = opts?.showStatusOverlay !== false;
+    this.onRetry = opts?.onRetry;
+    this.uiOptions = opts;
+    this.showDiagnosticsButton = opts?.showDiagnosticsButton ?? !!opts?.onDiagnostics;
+    this.showRecordingButton = opts?.showRecordingButton ?? false;
+    this.recording = false;
     this.initElements();
 
     const state = this.player?.getState?.();
@@ -192,19 +221,58 @@ export class FyraUiShell extends HTMLElement {
       playBtn: this.shadowRoot?.querySelector('.btn-play') as HTMLElement,
       timeLabel: this.shadowRoot?.querySelector('.time') as HTMLElement,
       spinner: this.shadowRoot?.querySelector('[data-role="spinner"]') as HTMLElement,
+      statusCard: this.shadowRoot?.querySelector('[data-role="status-card"]') as HTMLElement,
+      statusMessage: this.shadowRoot?.querySelector('[data-role="status-message"]') as HTMLElement,
+      statusDetail: this.shadowRoot?.querySelector('[data-role="status-detail"]') as HTMLElement,
+      retryBtn: this.shadowRoot?.querySelector('[data-role="retry"]') as HTMLElement,
+      diagnosticsBtn: this.shadowRoot?.querySelector('.bar [data-act="diagnostics"]') as HTMLElement,
+      diagnosticsMenuBtn: this.shadowRoot?.querySelector('.more-menu [data-act="diagnostics"]') as HTMLElement,
+      recordBtn: this.shadowRoot?.querySelector('.bar [data-act="record"]') as HTMLElement,
+      recordMenuBtn: this.shadowRoot?.querySelector('.more-menu [data-act="record"]') as HTMLElement,
       qualitySel: this.shadowRoot?.querySelector('.quality') as HTMLSelectElement,
       cover: this.shadowRoot?.querySelector('[data-role="cover"]') as HTMLElement,
       speedBtn: this.shadowRoot?.querySelector('[data-act="speed"]') as HTMLElement,
     };
     this.shell = this.shadowRoot?.querySelector('.shell') as HTMLElement;
+    if (this.elements.diagnosticsBtn) {
+      this.elements.diagnosticsBtn.style.display = this.showDiagnosticsButton ? '' : 'none';
+    }
+    if (this.elements.diagnosticsMenuBtn) {
+      this.elements.diagnosticsMenuBtn.style.display = this.showDiagnosticsButton ? '' : 'none';
+    }
+    if (this.elements.recordBtn) {
+      this.elements.recordBtn.style.display = this.showRecordingButton ? '' : 'none';
+    }
+    if (this.elements.recordMenuBtn) {
+      this.elements.recordMenuBtn.style.display = this.showRecordingButton ? '' : 'none';
+    }
+    this.updateRecordingUi();
+  }
+
+  private updateOptionalControlVisibility(): void {
+    const showCollapsible = this.isSmallMode ? 'none' : '';
+    if (this.elements.diagnosticsBtn) {
+      this.elements.diagnosticsBtn.style.display = this.showDiagnosticsButton ? showCollapsible : 'none';
+    }
+    if (this.elements.diagnosticsMenuBtn) {
+      this.elements.diagnosticsMenuBtn.style.display = this.showDiagnosticsButton ? '' : 'none';
+    }
+    if (this.elements.recordBtn) {
+      this.elements.recordBtn.style.display = this.showRecordingButton ? showCollapsible : 'none';
+    }
+    if (this.elements.recordMenuBtn) {
+      this.elements.recordMenuBtn.style.display = this.showRecordingButton ? '' : 'none';
+    }
   }
 
   private bindUi(): void {
+    const root = this.shadowRoot;
+    if (!root) return;
     const progress = this.shadowRoot?.querySelector('.progress') as HTMLInputElement | null;
     const vol = this.shadowRoot?.querySelector('.vol') as HTMLInputElement | null;
     if (vol && this.video) vol.value = `${this.video.muted ? 0 : this.video.volume}`;
 
-    this.shadowRoot?.addEventListener('click', async (e) => {
+    addDomListener(root, 'click', async (e) => {
       const btn =
         (e.target as HTMLElement).closest('button') ||
         (e.target as HTMLElement).closest('.big-play');
@@ -214,29 +282,34 @@ export class FyraUiShell extends HTMLElement {
         if (act === 'toggle-play') await this.togglePlay();
         if (act === 'fs') toggleFullscreen(this.host);
         if (act === 'pip') await togglePip(this.video);
-        if (act === 'shot') captureFrame(this.video);
+        if (act === 'shot') await this.captureScreenshot();
         if (act === 'mute') this.handleMute();
+        if (act === 'retry') await this.retryPlayback();
+        if (act === 'diagnostics') await this.openDiagnostics();
+        if (act === 'record') await this.toggleRecording();
       } catch (err) {
         this.log(`[err] ${err}`);
       }
-    });
+    }, this.eventCleanup);
 
-    progress?.addEventListener('input', () => {
+    if (progress) addDomListener(progress, 'input', () => {
       if (!this.video || !progress) return;
       if (!this.duration || !isFinite(this.duration)) return;
       const pct = Number(progress.value) / 100;
       if (!isFinite(pct)) return;
       const clamped = Math.max(0, Math.min(1, pct));
       this.video.currentTime = clamped * this.duration;
-    });
+    }, this.eventCleanup);
 
-    vol?.addEventListener('input', () => {
+    if (vol) addDomListener(vol, 'input', () => {
       if (!this.video || !vol) return;
       this.video.volume = Number(vol.value);
       this.video.muted = Number(vol.value) === 0;
-    });
+      this.emitPreference('volume', this.video.volume);
+      this.emitPreference('muted', this.video.muted);
+    }, this.eventCleanup);
 
-    this.elements.qualitySel?.addEventListener('change', () => {
+    if (this.elements.qualitySel) addDomListener(this.elements.qualitySel, 'change', () => {
       if (!this.elements.qualitySel || !this.player) return;
       const value = this.elements.qualitySel.value;
       const mode = this.elements.qualitySel.dataset.mode;
@@ -247,14 +320,16 @@ export class FyraUiShell extends HTMLElement {
           : Number.isNaN(numericValue)
             ? value
             : numericValue;
+        this.emitPreference('quality', level);
         this.player.setQualityLevel(level).catch((e) => this.log(`[quality] switch failed: ${e}`));
         return;
       }
       const idx = Number(value);
       if (!Number.isNaN(idx)) {
+        this.emitPreference('sourceIndex', idx);
         this.player.switchSource(idx).catch((e) => this.log(`[source] switch failed: ${e}`));
       }
-    });
+    }, this.eventCleanup);
   }
 
   private bindEvents(): void {
@@ -267,21 +342,27 @@ export class FyraUiShell extends HTMLElement {
       onPause: () => this.updatePlayUi(false),
       onPlaying: () => {
         this.setBuffering(false);
+        this.setStatusMessage('');
         this.hideCover();
       },
       onWaiting: () => this.setBuffering(true),
-      onCanPlay: () => this.setBuffering(false),
+      onCanPlay: () => {
+        this.setBuffering(false);
+        this.setStatusMessage('');
+      },
     });
 
     bindBusEvents(this.bus, this.eventCleanup, {
       onReady: () => {
         this.setBuffering(false);
+        this.setStatusMessage('');
         this.updatePlayUi(false);
         this.hideCover();
         this.populateQuality();
       },
       onPlay: () => {
         this.setBuffering(false);
+        this.setStatusMessage('');
         this.updatePlayUi(true);
         this.hideCover();
       },
@@ -297,6 +378,20 @@ export class FyraUiShell extends HTMLElement {
         const payloadRecord = this.asRecord(eventPayload);
         const severity = typeof payloadRecord?.severity === 'string' ? payloadRecord.severity : undefined;
         const type = typeof payloadRecord?.type === 'string' ? payloadRecord.type : undefined;
+        const code = typeof payloadRecord?.code === 'string' ? payloadRecord.code : undefined;
+        const attempt = typeof payloadRecord?.attempt === 'number' ? payloadRecord.attempt : undefined;
+        const maxRetries = typeof payloadRecord?.maxRetries === 'number' ? payloadRecord.maxRetries : undefined;
+        const details = code ? `${code}${attempt !== undefined ? ` ${attempt}/${maxRetries ?? '-'}` : ''}` : undefined;
+        if (type === 'reconnect' || code === 'RECONNECT_ATTEMPT') {
+          this.setBuffering(true);
+          this.setStatusMessage('视频流中断，正在重新连接...', details, false);
+        } else if (type === 'reconnect-exhausted' || code === 'RECONNECT_EXHAUSTED') {
+          this.setBuffering(false);
+          this.setStatusMessage('视频流中断，请重试', details, true);
+          this.updatePlayUi(false);
+        } else if (severity === 'fatal') {
+          this.setStatusMessage('视频流中断，正在尝试恢复...', details, false);
+        }
         if (severity === 'fatal' || type === 'reconnect-exhausted') {
           this.setBuffering(false);
           this.updatePlayUi(false);
@@ -461,6 +556,8 @@ export class FyraUiShell extends HTMLElement {
       });
       if (moreWrap) moreWrap.style.display = 'none';
     }
+
+    this.updateOptionalControlVisibility();
   }
 
   private bindAutoHide(): void {
@@ -535,11 +632,94 @@ export class FyraUiShell extends HTMLElement {
   private handleMute(): void {
     toggleMute(this.video);
     this.updateVolumeUi();
+    if (this.video) {
+      this.emitPreference('muted', this.video.muted);
+      this.emitPreference('volume', this.video.volume);
+    }
+  }
+
+  private async retryPlayback(): Promise<void> {
+    try {
+      if (this.onRetry) {
+        await this.onRetry();
+      } else {
+        await this.player?.play();
+      }
+      this.setStatusMessage('');
+    } catch (err) {
+      this.log(`[retry] failed: ${err}`);
+    }
+  }
+
+  private getActionContext() {
+    if (!this.player || !this.video) return null;
+    return {
+      player: this.player,
+      video: this.video,
+    };
+  }
+
+  private async openDiagnostics(): Promise<void> {
+    const context = this.getActionContext();
+    if (!context) return;
+    await this.uiOptions?.onDiagnostics?.(context);
+    this.log('[ui] diagnostics opened');
+  }
+
+  private async captureScreenshot(): Promise<void> {
+    let result = null;
+    try {
+      result = await captureFrame(this.video);
+    } catch (err) {
+      this.setStatusMessage('截图失败', 'SCREENSHOT_BLOCKED', false, true);
+      this.log(`[screenshot] capture failed: ${err}`);
+      return;
+    }
+    if (!result || !this.player || !this.video) {
+      this.setStatusMessage('截图失败', 'SCREENSHOT_UNAVAILABLE', false, true);
+      return;
+    }
+    this.setStatusMessage('截图已保存', `${result.width}x${result.height}`, false, true);
+    try {
+      await this.uiOptions?.onScreenshot?.({
+        ...result,
+        player: this.player,
+        video: this.video,
+      });
+    } catch (err) {
+      this.log(`[screenshot] hook failed: ${err}`);
+    }
+  }
+
+  private async toggleRecording(): Promise<void> {
+    const context = this.getActionContext();
+    if (!context) return;
+    const nextRecording = !this.recording;
+    try {
+      await this.uiOptions?.onRecordToggle?.({
+        ...context,
+        recording: nextRecording,
+        ts: Date.now(),
+      });
+    } catch (err) {
+      this.setStatusMessage('录制失败', 'RECORD_HOOK_FAILED', false, true);
+      this.log(`[record] hook failed: ${err}`);
+      return;
+    }
+    this.recording = nextRecording;
+    this.updateRecordingUi();
+    this.setStatusMessage(this.recording ? '录制已开始' : '录制已停止', '', false, true);
+  }
+
+  private updateRecordingUi(): void {
+    this.elements.recordBtn?.classList.toggle('active', this.recording);
+    this.elements.recordMenuBtn?.classList.toggle('active', this.recording);
   }
 
   private setPlaybackSpeed(speed: number): void {
     if (!this.video) return;
     this.video.playbackRate = speed;
+    this.emitPreference('playbackRate', speed);
 
     if (this.elements.speedBtn) {
       this.elements.speedBtn.textContent = `${speed}x`;
@@ -659,6 +839,28 @@ export class FyraUiShell extends HTMLElement {
         : this.video && this.video.paused
           ? 'flex'
           : 'none';
+    }
+  }
+
+  private setStatusMessage(message: string, detail = '', retry = false, transient = false): void {
+    if (!this.showStatusOverlay) return;
+    const statusMessage = this.elements.statusMessage;
+    if (!statusMessage) return;
+    statusMessage.textContent = message;
+    this.elements.statusCard?.classList.toggle('show', message.length > 0);
+    if (this.elements.statusDetail) {
+      this.elements.statusDetail.textContent = detail;
+      this.elements.statusDetail.style.display = detail ? 'block' : 'none';
+    }
+    if (this.elements.retryBtn) {
+      this.elements.retryBtn.style.display = retry ? 'inline-flex' : 'none';
+    }
+    if (transient && message) {
+      window.setTimeout(() => {
+        if (this.elements.statusMessage?.textContent === message) {
+          this.setStatusMessage('');
+        }
+      }, 1600);
     }
   }
 

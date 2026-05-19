@@ -2,12 +2,21 @@
 import defaultSources from "./sources.js";
 import { createUiComponentsPlugin } from "../src/ui/index.js";
 
-type SourceType = "auto" | "hls" | "dash" | "ws-raw" | "file" | "webrtc" | "webrtc-oven" | "gb28181";
+type SourceType = "auto" | "hls" | "dash" | "fmp4" | "ws-raw" | "file" | "webrtc" | "webrtc-oven" | "gb28181";
 type SimpleSource = {
   label: string;
   type: SourceType;
   url: string;
   lowLatency?: boolean;
+  fmp4?: {
+    transport?: "http" | "ws";
+    codec?: "h264" | "h265" | "av1";
+    audioCodec?: "aac" | "opus" | "mp3";
+    mimeType?: string;
+    videoCodecString?: string;
+    audioCodecString?: string;
+    isLive?: boolean;
+  };
   webCodecs?: { enable?: boolean; preferMp4?: boolean; allowH265?: boolean };
   gb?: {
     invite?: string;
@@ -61,6 +70,12 @@ let uiStatus: "idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "e
 let currentSrc: SimpleSource | null = null;
 let useSkin = true;
 let hideNativeControls = false;
+let latestStatsEvent: any = null;
+let latestNetworkEvent: any = null;
+let latestQosEvent: any = null;
+let longRunStartedAt = 0;
+let longRunTimer: number | null = null;
+let longRunSamples: any[] = [];
 // Expose for debugging (e.g., window.fyraPlayer.on('stats', console.log))
 (window as any).fyraPlayer = null;
 
@@ -76,9 +91,16 @@ if (!Array.from(typeSelect.options).some((o) => o.value === "webrtc-oven")) {
 
 const presetSources: SimpleSource[] = [
   { label: "HLS demo", type: "hls", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8" },
+  { label: "Apple HLS fMP4/CMAF sample", type: "hls", url: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8" },
   { label: "MediaMTX HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: false },
   { label: "MediaMTX LL-HLS local (live/test)", type: "hls", url: "http://127.0.0.1:8888/live/test/index.m3u8", lowLatency: true },
   { label: "MediaMTX WebRTC WHEP local (live/test)", type: "webrtc", url: "http://127.0.0.1:8889/live/test/whep" },
+  {
+    label: "ffmpeg fMP4 HTTP local (stream.fmp4)",
+    type: "fmp4",
+    url: "/ffmpeg-fmp4/stream.fmp4",
+    fmp4: { transport: "http", codec: "h264", audioCodec: "aac", videoCodecString: "avc1.4d401f", audioCodecString: "mp4a.40.2", isLive: true }
+  },
   { label: "DASH bbb", type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd" },
   { label: "DASH sintel", type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd" },
   { label: "MP4 demo", type: "file", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4" },
@@ -93,6 +115,17 @@ defaultSources?.forEach((s: any, idx: number) => {
     type: s.type,
     url: s.url,
     lowLatency: (s as any).lowLatency,
+    fmp4: s.type === "fmp4"
+      ? {
+          transport: (s as any).transport,
+          codec: (s as any).codec,
+          audioCodec: (s as any).audioCodec,
+          mimeType: (s as any).mimeType,
+          videoCodecString: (s as any).videoCodecString,
+          audioCodecString: (s as any).audioCodecString,
+          isLive: (s as any).isLive
+        }
+      : undefined,
     webCodecs: (s as any).webCodecs
   });
 });
@@ -180,6 +213,99 @@ function appendLog(msg: string) {
   }
 }
 
+function getActiveBufferedRange() {
+  if (!video || !video.buffered?.length) return null;
+  const current = video.currentTime || 0;
+  for (let i = 0; i < video.buffered.length; i += 1) {
+    const start = video.buffered.start(i);
+    const end = video.buffered.end(i);
+    if (current >= start && current <= end) {
+      return { start, end, level: Math.max(0, end - current) };
+    }
+  }
+  const last = video.buffered.length - 1;
+  return {
+    start: video.buffered.start(last),
+    end: video.buffered.end(last),
+    level: Math.max(0, video.buffered.end(last) - current)
+  };
+}
+
+function collectLongRunSample() {
+  const qualityState = player?.getQualityState?.();
+  const playbackQuality = typeof video.getVideoPlaybackQuality === "function"
+    ? video.getVideoPlaybackQuality()
+    : null;
+  const memory = (performance as any).memory;
+  const sample = {
+    ts: new Date().toISOString(),
+    elapsedSec: longRunStartedAt ? Math.round((Date.now() - longRunStartedAt) / 1000) : 0,
+    state: player?.getState?.() || uiStatus,
+    source: currentSrc ? { label: currentSrc.label, type: currentSrc.type, url: currentSrc.url, lowLatency: currentSrc.lowLatency } : null,
+    tech: qualityState?.tech || null,
+    quality: qualityState || null,
+    video: {
+      currentTime: video.currentTime,
+      readyState: video.readyState,
+      paused: video.paused,
+      ended: video.ended,
+      width: video.videoWidth,
+      height: video.videoHeight,
+      buffered: getActiveBufferedRange(),
+      totalFrames: playbackQuality?.totalVideoFrames,
+      droppedFrames: playbackQuality?.droppedVideoFrames
+    },
+    dom: {
+      video: document.querySelectorAll("video").length,
+      audio: document.querySelectorAll("audio").length,
+      uiShell: document.querySelectorAll("fyra-ui-shell").length
+    },
+    memory: memory
+      ? {
+          usedJSHeapSize: memory.usedJSHeapSize,
+          totalJSHeapSize: memory.totalJSHeapSize,
+          jsHeapSizeLimit: memory.jsHeapSizeLimit
+        }
+      : null,
+    lastStats: latestStatsEvent,
+    lastNetwork: latestNetworkEvent,
+    lastQos: latestQosEvent
+  };
+  longRunSamples.push(sample);
+  return sample;
+}
+
+function startLongRunSampling(intervalMs = 10000) {
+  stopLongRunSampling();
+  longRunStartedAt = Date.now();
+  longRunSamples = [];
+  collectLongRunSample();
+  longRunTimer = window.setInterval(collectLongRunSample, Math.max(1000, intervalMs));
+  appendLog(`long-run sampling started: interval=${Math.max(1000, intervalMs)}ms`);
+  return longRunSamples;
+}
+
+function stopLongRunSampling() {
+  if (longRunTimer !== null) {
+    window.clearInterval(longRunTimer);
+    longRunTimer = null;
+  }
+  return longRunSamples;
+}
+
+(window as any).fyraLongRun = {
+  start: startLongRunSampling,
+  stop: stopLongRunSampling,
+  sample: collectLongRunSample,
+  clear: () => {
+    longRunStartedAt = Date.now();
+    longRunSamples = [];
+    return longRunSamples;
+  },
+  getSamples: () => longRunSamples,
+  getJson: () => JSON.stringify(longRunSamples, null, 2)
+};
+
 function applyLowLatencyToggle(src: SimpleSource): SimpleSource {
   if (!lowLatencyToggle) return src;
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
@@ -239,6 +365,33 @@ function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
   if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, preferTech: "hls" as const };
   if (pick === "dash") return { type: "dash" as const, url: src.url, preferTech: "dash" as const };
+  if (pick === "fmp4") {
+    const fmp4 = src.fmp4 || {};
+    const videoCodecString = fmp4.videoCodecString
+      || (fmp4.codec === "h265"
+        ? "hvc1.1.6.L93.B0"
+        : fmp4.codec === "av1"
+          ? "av01.0.04M.08"
+          : "avc1.4d401f");
+    const audioCodecString = fmp4.audioCodecString
+      || (fmp4.audioCodec === "opus"
+        ? "opus"
+        : fmp4.audioCodec === "mp3"
+          ? "mp3"
+          : "mp4a.40.2");
+    return {
+      type: "fmp4" as const,
+      url: src.url,
+      transport: fmp4.transport || (src.url.toLowerCase().startsWith("ws") ? "ws" as const : "http" as const),
+      codec: fmp4.codec || "h264" as const,
+      audioCodec: fmp4.audioCodec || "aac" as const,
+      mimeType: fmp4.mimeType,
+      videoCodecString,
+      audioCodecString,
+      isLive: fmp4.isLive ?? true,
+      preferTech: "fmp4" as const
+    };
+  }
   if (pick === "ws-raw") return { type: "ws-raw" as const, url: src.url, codec: "h264" as const, transport: "flv" as const, preferTech: "ws-raw" as const };
   if (pick === "gb28181") {
     const gb = src.gb || {};
@@ -293,6 +446,7 @@ function detectType(url: string): Exclude<SourceType, "auto"> {
   const lower = url.toLowerCase();
   if (lower.endsWith(".m3u8")) return "hls";
   if (lower.endsWith(".mpd")) return "dash";
+  if (lower.endsWith(".fmp4") || lower.includes("/fmp4/") || lower.includes("stream.fmp4")) return "fmp4";
   if (lower.endsWith(".flv")) return "ws-raw";
   if (lower.startsWith("ws://") || lower.startsWith("wss://")) return "webrtc-oven";
   if (lower.endsWith(".ts") || lower.endsWith(".mp4")) return "file";
@@ -306,6 +460,7 @@ function bindPlayerEvents(p: FyraPlayer) {
   p.on("ended", () => setStatus("ended"));
   p.on("error", (e: any) => setStatus("error", `error: ${e?.message || e}`));
   p.on("network", (evt: any) => {
+    latestNetworkEvent = evt;
     const msg = `network: ${JSON.stringify(evt)}`;
     appendLog(msg);
     if (evt?.type === "reconnect") {
@@ -322,6 +477,7 @@ function bindPlayerEvents(p: FyraPlayer) {
     }
   });
   p.on("qos", (evt: any) => {
+    latestQosEvent = evt;
     if (evt?.code || evt?.type) {
       const code = evt?.code || evt?.type || "qos";
       appendLog(`qos[${code}]: ${JSON.stringify(evt)}`);
@@ -329,6 +485,7 @@ function bindPlayerEvents(p: FyraPlayer) {
   });
   p.on("buffer", () => setStatus("loading", "buffering..."));
   p.on("stats", ({ stats }) => {
+    latestStatsEvent = stats;
     if (!stats) return;
     statsEl.textContent = `bitrate: ${stats.bitrateKbps || "-"} kbps | fps: ${stats.fps || "-"} | res: ${stats.width || "-"}x${stats.height || "-"}`;
   });

@@ -129,4 +129,17 @@ describe('createUiComponentsPlugin lifecycle', () => {
     expect(host.classList.contains('fyra-player-container')).toBe(false);
     expect(host.style.position).toBe('');
   });
+
+  test('ships status overlay and retry control markup', async () => {
+    const { UI_SHELL_HTML, UI_SHELL_STYLES } = await import('../src/ui/styles.js');
+
+    expect(UI_SHELL_HTML).toContain('data-role="status-card"');
+    expect(UI_SHELL_HTML).toContain('data-role="status-detail"');
+    expect(UI_SHELL_HTML).toContain('data-role="retry"');
+    expect(UI_SHELL_HTML).toContain('data-act="diagnostics"');
+    expect(UI_SHELL_HTML).toContain('data-act="record"');
+    expect(UI_SHELL_STYLES).toContain('.status-card');
+    expect(UI_SHELL_STYLES).toContain('.retry-btn');
+    expect(UI_SHELL_STYLES).toContain('button.active');
+  });
 });
