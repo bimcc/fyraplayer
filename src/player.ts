@@ -126,6 +126,10 @@ export class FyraPlayer implements PlayerAPI {
     return this.options.sources[this.currentSourceIndex];
   }
 
+  getVideoElement(): HTMLVideoElement {
+    return this.videoEl;
+  }
+
   get currentTime(): number {
     return Number.isFinite(this.videoEl.currentTime) ? this.videoEl.currentTime : 0;
   }

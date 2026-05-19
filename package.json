@@ -40,6 +40,10 @@
       "import": "./dist/plugins/performance.js",
       "types": "./dist/plugins/performance.d.ts"
     },
+    "./plugins/panoramalite": {
+      "import": "./dist/plugins/panoramalite.js",
+      "types": "./dist/plugins/panoramalite.d.ts"
+    },
     "./plugins/reconnect": {
       "import": "./dist/plugins/reconnect.js",
       "types": "./dist/plugins/reconnect.d.ts"

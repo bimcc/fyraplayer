@@ -12,6 +12,7 @@
       "fyraplayer/plugins/metadata": ["./src/plugins/metadata/index.ts"],
       "fyraplayer/plugins/metrics": ["./src/plugins/metrics.ts"],
       "fyraplayer/plugins/diagnostics": ["./src/plugins/diagnostics.ts"],
+      "fyraplayer/plugins/panoramalite": ["./src/plugins/panoramalite.ts"],
       "fyraplayer/plugins/performance": ["./src/plugins/performance.ts"],
       "fyraplayer/plugins/recording-api": ["./src/plugins/recording.ts"],
       "fyraplayer/plugins/reconnect": ["./src/plugins/reconnect.ts"],

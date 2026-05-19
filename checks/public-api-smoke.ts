@@ -52,6 +52,14 @@ import {
   type PerformanceSample,
   type PerformanceViolation,
 } from 'fyraplayer/plugins/performance';
+import {
+  createPanoramaLitePlugin,
+  createEquirectSphereMesh,
+  normalizeView,
+  type PanoramaLiteHandle,
+  type PanoramaLitePluginOptions,
+  type PanoramaLiteQosCode,
+} from 'fyraplayer/plugins/panoramalite';
 import { createReconnectPlugin, type ReconnectPluginOptions } from 'fyraplayer/plugins/reconnect';
 import { createStoragePlugin, type StoragePluginOptions } from 'fyraplayer/plugins/storage';
 import {
@@ -75,6 +83,7 @@ import {
   createAuthSigningMiddleware as createAuthSigningMiddlewareFromPlugins,
   createDebugPanelPlugin as createDebugPanelPluginFromPlugins,
   createPerformanceMonitorPlugin as createPerformanceMonitorPluginFromPlugins,
+  createPanoramaLitePlugin as createPanoramaLitePluginFromPlugins,
   createDiagnosticsPlugin as createDiagnosticsPluginFromPlugins,
   createReconnectPlugin as createReconnectPluginFromPlugins,
   createRecordingApiPlugin as createRecordingApiPluginFromPlugins,
@@ -84,6 +93,7 @@ import {
   type DebugPanelPluginOptions as DebugPanelPluginOptionsFromPlugins,
   type DiagnosticsPluginOptions as DiagnosticsPluginOptionsFromPlugins,
   type PerformanceMonitorOptions as PerformanceMonitorOptionsFromPlugins,
+  type PanoramaLitePluginOptions as PanoramaLitePluginOptionsFromPlugins,
   type RecordingApiPluginOptions as RecordingApiPluginOptionsFromPlugins,
   type ReconnectPluginOptions as ReconnectPluginOptionsFromPlugins,
   type SourceResolverMiddlewareOptions as SourceResolverMiddlewareOptionsFromPlugins,
@@ -246,6 +256,7 @@ player.on('recording', (evt) => {
 });
 
 player.currentTime.toFixed();
+player.getVideoElement().paused.valueOf();
 player.getSources().map((source) => source.type);
 player.getCurrentSource()?.type;
 const qualityState: QualityState = player.getQualityState();
@@ -473,6 +484,31 @@ const performanceOptions: PerformanceMonitorOptions = {
 createPerformanceMonitorPlugin(performanceOptions);
 const performanceOptionsFromPlugins: PerformanceMonitorOptionsFromPlugins = performanceOptions;
 createPerformanceMonitorPluginFromPlugins(performanceOptionsFromPlugins);
+
+let panoramaHandle: PanoramaLiteHandle | undefined;
+const panoramaOptions: PanoramaLitePluginOptions = {
+  target: '.player-shell',
+  media: 'video',
+  projection: 'equirectangular',
+  interactive: true,
+  initialView: { yaw: 0, pitch: 0, fov: 80 },
+  limits: { minFov: 35, maxFov: 110 },
+  maxPixelRatio: 1.5,
+  onReady: (handle) => {
+    panoramaHandle = handle;
+  },
+  onError: (error) => error?.toString(),
+};
+createPanoramaLitePlugin(panoramaOptions);
+const panoramaOptionsFromPlugins: PanoramaLitePluginOptionsFromPlugins = panoramaOptions;
+createPanoramaLitePluginFromPlugins(panoramaOptionsFromPlugins);
+panoramaHandle?.setView({ yaw: 45 });
+panoramaHandle?.getView().fov.toFixed();
+const panoramaMesh = createEquirectSphereMesh({ widthSegments: 16, heightSegments: 8 });
+panoramaMesh.indices.length.toFixed();
+normalizeView({ yaw: 540, pitch: 120, fov: 10 }).yaw.toFixed();
+const panoramaCode: PanoramaLiteQosCode = 'PANORAMALITE_READY';
+panoramaCode.toString();
 
 const storageOptions: StoragePluginOptions = {
   key: 'fyra:lastSource',

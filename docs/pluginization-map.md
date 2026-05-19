@@ -78,7 +78,7 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 | Performance Monitor | P2 | done | Sampling/budget rules are optional and product-tunable |
 | Screenshot / Recording | P2 | done for current scope | UI screenshot download/feedback and recording toggle hook exist; backend recording API plugin supports start/stop/status, structured recording events, and normalized backend errors. Browser-side recording, permissions, storage, retention, and privacy policy stay out of scope/product-owned |
 | Render Target Bridge | P2 | done for player package boundary | `docs/render-bridges.md` documents external bridge ownership and supported video/canvas/event/metadata outputs; concrete PSV/Cesium/map adapters remain external |
-| PanoramaLite | P2 | planned | First-party lightweight WebGL2 equirectangular panorama renderer plugin for panoramic video, panoramic images, and live panorama playback. Keep it optional and dependency-free; see `docs/panoramalite.md` |
+| PanoramaLite | P2 | doing | First-party lightweight WebGL2 equirectangular panorama renderer plugin for panoramic video, panoramic images, and live panorama playback. API, renderer skeleton, texture binding, controls, and unit coverage exist; browser pixel evidence remains pending. Keep it optional and dependency-free; see `docs/panoramalite.md` |
 | DRM | P3 | deferred | Requires EME/license/vendor config; not current focus |
 | Subtitles/Text Tracks | P3 | deferred | Important later, but should not block playback stabilization |
 | Ads / SSAI / CSAI | P3 | deferred | Product/business feature; separate lifecycle and compliance concerns |
@@ -138,7 +138,7 @@ Do not expose mutable internal player state directly. Add narrow APIs only when 
 | PL-011 | P2 | done: expand playback preference persistence | Volume/mute/speed/low-latency/quality preferences stay optional and scoped |
 | PL-012 | P2 | done for current capture scope; render bridges remain external | UI screenshot and recording-toggle hooks exist; backend recording API plugin support exists with structured errors; browser recording stays out of scope; PSV/Cesium/map/panorama integrations stay out of core |
 | PL-013 | P2 | done: document render bridge boundary | `docs/render-bridges.md` defines the bridge contract without adding renderer dependencies to core |
-| PL-014 | P2 | planned: design and implement `panoramalite` | Lightweight WebGL2 panorama plugin supports equirectangular image/video/live sources without Three.js/PSV/WebGPU dependencies |
+| PL-014 | P2 | doing: implement `panoramalite` | Lightweight WebGL2 panorama plugin supports equirectangular image/video/live sources without Three.js/PSV/WebGPU dependencies; browser evidence still required before product support claims |
 
 ---
 

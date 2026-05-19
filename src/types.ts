@@ -693,6 +693,7 @@ export interface PlayerAPI {
   getState(): PlayerState;
   getSources(): Source[];
   getCurrentSource(): Source | undefined;
+  getVideoElement(): HTMLVideoElement;
   on<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;
   on(event: string, handler: (...args: unknown[]) => void): void;
   once<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;

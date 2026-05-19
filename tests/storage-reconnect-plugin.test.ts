@@ -77,6 +77,7 @@ class PlayerStub implements PlayerAPI {
   getState() { return 'idle' as const; }
   getSources(): Source[] { return this.sources; }
   getCurrentSource(): Source | undefined { return this.sources[this.currentIndex]; }
+  getVideoElement(): HTMLVideoElement { return {} as HTMLVideoElement; }
   async control(): Promise<unknown> { return undefined; }
   enableMetadataExtraction(): void {}
   disableMetadataExtraction(): void {}

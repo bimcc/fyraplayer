@@ -21,6 +21,7 @@ class FyraPlayer implements PlayerAPI {
   getState(): PlayerState
   getSources(): Source[]
   getCurrentSource(): Source | undefined
+  getVideoElement(): HTMLVideoElement
   get currentTime(): number  // 当前播放时间（秒）
   
   // 事件
@@ -690,6 +691,11 @@ support public quality selection. The optional UI plugin prefers this Tech-level
 quality state; only when no adaptive levels exist does the selector fall back to
 multi-source switching.
 
+`getVideoElement()` exposes the player-owned media element for optional renderer
+plugins and host integrations. Consumers may read layout/media state from it,
+but playback lifecycle, source loading, reconnect, and audio ownership should
+remain with `FyraPlayer` and the active Tech.
+
 ### HLS/DASH Event Semantics
 
 Current stable contract:
@@ -1014,6 +1020,75 @@ Recording error events include `code` plus `error` details when available:
 Its `info` field matches the `PlayerRecordingErrorInfo` shape emitted on the
 `recording` event, so products can show concise UI feedback while exporting the
 same object for diagnostics.
+
+## PanoramaLite Plugin
+
+`panoramalite` is an optional first-party WebGL2 equirectangular panorama
+renderer. It is not a playback Tech: FyraPlayer still owns loading, audio,
+quality selection, reconnect, and source switching. The plugin consumes the
+player video element or an image and renders it to a WebGL2 canvas.
+
+```typescript
+import { FyraPlayer } from 'fyraplayer';
+import { createPanoramaLitePlugin } from 'fyraplayer/plugins/panoramalite';
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'hls', url: 'https://example.com/live360.m3u8' }],
+  plugins: [
+    createPanoramaLitePlugin({
+      target: '.player-shell',
+      media: 'video',
+      projection: 'equirectangular',
+      interactive: true,
+      initialView: { yaw: 0, pitch: 0, fov: 80 },
+      maxPixelRatio: 1.5
+    })
+  ]
+});
+```
+
+The plugin also supports panoramic images:
+
+```typescript
+createPanoramaLitePlugin({
+  target: '.pano',
+  media: 'image',
+  image: '/assets/panorama.jpg',
+  onReady: (handle) => handle.setView({ yaw: 45 })
+});
+```
+
+Key options:
+
+```typescript
+interface PanoramaLitePluginOptions {
+  target?: HTMLElement | string
+  media?: 'video' | 'image'
+  image?: string | HTMLImageElement | ImageBitmap
+  projection?: 'equirectangular'
+  interactive?: boolean
+  initialView?: Partial<PanoramaLiteView>
+  limits?: Partial<PanoramaLiteViewLimits>
+  pixelRatio?: number | 'auto'
+  maxPixelRatio?: number
+  hideSourceVideo?: boolean
+  className?: string
+  onReady?: (handle: PanoramaLiteHandle) => void
+  onError?: (error: unknown) => void
+}
+```
+
+`PanoramaLiteHandle` exposes `setView()`, `getView()`, `resetView()`,
+`bindVideo()`, `setImage()`, `setInteractive()`, `resize()`, and `destroy()`.
+The plugin emits QoS codes such as `PANORAMALITE_UNSUPPORTED`,
+`PANORAMALITE_READY`, `PANORAMALITE_RENDER_ERROR`,
+`PANORAMALITE_CONTEXT_LOST`, `PANORAMALITE_CONTEXT_RESTORED`, and
+`PANORAMALITE_TEXTURE_ERROR`.
+
+Commercial support remains conditional until browser pixel evidence is recorded
+for image, file/video, HLS, and live sources. Track that work in
+`docs/panoramalite.md`.
 
 ## Storage And Reconnect Plugins
 

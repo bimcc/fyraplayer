@@ -111,7 +111,7 @@ Status values:
 | CR-026 | P2 | done | Render Bridges | Keep PSV/Cesium/map/panorama integrations outside core but documented | `docs/render-bridges.md` defines the external bridge boundary, supported video/canvas/event/metadata outputs, PSV/Cesium ownership, cleanup checklist, and public API smoke covers `CanvasFrameBuffer` / `BaseTarget` |
 | CR-027 | P2 | done | Screenshot / Recording | Provide optional capture utilities | UI screenshot feedback exists; backend recording API plugin supports start/stop/status, typed events, normalized errors, and lifecycle cleanup; browser-side recording remains intentionally out of scope |
 | CR-028 | P3 | deferred | Ads / Business Analytics | Keep SSAI/CSAI and business event exporters out of current focus | Placeholder exists; not part of current core stabilization work |
-| CR-029 | P2 | todo | PanoramaLite | Add lightweight first-party WebGL2 panorama plugin | `docs/panoramalite.md` is the tracking baseline; implementation must cover equirectangular image, video, and live-source rendering, interaction controls, lifecycle cleanup, diagnostics, public API smoke, and browser pixel evidence |
+| CR-029 | P2 | doing | PanoramaLite | Add lightweight first-party WebGL2 panorama plugin | API/types/export, renderer skeleton, image/video texture binding, interaction controls, and unit coverage exist. Browser pixel evidence for image, MP4/HLS, and live sources remains required before support claims |
 
 ---
 
@@ -1662,6 +1662,42 @@ Clean API decision:
   - `cmd /c pnpm check:release`: passed, including 25 Jest suites / 128 tests, 28 package export files, and 18 example sources.
   - `cmd /c pnpm bundle:examples`: passed.
   - `git diff --check`: passed.
+
+---
+
+### 2026-05-19 PanoramaLite Baseline Implementation
+
+Summary:
+
+- Added the first-party optional `panoramalite` plugin as a lightweight WebGL2
+  equirectangular renderer for panoramic images, panoramic video, and future
+  live panorama sources.
+- Added `PlayerAPI.getVideoElement()` for renderer plugins and host
+  integrations that need the player-owned media element without accessing
+  private state.
+- Exposed `fyraplayer/plugins/panoramalite`, the aggregate `fyraplayer/plugins`
+  export, and the IIFE export surface.
+- Implemented math/camera/sphere mesh, video/image texture binding, pointer /
+  touch / wheel controls, WebGL2 unsupported diagnostics, context
+  loss/restoration hooks, and lifecycle cleanup.
+- Updated API, SDK integration, pluginization, supported-scenarios, and
+  PanoramaLite tracking docs. Product support claims remain conditional until
+  browser pixel evidence is recorded.
+
+Validation:
+
+- `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed, 7
+  tests.
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm check:release`: passed, including 26 Jest suites / 135 tests,
+  public API check, 30 package export files, 18 example sources, ESM build, and
+  IIFE bundle.
+
+Remaining:
+
+- Add a runnable PanoramaLite example/demo preset.
+- Record browser pixel evidence for panoramic image, MP4/file video, HLS 360,
+  and live/WebRTC or MediaMTX sources before marking `CR-029` done.
 
 ---
 

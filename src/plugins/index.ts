@@ -39,6 +39,27 @@ export {
   type PerformanceViolationCode,
 } from './performance.js';
 
+// Lightweight WebGL2 panorama renderer plugin
+export {
+  DEFAULT_PANORAMA_LIMITS,
+  DEFAULT_PANORAMA_VIEW,
+  createEquirectSphereMesh,
+  createPanoramaLitePlugin,
+  createViewProjection,
+  mergeLimits,
+  normalizeView,
+  type PanoramaLiteHandle,
+  type PanoramaLiteMediaType,
+  type PanoramaLiteMesh,
+  type PanoramaLitePluginOptions,
+  type PanoramaLiteProjection,
+  type PanoramaLiteQosCode,
+  type PanoramaLiteQosPayload,
+  type PanoramaLiteView,
+  type PanoramaLiteViewLimits,
+  type SphereMeshOptions,
+} from './panoramalite.js';
+
 // Storage preference plugin
 export {
   createStoragePlugin,

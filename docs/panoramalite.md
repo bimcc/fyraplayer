@@ -1,7 +1,7 @@
 # PanoramaLite WebGL2 Plugin Plan
 
 > Created: 2026-05-19  
-> Status: planned  
+> Status: doing
 > Purpose: track the lightweight first-party panorama renderer for panoramic
 > video, panoramic images, and live panorama playback without adding Three.js,
 > PSV, or WebGPU to the core player.
@@ -72,11 +72,11 @@ FyraPlayer owns:
 The plugin must not patch Tech implementations or replace the video element's
 playback lifecycle.
 
-## 4. Public API Draft
+## 4. Public API
 
-This section is a future API draft. The package path must not be added to
-`package.json` exports until the implementation, tests, and browser evidence are
-in place.
+The package path is implemented for the lightweight plugin baseline. Browser
+pixel evidence is still pending, so product support claims must remain
+conditional until `PLITE-009` is closed.
 
 Package path:
 
@@ -175,24 +175,18 @@ src/plugins/panoramalite/
     camera.ts
     math.ts
   input/
-    pointerControls.ts
-    touchControls.ts
-    wheelControls.ts
+    controls.ts
   media/
     imageLoader.ts
-    videoTexture.ts
-  lifecycle/
-    contextLoss.ts
-    resizeObserver.ts
 ```
 
 Build/export plan:
 
-- add `./plugins/panoramalite` to `package.json` exports only when the
-  implementation exists;
-- add path mapping to `tsconfig.public-api.json`;
-- extend `checks/public-api-smoke.ts`;
-- keep it out of the core entry unless the plugin aggregate exports it.
+- `./plugins/panoramalite` exists in `package.json` exports;
+- `tsconfig.public-api.json` maps the public subpath;
+- `checks/public-api-smoke.ts` covers direct and aggregate plugin imports;
+- `src/plugins/index.ts` and the IIFE entry export the plugin factory and
+  public helper types.
 
 ## 6. Rendering Design
 
@@ -316,17 +310,42 @@ Verification tools:
 
 | ID | Status | Task | Acceptance |
 |---|---:|---|---|
-| PLITE-001 | todo | Add docs and roadmap tracking | `docs/panoramalite.md`, roadmap, and plugin map describe the same scope |
-| PLITE-002 | todo | Add API/types and public export | `createPanoramaLitePlugin` compiles in public API smoke |
-| PLITE-003 | todo | Implement math, camera, and sphere mesh | Unit tests cover projection basics and view limits |
-| PLITE-004 | todo | Implement WebGL2 renderer and image texture | Browser screenshot shows nonblank panoramic image render |
-| PLITE-005 | todo | Implement video texture binding | MP4/HLS 360 sample renders nonblank and updates over time |
-| PLITE-006 | todo | Implement interaction controls | Drag and zoom change view state and screenshot pixels |
-| PLITE-007 | todo | Implement lifecycle and context recovery | Destroy/source switch/context lost behavior is tested |
+| PLITE-001 | done | Add docs and roadmap tracking | `docs/panoramalite.md`, roadmap, and plugin map describe the same scope |
+| PLITE-002 | done | Add API/types and public export | `createPanoramaLitePlugin` compiles in public API smoke |
+| PLITE-003 | done | Implement math, camera, and sphere mesh | Unit tests cover projection basics and view limits |
+| PLITE-004 | doing | Implement WebGL2 renderer and image texture | Renderer and image texture path exist; browser screenshot evidence still pending |
+| PLITE-005 | doing | Implement video texture binding | Video texture path exists; MP4/HLS browser pixel evidence still pending |
+| PLITE-006 | doing | Implement interaction controls | Pointer/touch/wheel controls exist; browser drag/zoom pixel evidence still pending |
+| PLITE-007 | doing | Implement lifecycle and context recovery | Destroy/init-failure cleanup is unit-covered; source switch/context-restored browser evidence remains pending |
 | PLITE-008 | todo | Add example/demo preset | Example can toggle panoramic image/video/live source without custom glue |
 | PLITE-009 | todo | Add browser verification records | Matrix documents image, file/video, HLS, and live-source evidence |
 
-## 12. Advanced Plugin Boundary
+## 12. Review Log
+
+### 2026-05-19 Baseline Implementation
+
+- Added the optional `fyraplayer/plugins/panoramalite` public entrypoint,
+  aggregate plugin export, and IIFE export.
+- Added `PlayerAPI.getVideoElement()` so renderer plugins can consume the
+  player-owned media element without reaching into private player state.
+- Implemented the lightweight WebGL2 baseline: equirectangular sphere mesh,
+  camera/view math, video/image texture binding, pointer/touch/wheel controls,
+  WebGL2 unsupported diagnostics, context loss/restoration hooks, visibility
+  render scheduling, and lifecycle cleanup.
+- Kept audio, playback, reconnect, quality control, and source switching owned
+  by `FyraPlayer` and the active Tech.
+- Added unit coverage for view normalization, mesh generation, video texture
+  allocation after placeholder frames, unsupported WebGL2 diagnostics,
+  renderer-init failure cleanup, and destroy-time host/video style restoration.
+- Validation:
+  - `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed,
+    7 tests.
+  - `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+  - `cmd /c pnpm check:release`: passed, 26 suites / 135 tests, 30 package
+    export files, 18 example sources, public API check, ESM build, and IIFE
+    bundle.
+
+## 13. Advanced Plugin Boundary
 
 `panoramalite` is the basic built-in path. The following should stay separate:
 

@@ -41,6 +41,7 @@ internals.
 | `fyraplayer/plugins/reconnect` | Reconnect event logging/callback helper |
 | `fyraplayer/plugins/metrics` | Metrics reporter plugin |
 | `fyraplayer/plugins/performance` | Performance budget monitor |
+| `fyraplayer/plugins/panoramalite` | Lightweight WebGL2 panorama renderer plugin |
 | `fyraplayer/plugins/engines` | Streaming-server URL/source adapters |
 | `fyraplayer/plugins/metadata` | KLV/SEI/private-data metadata bridge |
 
