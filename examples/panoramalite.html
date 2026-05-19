@@ -14,8 +14,10 @@
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       }
       .page {
+        width: 100%;
         max-width: 980px;
         margin: 0 auto;
+        min-width: 0;
       }
       h1 {
         margin: 0 0 14px;
@@ -39,10 +41,30 @@
       }
       .controls {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto auto auto;
+        grid-template-columns: minmax(0, 1fr) auto auto auto auto auto;
         gap: 10px;
         margin-top: 14px;
         align-items: center;
+        min-width: 0;
+      }
+      .toggle {
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        padding: 0 10px;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      .toggle input {
+        width: 14px;
+        height: 14px;
+        min-width: 14px;
+        padding: 0;
       }
       input, select, button {
         height: 36px;
@@ -57,9 +79,11 @@
         padding: 0 10px;
       }
       select {
+        min-width: 0;
         padding: 0 8px;
       }
       button {
+        min-width: 0;
         padding: 0 14px;
         cursor: pointer;
         font-weight: 550;
@@ -107,13 +131,16 @@
       @media (max-width: 720px) {
         body { padding: 12px; }
         .controls {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         }
         .controls input {
           grid-column: 1 / -1;
         }
+        .controls > * {
+          width: 100%;
+        }
         .status {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         }
       }
     </style>
@@ -133,6 +160,8 @@
           <option value="dash">DASH</option>
           <option value="webrtc">WebRTC</option>
         </select>
+        <label class="toggle"><input id="flip-x" type="checkbox" />Flip X</label>
+        <label class="toggle"><input id="flip-y" type="checkbox" />Flip Y</label>
         <button id="load" class="primary">Load</button>
         <button id="reset">Reset</button>
       </div>

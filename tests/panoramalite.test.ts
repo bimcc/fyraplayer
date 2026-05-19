@@ -146,6 +146,7 @@ class WebGL2Stub {
   bindVertexArray = jest.fn();
   activeTexture = jest.fn();
   uniform1i = jest.fn();
+  uniform4f = jest.fn();
   uniformMatrix4fv = jest.fn();
   drawElements = jest.fn();
   bindBuffer = jest.fn();
@@ -246,6 +247,7 @@ describe('PanoramaLiteRenderer', () => {
     Object.defineProperty(video, 'videoWidth', { value: 0, configurable: true });
     Object.defineProperty(video, 'videoHeight', { value: 0, configurable: true });
     renderer.setTextureSource(video);
+    expect(gl.pixelStorei).toHaveBeenCalledWith(gl.UNPACK_FLIP_Y_WEBGL, false);
     expect(gl.texImage2D).toHaveBeenCalledWith(
       gl.TEXTURE_2D,
       0,
@@ -263,11 +265,33 @@ describe('PanoramaLiteRenderer', () => {
     Object.defineProperty(video, 'videoHeight', { value: 960, configurable: true });
     renderer.render({ yaw: 0, pitch: 0, roll: 0, fov: 80 });
 
+    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), 1, 1, 0, 0);
     expect(gl.texImage2D).toHaveBeenLastCalledWith(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
     expect(gl.texSubImage2D).not.toHaveBeenCalled();
 
     renderer.render({ yaw: 0, pitch: 0, roll: 0, fov: 80 });
     expect(gl.texSubImage2D).toHaveBeenCalledWith(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, video);
+  });
+
+  test('applies configured texture coordinate flips in the shader transform', () => {
+    const gl = new WebGL2Stub();
+    const canvas = new CanvasStub(gl);
+    Object.defineProperty(globalThis, 'document', {
+      value: { createElement: () => new CanvasStub(gl) },
+      configurable: true,
+    });
+
+    const renderer = new PanoramaLiteRenderer({
+      canvas: canvas as unknown as HTMLCanvasElement,
+      pixelRatio: 1,
+      textureFlipX: true,
+      textureFlipY: true,
+    });
+    const video = new VideoStub() as unknown as HTMLVideoElement;
+    renderer.setTextureSource(video);
+    renderer.render({ yaw: 0, pitch: 0, roll: 0, fov: 80 });
+
+    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), -1, -1, 1, 1);
   });
 });
 

@@ -111,7 +111,7 @@ Status values:
 | CR-026 | P2 | done | Render Bridges | Keep PSV/Cesium/map/panorama integrations outside core but documented | `docs/render-bridges.md` defines the external bridge boundary, supported video/canvas/event/metadata outputs, PSV/Cesium ownership, cleanup checklist, and public API smoke covers `CanvasFrameBuffer` / `BaseTarget` |
 | CR-027 | P2 | done | Screenshot / Recording | Provide optional capture utilities | UI screenshot feedback exists; backend recording API plugin supports start/stop/status, typed events, normalized errors, and lifecycle cleanup; browser-side recording remains intentionally out of scope |
 | CR-028 | P3 | deferred | Ads / Business Analytics | Keep SSAI/CSAI and business event exporters out of current focus | Placeholder exists; not part of current core stabilization work |
-| CR-029 | P2 | done for smoke scope | PanoramaLite | Add lightweight first-party WebGL2 panorama plugin | API/types/export, renderer, image/video texture binding, interaction controls, unit coverage, demo, and Edge browser smoke evidence for image, MP4/file, HLS VOD, live HLS, and live WebRTC exist. Longer WebGL resource-leak runs can be tracked separately |
+| CR-029 | P2 | done for product-demo scope; hardening continues | PanoramaLite | Add lightweight first-party WebGL2 panorama plugin | API/types/export, renderer, image/video texture binding, interaction controls, orientation correction, video upload throttling, canvas pixel caps, unit coverage, demo, and Edge browser smoke evidence for image, MP4/file, HLS VOD, live HLS, and live WebRTC exist. Longer WebGL resource-leak runs, controlled context restore, and deployment-specific orientation validation remain hardening work |
 
 ---
 
@@ -1731,6 +1731,32 @@ Additional live validation:
 - `CR-029` is closed for smoke/product-demo scope. Longer WebGL resource-leak
   or 30-minute panorama-specific runs can be tracked as a separate hardening
   item if needed.
+
+---
+
+### 2026-05-19 PanoramaLite Orientation And Performance Hardening
+
+Summary:
+
+- Added a generated equirectangular latitude/longitude calibration grid as the
+  default PanoramaLite demo source. It exposes equator, front meridian, up/down,
+  left/right, and back labels so inverted or mirrored video can be confirmed
+  visually before changing integration config.
+- Added public `textureFlipX` and `textureFlipY` options and moved orientation
+  correction into shader texture-coordinate transforms. WebGL upload now keeps
+  `UNPACK_FLIP_Y_WEBGL` disabled by default.
+- Added `maxVideoFps` and `maxCanvasPixels` for live panorama performance. The
+  renderer already rasterizes only the visible canvas pixels; the practical
+  optimization target is full-frame video texture upload and high-DPI backing
+  store size.
+- Demo defaults now cap WebRTC panorama uploads at 24 fps and other video
+  sources at 30 fps, with `maxPixelRatio: 1` and `maxCanvasPixels: 1280 * 720`.
+
+Validation:
+
+- `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed, 8
+  tests.
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
 
 ---
 

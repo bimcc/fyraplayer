@@ -65,15 +65,20 @@ class PanoramaLiteInstance {
   private controls: PanoramaLiteControls | null = null;
   private view: PanoramaLiteView;
   private video: VideoWithFrameCallback | null = null;
+  private readonly minVideoFrameIntervalMs: number;
+  private lastVideoRenderAt = 0;
   private rafId: number | null = null;
   private videoFrameId: number | null = null;
-  private renderScheduled = false;
+  private pendingRenderUpload = false;
   private destroyed = false;
   private previousVideoVisibility: { visibility?: string; opacity?: string; pointerEvents?: string } | null = null;
   private previousHostPosition: string | null = null;
   private readonly videoEventHandlers: Array<{ event: string; handler: EventListener }> = [];
   private readonly onReady = () => this.rebindCurrentVideo();
-  private readonly onPlay = () => this.scheduleRender();
+  private readonly onPlay = () => {
+    this.scheduleRender();
+    this.scheduleVideoFrameLoop();
+  };
   private readonly onPause = () => this.scheduleRender();
   private readonly onVisibilityChange = () => {
     if (isDocumentHidden()) {
@@ -101,6 +106,7 @@ class PanoramaLiteInstance {
     this.limits = mergeLimits(options.limits);
     this.initialView = normalizeView(options.initialView, this.limits, DEFAULT_PANORAMA_VIEW);
     this.view = { ...this.initialView };
+    this.minVideoFrameIntervalMs = resolveVideoFrameIntervalMs(options.maxVideoFps ?? 30);
     this.host = resolveTarget(options.target, player.getVideoElement());
     this.canvas = document.createElement('canvas');
     this.canvas.className = [PLUGIN_CLASS, options.className].filter(Boolean).join(' ');
@@ -112,6 +118,9 @@ class PanoramaLiteInstance {
         canvas: this.canvas,
         pixelRatio: options.pixelRatio ?? 'auto',
         maxPixelRatio: options.maxPixelRatio ?? 1.5,
+        maxCanvasPixels: options.maxCanvasPixels,
+        textureFlipX: options.textureFlipX ?? false,
+        textureFlipY: options.textureFlipY ?? false,
         preserveDrawingBuffer: !!options.preserveDrawingBuffer,
         onContextLost: () => emitQos(this.coreBus, 'PANORAMALITE_CONTEXT_LOST', 'warning', 'PanoramaLite WebGL context lost'),
         onContextRestored: () => {
@@ -147,7 +156,7 @@ class PanoramaLiteInstance {
 
   setView(view: Partial<PanoramaLiteView>): void {
     this.view = normalizeView(view, this.limits, this.view);
-    this.scheduleRender();
+    this.scheduleRender(false);
   }
 
   bindVideo(video: HTMLVideoElement): void {
@@ -169,7 +178,9 @@ class PanoramaLiteInstance {
       video.style.opacity = '0';
       video.style.pointerEvents = 'none';
     }
+    this.lastVideoRenderAt = 0;
     this.scheduleRender();
+    this.scheduleVideoFrameLoop();
   }
 
   async setImage(image: string | HTMLImageElement | ImageBitmap): Promise<void> {
@@ -184,7 +195,7 @@ class PanoramaLiteInstance {
 
   resize(): void {
     this.renderer.resize();
-    this.scheduleRender();
+    this.scheduleRender(false);
   }
 
   destroy(): void {
@@ -208,29 +219,45 @@ class PanoramaLiteInstance {
     this.bindVideo(this.player.getVideoElement());
   }
 
-  private scheduleRender(): void {
-    if (this.destroyed || this.renderScheduled) return;
-    this.renderScheduled = true;
-    const video = this.video;
-    if (video?.requestVideoFrameCallback && !video.paused && !isDocumentHidden()) {
-      this.videoFrameId = video.requestVideoFrameCallback(() => {
-        this.videoFrameId = null;
-        this.renderScheduled = false;
-        this.renderOnce();
-        this.scheduleRender();
-      });
-      return;
-    }
+  private scheduleRender(uploadTexture = true): void {
+    if (this.destroyed) return;
+    this.pendingRenderUpload ||= uploadTexture;
+    if (this.rafId !== null) return;
     this.rafId = requestAnimationFrame(() => {
       this.rafId = null;
-      this.renderScheduled = false;
-      this.renderOnce();
+      const shouldUpload = this.pendingRenderUpload;
+      this.pendingRenderUpload = false;
+      this.renderOnce(shouldUpload);
     });
   }
 
-  private renderOnce(): void {
+  private scheduleVideoFrameLoop(): void {
+    const video = this.video;
+    if (this.destroyed || !video?.requestVideoFrameCallback || video.paused || isDocumentHidden() || this.videoFrameId !== null) {
+      return;
+    }
+    this.videoFrameId = video.requestVideoFrameCallback((now) => {
+      this.videoFrameId = null;
+      if (!this.destroyed && !isDocumentHidden() && this.shouldRenderVideoFrame(now)) {
+        this.renderOnce(true);
+      }
+      this.scheduleVideoFrameLoop();
+    });
+  }
+
+  private shouldRenderVideoFrame(now: number): boolean {
+    if (this.minVideoFrameIntervalMs <= 0 || this.lastVideoRenderAt <= 0) {
+      this.lastVideoRenderAt = now;
+      return true;
+    }
+    if (now - this.lastVideoRenderAt < this.minVideoFrameIntervalMs) return false;
+    this.lastVideoRenderAt = now;
+    return true;
+  }
+
+  private renderOnce(uploadTexture = true): void {
     try {
-      this.renderer.render(this.view);
+      this.renderer.render(this.view, { uploadTexture });
     } catch (error) {
       this.handleError(error, 'PANORAMALITE_RENDER_ERROR');
     }
@@ -241,11 +268,11 @@ class PanoramaLiteInstance {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+    this.pendingRenderUpload = false;
     if (this.videoFrameId !== null && this.video?.cancelVideoFrameCallback) {
       this.video.cancelVideoFrameCallback(this.videoFrameId);
       this.videoFrameId = null;
     }
-    this.renderScheduled = false;
   }
 
   private handleError(error: unknown, code: PanoramaLiteQosCode): void {
@@ -275,7 +302,10 @@ class PanoramaLiteInstance {
   private attachVideoFrameEvents(video: HTMLVideoElement): void {
     const events = ['loadeddata', 'loadedmetadata', 'canplay', 'playing', 'timeupdate', 'seeked'];
     for (const event of events) {
-      const handler = () => this.scheduleRender();
+      const handler = () => {
+        this.scheduleRender();
+        this.scheduleVideoFrameLoop();
+      };
       video.addEventListener?.(event, handler);
       this.videoEventHandlers.push({ event, handler });
     }
@@ -330,6 +360,13 @@ function isDocumentHidden(): boolean {
 
 function isHTMLElement(value: unknown): value is HTMLElement {
   return typeof HTMLElement !== 'undefined' && value instanceof HTMLElement;
+}
+
+function resolveVideoFrameIntervalMs(maxVideoFps: number | undefined): number {
+  if (typeof maxVideoFps !== 'number' || !Number.isFinite(maxVideoFps) || maxVideoFps <= 0) {
+    return 0;
+  }
+  return 1000 / Math.min(120, Math.max(1, maxVideoFps));
 }
 
 function emitQos(

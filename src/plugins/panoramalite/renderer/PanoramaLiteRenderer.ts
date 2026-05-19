@@ -8,6 +8,9 @@ export interface PanoramaLiteRendererOptions {
   canvas: HTMLCanvasElement;
   pixelRatio?: number | 'auto';
   maxPixelRatio?: number;
+  maxCanvasPixels?: number;
+  textureFlipX?: boolean;
+  textureFlipY?: boolean;
   preserveDrawingBuffer?: boolean;
   onContextLost?: () => void;
   onContextRestored?: () => void;
@@ -26,6 +29,7 @@ export class PanoramaLiteRenderer {
   private mesh: PanoramaLiteMesh | null = null;
   private viewProjectionLocation: WebGLUniformLocation | null = null;
   private textureLocation: WebGLUniformLocation | null = null;
+  private textureTransformLocation: WebGLUniformLocation | null = null;
   private textureSource: PanoramaLiteTextureSource | null = null;
   private textureSize: { width: number; height: number } | null = null;
   private destroyed = false;
@@ -65,7 +69,7 @@ export class PanoramaLiteRenderer {
     if (!this.gl || !this.texture) return;
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -80,8 +84,8 @@ export class PanoramaLiteRenderer {
   }
 
   resize(): void {
-    const ratio = this.resolvePixelRatio();
     const rect = this.canvas.getBoundingClientRect();
+    const ratio = this.resolvePixelRatio(rect);
     const width = Math.max(1, Math.floor((rect.width || this.canvas.clientWidth || 1) * ratio));
     const height = Math.max(1, Math.floor((rect.height || this.canvas.clientHeight || 1) * ratio));
     if (this.canvas.width !== width) this.canvas.width = width;
@@ -89,11 +93,13 @@ export class PanoramaLiteRenderer {
     this.gl?.viewport(0, 0, width, height);
   }
 
-  render(view: PanoramaLiteView): void {
+  render(view: PanoramaLiteView, options: { uploadTexture?: boolean } = {}): void {
     const gl = this.gl;
     if (!gl || !this.program || !this.vao || !this.texture || !this.mesh) return;
     this.resize();
-    this.uploadTextureFrame();
+    if (options.uploadTexture !== false) {
+      this.uploadTextureFrame();
+    }
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.useProgram(this.program);
@@ -101,6 +107,17 @@ export class PanoramaLiteRenderer {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     if (this.textureLocation) gl.uniform1i(this.textureLocation, 0);
+    if (this.textureTransformLocation) {
+      const scaleX = this.options.textureFlipX ? -1 : 1;
+      const scaleY = this.options.textureFlipY ? -1 : 1;
+      gl.uniform4f(
+        this.textureTransformLocation,
+        scaleX,
+        scaleY,
+        this.options.textureFlipX ? 1 : 0,
+        this.options.textureFlipY ? 1 : 0
+      );
+    }
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     if (this.viewProjectionLocation) {
       gl.uniformMatrix4fv(this.viewProjectionLocation, false, createViewProjection(view, aspect));
@@ -138,6 +155,7 @@ export class PanoramaLiteRenderer {
     this.program = this.createProgram(PANORAMA_VERTEX_SHADER, PANORAMA_FRAGMENT_SHADER);
     this.viewProjectionLocation = gl.getUniformLocation(this.program, 'uViewProjection');
     this.textureLocation = gl.getUniformLocation(this.program, 'uTexture');
+    this.textureTransformLocation = gl.getUniformLocation(this.program, 'uTextureTransform');
     this.texture = gl.createTexture();
     this.createBuffers();
     gl.disable(gl.CULL_FACE);
@@ -244,6 +262,7 @@ export class PanoramaLiteRenderer {
     this.textureSize = null;
     this.program = null;
     this.gl = null;
+    this.textureTransformLocation = null;
   }
 
   private requireGl(): WebGL2RenderingContext {
@@ -251,12 +270,20 @@ export class PanoramaLiteRenderer {
     return this.gl;
   }
 
-  private resolvePixelRatio(): number {
+  private resolvePixelRatio(rect: DOMRect | { width: number; height: number }): number {
     const max = this.options.maxPixelRatio ?? 1.5;
+    let ratio: number;
     if (typeof this.options.pixelRatio === 'number') {
-      return Math.max(0.5, Math.min(max, this.options.pixelRatio));
+      ratio = Math.max(0.25, Math.min(max, this.options.pixelRatio));
+    } else {
+      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      ratio = Math.max(0.25, Math.min(max, dpr));
     }
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-    return Math.max(0.5, Math.min(max, dpr));
+    const maxCanvasPixels = this.options.maxCanvasPixels;
+    if (typeof maxCanvasPixels === 'number' && Number.isFinite(maxCanvasPixels) && maxCanvasPixels > 0) {
+      const cssPixels = Math.max(1, (rect.width || this.canvas.clientWidth || 1) * (rect.height || this.canvas.clientHeight || 1));
+      ratio = Math.min(ratio, Math.max(0.25, Math.sqrt(maxCanvasPixels / cssPixels)));
+    }
+    return ratio;
   }
 }

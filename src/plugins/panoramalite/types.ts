@@ -25,6 +25,10 @@ export interface PanoramaLitePluginOptions {
   limits?: Partial<PanoramaLiteViewLimits>;
   pixelRatio?: number | 'auto';
   maxPixelRatio?: number;
+  maxCanvasPixels?: number;
+  maxVideoFps?: number;
+  textureFlipX?: boolean;
+  textureFlipY?: boolean;
   preserveDrawingBuffer?: boolean;
   crossOrigin?: '' | 'anonymous' | 'use-credentials';
   hideSourceVideo?: boolean;

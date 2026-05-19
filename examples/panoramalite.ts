@@ -8,6 +8,8 @@ const shell = document.getElementById('pano-shell') as HTMLElement;
 const video = document.getElementById('video') as HTMLVideoElement;
 const urlInput = document.getElementById('source-url') as HTMLInputElement;
 const kindSelect = document.getElementById('source-kind') as HTMLSelectElement;
+const flipXInput = document.getElementById('flip-x') as HTMLInputElement;
+const flipYInput = document.getElementById('flip-y') as HTMLInputElement;
 const loadButton = document.getElementById('load') as HTMLButtonElement;
 const resetButton = document.getElementById('reset') as HTMLButtonElement;
 const stateEl = document.getElementById('state') as HTMLDivElement;
@@ -29,33 +31,113 @@ function appendLog(message: string): void {
 
 function createFixturePanoramaUrl(): string {
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 512;
+  canvas.width = 2048;
+  canvas.height = 1024;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('2D canvas is unavailable');
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
-  gradient.addColorStop(0, '#d62828');
-  gradient.addColorStop(0.24, '#f77f00');
-  gradient.addColorStop(0.5, '#fcbf49');
-  gradient.addColorStop(0.76, '#2a9d8f');
-  gradient.addColorStop(1, '#264653');
+  const { width, height } = canvas;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, '#0b1220');
+  gradient.addColorStop(0.42, '#12343f');
+  gradient.addColorStop(0.68, '#2f5f4c');
+  gradient.addColorStop(1, '#f2c14e');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = 'rgba(255,255,255,0.82)';
-  for (let x = 0; x < canvas.width; x += 128) {
-    ctx.fillRect(x, 0, 2, canvas.height);
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+  ctx.font = '28px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+
+  for (let lon = -180; lon <= 180; lon += 15) {
+    const x = ((lon + 180) / 360) * width;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+    if (lon % 45 === 0) {
+      ctx.fillText(`${lon}deg`, x + 8, centerY - 18);
+    }
   }
-  for (let y = 0; y < canvas.height; y += 128) {
-    ctx.fillRect(0, y, canvas.width, 2);
+
+  for (let lat = -75; lat <= 75; lat += 15) {
+    const y = ((90 - lat) / 180) * height;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+    if (lat % 30 === 0) {
+      ctx.fillText(`${lat}deg`, centerX + 18, y - 8);
+    }
   }
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 54px system-ui, sans-serif';
-  ctx.fillText('PanoramaLite', 42, 96);
-  ctx.font = '32px system-ui, sans-serif';
-  ctx.fillText('left', 48, 270);
-  ctx.fillText('front', 430, 270);
-  ctx.fillText('right', 810, 270);
+
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.moveTo(0, centerY);
+  ctx.lineTo(width, centerY);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#ef476f';
+  ctx.beginPath();
+  ctx.moveTo(centerX, 0);
+  ctx.lineTo(centerX, height);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#06d6a0';
+  ctx.beginPath();
+  ctx.moveTo(0, centerY);
+  ctx.lineTo(0, height);
+  ctx.moveTo(width, centerY);
+  ctx.lineTo(width, height);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(7, 15, 27, 0.72)';
+  ctx.fillRect(36, 34, 620, 116);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 58px system-ui, sans-serif';
+  ctx.fillText('PanoramaLite Grid', 64, 105);
+  ctx.font = '28px system-ui, sans-serif';
+  ctx.fillText('yellow = equator / red = front meridian', 66, 138);
+
+  drawLabel(ctx, centerX, centerY, 'FRONT 0deg', '#ef476f');
+  drawLabel(ctx, width * 0.75, centerY, 'RIGHT 90deg', '#118ab2');
+  drawLabel(ctx, width - 86, centerY, 'BACK 180deg', '#06d6a0', 'right');
+  drawLabel(ctx, 86, centerY, 'BACK -180deg', '#06d6a0', 'left');
+  drawLabel(ctx, width * 0.25, centerY, 'LEFT -90deg', '#f77f00');
+  drawLabel(ctx, centerX, 86, 'NORTH / UP', '#ffffff');
+  drawLabel(ctx, centerX, height - 86, 'SOUTH / DOWN', '#ffffff');
+
   return canvas.toDataURL('image/png');
+}
+
+function drawLabel(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  text: string,
+  color: string,
+  align: CanvasTextAlign = 'center'
+): void {
+  ctx.save();
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 42px system-ui, sans-serif';
+  const metrics = ctx.measureText(text);
+  const padX = 22;
+  const boxWidth = metrics.width + padX * 2;
+  const boxHeight = 64;
+  const left = align === 'right' ? x - boxWidth : align === 'left' ? x : x - boxWidth / 2;
+  ctx.fillStyle = 'rgba(7, 15, 27, 0.78)';
+  ctx.fillRect(left, y - boxHeight / 2, boxWidth, boxHeight);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(left, y - boxHeight / 2, boxWidth, boxHeight);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y + 1);
+  ctx.restore();
 }
 
 function detectKind(url: string): SourceKind {
@@ -147,6 +229,11 @@ async function loadCurrent(): Promise<void> {
       image: mode === 'image' ? url : undefined,
       crossOrigin: 'anonymous',
       preserveDrawingBuffer: true,
+      maxPixelRatio: 1,
+      maxCanvasPixels: 1280 * 720,
+      maxVideoFps: mode === 'webrtc' ? 24 : 30,
+      textureFlipX: flipXInput.checked,
+      textureFlipY: flipYInput.checked,
       onReady: (nextHandle) => {
         handle = nextHandle;
       },

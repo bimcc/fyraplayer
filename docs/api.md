@@ -1042,7 +1042,8 @@ const player = new FyraPlayer({
       projection: 'equirectangular',
       interactive: true,
       initialView: { yaw: 0, pitch: 0, fov: 80 },
-      maxPixelRatio: 1.5
+      maxPixelRatio: 1.5,
+      maxVideoFps: 30
     })
   ]
 });
@@ -1072,6 +1073,10 @@ interface PanoramaLitePluginOptions {
   limits?: Partial<PanoramaLiteViewLimits>
   pixelRatio?: number | 'auto'
   maxPixelRatio?: number
+  maxCanvasPixels?: number
+  maxVideoFps?: number
+  textureFlipX?: boolean
+  textureFlipY?: boolean
   preserveDrawingBuffer?: boolean
   crossOrigin?: '' | 'anonymous' | 'use-credentials'
   hideSourceVideo?: boolean
@@ -1088,8 +1093,11 @@ The plugin emits QoS codes such as `PANORAMALITE_UNSUPPORTED`,
 `PANORAMALITE_CONTEXT_LOST`, `PANORAMALITE_CONTEXT_RESTORED`, and
 `PANORAMALITE_TEXTURE_ERROR`.
 
-Commercial support remains conditional until browser pixel evidence is recorded
-for image, file/video, HLS, and live sources. Track that work in
+For live/WebRTC panorama scenes, tune `maxVideoFps`, `maxCanvasPixels`, and
+`maxPixelRatio` before changing media Tech settings. `textureFlipX` and
+`textureFlipY` are source-orientation corrections; use the generated demo grid
+to confirm upside-down or mirrored streams before enabling them. Browser pixel
+evidence for image, file/video, HLS, live HLS, and live WebRTC is tracked in
 `docs/panoramalite.md`.
 
 ## Storage And Reconnect Plugins
