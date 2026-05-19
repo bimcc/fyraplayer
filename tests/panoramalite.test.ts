@@ -42,11 +42,23 @@ class BusStub implements EventBusLike {
 }
 
 class ElementStub {
+  textContent = '';
   readonly style: Record<string, string> = {};
   className = '';
+  type = '';
+  title = '';
+  min = '';
+  max = '';
+  step = '';
+  value = '';
+  loop = false;
   parentElement: ElementStub | null = null;
   readonly children: ElementStub[] = [];
   readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+  readonly attributes = new Map<string, string>();
+  readonly classList = {
+    toggle: jest.fn(),
+  };
   clientWidth = 640;
   clientHeight = 320;
 
@@ -70,6 +82,10 @@ class ElementStub {
 
   removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
     this.listeners.get(type)?.delete(listener);
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
   }
 
   getBoundingClientRect(): { width: number; height: number } {
@@ -468,7 +484,7 @@ describe('createPanoramaLitePlugin', () => {
     expect(video.listeners.get('timeupdate')?.size ?? 0).toBe(0);
   });
 
-  test('uses image-up and video-neutral Y orientation defaults', async () => {
+  test('uses image-up and video matching-normal-playback orientation defaults', async () => {
     const gl = new WebGL2Stub();
     const host = new ElementStub();
     const video = new VideoStub();
@@ -479,6 +495,8 @@ describe('createPanoramaLitePlugin', () => {
       createElement: (tagName: string) => tagName === 'canvas' ? new CanvasStub(gl) : new ElementStub(),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      getElementById: jest.fn(() => null),
+      head: new ElementStub(),
       body: new ElementStub(),
     };
     Object.defineProperty(globalThis, 'document', { value: documentStub, configurable: true });
@@ -513,7 +531,52 @@ describe('createPanoramaLitePlugin', () => {
       createContext(player, new BusStub())
     );
 
-    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), 1, 1, 0, 0);
+    expect(gl.uniform4f).toHaveBeenLastCalledWith(expect.anything(), -1, 1, 1, 0);
     videoLifecycle?.destroy?.();
+  });
+
+  test('adds optional viewer controls and removes them on destroy', () => {
+    const gl = new WebGL2Stub();
+    const host = new ElementStub();
+    const video = new VideoStub();
+    host.appendChild(video);
+    const head = new ElementStub();
+    const documentStub = {
+      visibilityState: 'visible',
+      fullscreenElement: null,
+      querySelector: () => host,
+      createElement: (tagName: string) => tagName === 'canvas' ? new CanvasStub(gl) : new ElementStub(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      getElementById: jest.fn(() => null),
+      head,
+      body: new ElementStub(),
+    };
+    Object.defineProperty(globalThis, 'document', { value: documentStub, configurable: true });
+    Object.defineProperty(globalThis, 'HTMLElement', { value: ElementStub, configurable: true });
+    Object.defineProperty(globalThis, 'window', {
+      value: {
+        getComputedStyle: () => ({ position: 'relative' }),
+        devicePixelRatio: 1,
+        setInterval: jest.fn(() => 7),
+        clearInterval: jest.fn(),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'requestAnimationFrame', { value: () => 1, configurable: true });
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { value: jest.fn(), configurable: true });
+
+    const lifecycle = createPanoramaLitePlugin({ target: '.host', media: 'video', viewerControls: true })(
+      createContext(new PlayerStub(video as unknown as HTMLVideoElement), new BusStub())
+    );
+
+    expect(lifecycle).toBeDefined();
+    const viewerControls = host.children.find((child) => child.className.includes('fyra-panoramalite-viewer-controls'));
+    expect(viewerControls).toBeDefined();
+    expect(head.children.some((child) => child.textContent.includes('fyra-panoramalite-viewer-controls'))).toBe(true);
+
+    lifecycle?.destroy?.();
+
+    expect(host.children.find((child) => child.className.includes('fyra-panoramalite-viewer-controls'))).toBeUndefined();
   });
 });

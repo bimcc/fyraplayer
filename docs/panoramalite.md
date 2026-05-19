@@ -96,6 +96,7 @@ const player = new FyraPlayer({
       media: 'video',
       projection: 'equirectangular',
       interactive: true,
+      viewerControls: true,
       initialView: { yaw: 0, pitch: 0, fov: 80 },
       powerPreference: 'high-performance',
     }),
@@ -112,6 +113,7 @@ export interface PanoramaLitePluginOptions {
   image?: string | HTMLImageElement | ImageBitmap;
   projection?: 'equirectangular';
   interactive?: boolean;
+  viewerControls?: boolean | PanoramaLiteViewerControlsOptions;
   initialView?: Partial<PanoramaLiteView>;
   limits?: Partial<PanoramaLiteViewLimits>;
   pixelRatio?: number | 'auto';
@@ -127,6 +129,17 @@ export interface PanoramaLitePluginOptions {
   className?: string;
   onReady?: (handle: PanoramaLiteHandle) => void;
   onError?: (error: unknown) => void;
+}
+
+export interface PanoramaLiteViewerControlsOptions {
+  enabled?: boolean;
+  playback?: boolean;
+  seek?: boolean;
+  loop?: boolean;
+  volume?: boolean;
+  fullscreen?: boolean;
+  resetView?: boolean;
+  className?: string;
 }
 
 export interface PanoramaLiteView {
@@ -160,6 +173,8 @@ Defaults:
 - `media: 'video'`;
 - `projection: 'equirectangular'`;
 - `interactive: true`;
+- `viewerControls: undefined`, meaning no built-in viewer overlay unless
+  explicitly enabled;
 - `initialView: { yaw: 0, pitch: 0, roll: 0, fov: 80 }`;
 - `limits: { minPitch: -85, maxPitch: 85, minFov: 35, maxFov: 110 }`;
 - `pixelRatio: 'auto'`;
@@ -167,7 +182,7 @@ Defaults:
 - `maxCanvasPixels: undefined`;
 - `maxVideoFps: undefined`;
 - `powerPreference: 'high-performance'`;
-- `textureFlipX: false`;
+- `textureFlipX: true` for video sources, `false` for image sources;
 - `textureFlipY: false` for video sources, `true` for image sources;
 - `preserveDrawingBuffer: false`;
 - `hideSourceVideo: true`.
@@ -190,6 +205,7 @@ src/plugins/panoramalite/
     math.ts
   input/
     controls.ts
+  viewerControls.ts
   media/
     imageLoader.ts
 ```
@@ -258,6 +274,11 @@ Controls:
 - single-touch drag changes yaw/pitch;
 - wheel zoom changes fov;
 - pinch zoom changes fov;
+- optional `viewerControls` adds an in-view bottom control bar for fullscreen
+  and headset-style usage. It can expose play/pause, seek for finite media,
+  loop, mute/volume, reset view, and fullscreen;
+- live streams without finite duration show live status and hide seek/loop;
+- image sources hide video-only controls and keep reset/fullscreen controls;
 - double click/tap reset can be considered after MVP if it does not conflict
   with the host UI.
 
@@ -265,9 +286,9 @@ Rules:
 
 - clamp pitch and fov through `PanoramaLiteViewLimits`;
 - wrap yaw continuously;
-- avoid text overlays and controls inside the renderer itself;
-- expose view state through the handle so product UI can own buttons, presets,
-  mini-maps, or PTZ-like controls later.
+- keep `viewerControls` opt-in so products can still own their full UI shell;
+- expose view state through the handle so product UI can own presets, mini-maps,
+  or PTZ-like controls later.
 
 ## 8. Lifecycle
 
@@ -344,12 +365,17 @@ Orientation and calibration:
 - WebGL upload keeps `UNPACK_FLIP_Y_WEBGL` disabled by default, so image/video
   orientation is controlled in shader texture coordinates instead of hidden
   upload state;
+- video sources default to `textureFlipX: true` so a video panorama matches the
+  ordinary `HTMLVideoElement` left/right orientation. The sphere mesh uses
+  reversed U coordinates for inside-sphere viewing, so the video path needs this
+  default compensation;
 - image sources default to `textureFlipY: true`, while video sources default to
   `textureFlipY: false`. The generated canvas/image fixture and browser video
   textures land with different practical Y orientation in the current renderer,
   so a single shared default would make one side appear upside down;
-- if a camera or encoder outputs inverted equirectangular frames, confirm it
-  with the grid first, then set `textureFlipY: true` at integration level.
+- if a camera or encoder outputs inverted or mirrored equirectangular frames,
+  confirm it with the grid first, then override `textureFlipX` or
+  `textureFlipY` at integration level.
 
 Performance interpretation:
 
@@ -383,6 +409,7 @@ Performance interpretation:
 | PLITE-008 | done | Add example/demo preset | `examples/panoramalite.html` can load image/video/HLS/DASH/WebRTC sources and exposes a smoke API |
 | PLITE-009 | done for smoke scope | Add browser verification records | Matrix documents image, file/video, HLS VOD, live HLS, and live WebRTC smoke evidence; long-run/resource-leak evidence can be tracked separately |
 | PLITE-010 | doing | Add orientation/performance hardening | Default demo calibration grid exists; image/video Y defaults are separated; non-degrading scheduling/upload/layout/context optimizations are implemented; default-quality live WebRTC/HLS smoke evidence is pending |
+| PLITE-011 | doing | Add in-view viewer controls | Optional viewer control bar exists for play/pause, seek, loop, mute/volume, reset view, and fullscreen; browser/manual fullscreen evidence remains pending |
 
 ## 12. Review Log
 
@@ -493,6 +520,41 @@ Performance interpretation:
   - `cmd /c pnpm smoke:panoramalite -- --scenario image --duration 2s --out .fyra-long-run\panoramalite-grid-image-orientation-default-quality-edge.json --fail-on-error`: passed.
   - `cmd /c pnpm smoke:panoramalite -- --port 4201 --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 12s --out .fyra-long-run\panoramalite-hls-live-default-quality-edge.json --fail-on-error`: passed.
   - `cmd /c pnpm smoke:panoramalite -- --port 4202 --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 10s --out .fyra-long-run\panoramalite-webrtc-live-default-quality-edge.json --fail-on-error`: passed.
+
+### 2026-05-20 Viewer Controls And X Orientation Pass
+
+- Changed the video-source `textureFlipX` default to `true` so PanoramaLite
+  video matches ordinary FyraPlayer/video-element left/right orientation without
+  requiring users to click Flip X in the demo.
+- Kept image-source `textureFlipX` default at `false`; image vertical
+  correction remains `textureFlipY: true`.
+- Added optional `viewerControls`, disabled by default for SDK purity and
+  enabled in the demo. The overlay supports play/pause, seek for finite video,
+  loop, mute/volume, reset view, and fullscreen; it hides seek/loop for live
+  streams and hides video-only controls for images.
+- Refined the default overlay style to a lightweight bottom floating control
+  cluster with transparent container chrome, so it does not cover the panorama
+  with a full-width control bar. Live mode keeps the cluster compact by hiding
+  seek, loop, the live label, and the volume slider while retaining play/pause,
+  mute/unmute, reset, and fullscreen.
+- Routed the viewer control play/pause buttons through the FyraPlayer
+  `PlayerAPI` instead of calling the raw `HTMLVideoElement` directly, so the
+  overlay stays aligned with player state, middleware, and future reconnect
+  behavior.
+- Exported `PanoramaLiteViewerControlsOptions` from both PanoramaLite and
+  aggregate plugin entry points for external TypeScript integrations.
+- Remaining viewer-control hardening:
+  - keyboard/focus polish;
+  - VR/WebXR presentation integration;
+  - mobile safe-area polish;
+  - branded icon replacement if product UI wants icon-only controls.
+- Validation:
+  - `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+  - `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed,
+    11 tests.
+  - `cmd /c pnpm smoke:panoramalite -- --port 4224 --scenario image --duration 3s --out .fyra-long-run\panoramalite-viewer-controls-image-edge-20260520-retry.json --fail-on-error`: passed after one concurrent automation timeout.
+  - `cmd /c pnpm smoke:panoramalite -- --port 4221 --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 12s --out .fyra-long-run\panoramalite-hls-video-x-default-edge-20260520.json --fail-on-error`: passed.
+  - `cmd /c pnpm smoke:panoramalite -- --port 4225 --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 10s --out .fyra-long-run\panoramalite-webrtc-video-x-default-edge-20260520-retry.json --fail-on-error`: passed after one CDP-only timeout.
 
 ## 13. Advanced Plugin Boundary
 

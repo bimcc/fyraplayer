@@ -1791,6 +1791,39 @@ Validation:
 
 ---
 
+### 2026-05-20 PanoramaLite Viewer Controls And Orientation Pass
+
+Summary:
+
+- Changed the video-source `textureFlipX` default to `true` so PanoramaLite
+  video matches the ordinary FyraPlayer/video-element left/right orientation.
+  This fixes the observed need to click Flip X manually for live/video sources.
+- Kept image-source `textureFlipX` default `false`; image-source vertical
+  orientation remains `textureFlipY: true`.
+- Added optional `viewerControls`, disabled by default for SDK purity and
+  enabled in the PanoramaLite demo. The overlay provides in-view play/pause,
+  seek for finite media, loop, mute/volume, reset view, and fullscreen controls.
+- Refined the overlay style to a lightweight bottom floating control cluster
+  instead of a full-width dark bar, reducing panorama occlusion. Live mode hides
+  seek, loop, the live label, and the volume slider while retaining essential
+  buttons.
+- Routed viewer-control play/pause through the FyraPlayer `PlayerAPI`, and
+  exported `PanoramaLiteViewerControlsOptions` from public plugin entry points.
+- Viewer controls are intentionally a lightweight plugin-level affordance for
+  fullscreen/headset-style usage; richer branded controls, WebXR presentation,
+  keyboard/focus polish, and mobile safe-area polish remain follow-up work.
+
+Validation:
+
+- `cmd /c pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `cmd /c pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed, 11
+  tests.
+- `cmd /c pnpm smoke:panoramalite -- --port 4224 --scenario image --duration 3s --out .fyra-long-run\panoramalite-viewer-controls-image-edge-20260520-retry.json --fail-on-error`: passed after one concurrent automation timeout.
+- `cmd /c pnpm smoke:panoramalite -- --port 4221 --scenario hls --source-url http://127.0.0.1:28888/live/test/index.m3u8 --duration 12s --out .fyra-long-run\panoramalite-hls-video-x-default-edge-20260520.json --fail-on-error`: passed.
+- `cmd /c pnpm smoke:panoramalite -- --port 4225 --scenario webrtc --source-url http://127.0.0.1:28889/live/test/whep --duration 10s --out .fyra-long-run\panoramalite-webrtc-video-x-default-edge-20260520-retry.json --fail-on-error`: passed after one CDP-only timeout.
+
+---
+
 ## 9. How To Update This Document
 
 When work is done:

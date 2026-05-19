@@ -11,6 +11,7 @@ import { DEFAULT_PANORAMA_VIEW, mergeLimits, normalizeView } from './renderer/ca
 import { PanoramaLiteRenderer } from './renderer/PanoramaLiteRenderer.js';
 import { loadPanoramaImage } from './media/imageLoader.js';
 import { createPanoramaLiteControls, type PanoramaLiteControls } from './input/controls.js';
+import { createPanoramaLiteViewerControls, type PanoramaLiteViewerControls } from './viewerControls.js';
 
 type VideoFrameRequestCallback = (now: number, metadata: unknown) => void;
 type VideoWithFrameCallback = HTMLVideoElement & {
@@ -63,6 +64,7 @@ class PanoramaLiteInstance {
   private readonly host: HTMLElement;
   private readonly renderer: PanoramaLiteRenderer;
   private controls: PanoramaLiteControls | null = null;
+  private viewerControls: PanoramaLiteViewerControls | null = null;
   private view: PanoramaLiteView;
   private video: VideoWithFrameCallback | null = null;
   private readonly minVideoFrameIntervalMs: number;
@@ -125,7 +127,7 @@ class PanoramaLiteInstance {
         maxPixelRatio: options.maxPixelRatio ?? 1.5,
         maxCanvasPixels: options.maxCanvasPixels,
         powerPreference: options.powerPreference,
-        textureFlipX: options.textureFlipX ?? false,
+        textureFlipX: resolveTextureFlipX(options, options.media ?? 'video'),
         textureFlipY: resolveTextureFlipY(options, options.media ?? 'video'),
         preserveDrawingBuffer: !!options.preserveDrawingBuffer,
         onContextLost: () => emitQos(this.coreBus, 'PANORAMALITE_CONTEXT_LOST', 'warning', 'PanoramaLite WebGL context lost'),
@@ -145,6 +147,17 @@ class PanoramaLiteInstance {
       getView: () => this.view,
       setView: (view) => this.setView(view),
       enabled: options.interactive !== false,
+    });
+    this.viewerControls = createPanoramaLiteViewerControls({
+      host: this.host,
+      video: player.getVideoElement(),
+      media: options.media ?? 'video',
+      options: options.viewerControls,
+      play: () => this.player.play(),
+      pause: () => this.player.pause(),
+      resetView: () => this.handle.resetView(),
+      resize: () => this.resize(),
+      onError: (error) => this.handleError(error, 'PANORAMALITE_RENDER_ERROR'),
     });
 
     player.on('ready', this.onReady);
@@ -179,9 +192,10 @@ class PanoramaLiteInstance {
       video.crossOrigin = this.options.crossOrigin;
     }
     this.renderer.setTextureTransform({
-      textureFlipX: this.options.textureFlipX ?? false,
+      textureFlipX: resolveTextureFlipX(this.options, 'video'),
       textureFlipY: resolveTextureFlipY(this.options, 'video'),
     });
+    this.viewerControls?.bindVideo(video, 'video');
     this.renderer.setTextureSource(video);
     this.attachVideoFrameEvents(video);
     if (this.options.hideSourceVideo !== false) {
@@ -206,9 +220,10 @@ class PanoramaLiteInstance {
     this.video = null;
     this.videoFrameDirty = false;
     this.renderer.setTextureTransform({
-      textureFlipX: this.options.textureFlipX ?? false,
+      textureFlipX: resolveTextureFlipX(this.options, 'image'),
       textureFlipY: resolveTextureFlipY(this.options, 'image'),
     });
+    this.viewerControls?.setMedia('image');
     this.renderer.setTextureSource(loaded);
     this.scheduleRender();
   }
@@ -236,6 +251,8 @@ class PanoramaLiteInstance {
     this.detachVideoFrameEvents();
     this.controls?.destroy();
     this.controls = null;
+    this.viewerControls?.destroy();
+    this.viewerControls = null;
     this.renderer.destroy();
     this.restoreVideoStyle();
     this.canvas.remove();
@@ -413,6 +430,11 @@ function resolveVideoFrameIntervalMs(maxVideoFps: number | undefined): number {
     return 0;
   }
   return 1000 / Math.min(120, Math.max(1, maxVideoFps));
+}
+
+function resolveTextureFlipX(options: PanoramaLitePluginOptions, media: 'video' | 'image'): boolean {
+  if (typeof options.textureFlipX === 'boolean') return options.textureFlipX;
+  return media === 'video';
 }
 
 function resolveTextureFlipY(options: PanoramaLitePluginOptions, media: 'video' | 'image'): boolean {

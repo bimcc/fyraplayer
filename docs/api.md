@@ -1041,6 +1041,7 @@ const player = new FyraPlayer({
       media: 'video',
       projection: 'equirectangular',
       interactive: true,
+      viewerControls: true,
       initialView: { yaw: 0, pitch: 0, fov: 80 },
       maxPixelRatio: 1.5,
       powerPreference: 'high-performance'
@@ -1069,6 +1070,7 @@ interface PanoramaLitePluginOptions {
   image?: string | HTMLImageElement | ImageBitmap
   projection?: 'equirectangular'
   interactive?: boolean
+  viewerControls?: boolean | PanoramaLiteViewerControlsOptions
   initialView?: Partial<PanoramaLiteView>
   limits?: Partial<PanoramaLiteViewLimits>
   pixelRatio?: number | 'auto'
@@ -1084,6 +1086,17 @@ interface PanoramaLitePluginOptions {
   className?: string
   onReady?: (handle: PanoramaLiteHandle) => void
   onError?: (error: unknown) => void
+}
+
+interface PanoramaLiteViewerControlsOptions {
+  enabled?: boolean
+  playback?: boolean
+  seek?: boolean
+  loop?: boolean
+  volume?: boolean
+  fullscreen?: boolean
+  resetView?: boolean
+  className?: string
 }
 ```
 
@@ -1102,11 +1115,22 @@ WebGL context. `maxVideoFps`, `maxCanvasPixels`, and lower `maxPixelRatio`
 values are explicit fallback knobs for constrained devices or dense
 multi-view dashboards.
 
-`textureFlipX` and `textureFlipY` are source-orientation corrections. Images
-default to `textureFlipY: true`; videos default to `textureFlipY: false`. Use
-the generated demo grid to confirm upside-down or mirrored streams before
-overriding them. Browser pixel evidence for image, file/video, HLS, live HLS,
-and live WebRTC is tracked in `docs/panoramalite.md`.
+`viewerControls` is optional and disabled by default. Enable it when the
+panorama canvas needs its own fullscreen-friendly controls for play/pause, seek
+on finite media, loop, mute/volume, reset view, and fullscreen. The default
+style is a lightweight bottom floating control cluster, not a full-width bar;
+live streams hide seek, loop, the live label, and the volume slider to reduce
+picture occlusion. The built-in play/pause buttons call FyraPlayer's
+`PlayerAPI`, so application middleware and state transitions remain the single
+playback authority.
+
+`textureFlipX` and `textureFlipY` are source-orientation corrections. Videos
+default to `textureFlipX: true` and `textureFlipY: false` so the panorama view
+matches ordinary video-element left/right orientation. Images default to
+`textureFlipX: false` and `textureFlipY: true`. Use the generated demo grid to
+confirm upside-down or mirrored streams before overriding them. Browser pixel
+evidence for image, file/video, HLS, live HLS, and live WebRTC is tracked in
+`docs/panoramalite.md`.
 
 ## Storage And Reconnect Plugins
 

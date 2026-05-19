@@ -15,6 +15,6 @@ export type {
   PanoramaLiteQosCode,
   PanoramaLiteQosPayload,
   PanoramaLiteView,
+  PanoramaLiteViewerControlsOptions,
   PanoramaLiteViewLimits,
 } from './types.js';
-

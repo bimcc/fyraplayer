@@ -21,6 +21,7 @@ export interface PanoramaLitePluginOptions {
   image?: string | HTMLImageElement | ImageBitmap;
   projection?: PanoramaLiteProjection;
   interactive?: boolean;
+  viewerControls?: boolean | PanoramaLiteViewerControlsOptions;
   initialView?: Partial<PanoramaLiteView>;
   limits?: Partial<PanoramaLiteViewLimits>;
   pixelRatio?: number | 'auto';
@@ -36,6 +37,17 @@ export interface PanoramaLitePluginOptions {
   className?: string;
   onReady?: (handle: PanoramaLiteHandle) => void;
   onError?: (error: unknown) => void;
+}
+
+export interface PanoramaLiteViewerControlsOptions {
+  enabled?: boolean;
+  playback?: boolean;
+  seek?: boolean;
+  loop?: boolean;
+  volume?: boolean;
+  fullscreen?: boolean;
+  resetView?: boolean;
+  className?: string;
 }
 
 export interface PanoramaLiteHandle {

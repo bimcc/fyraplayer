@@ -158,8 +158,9 @@ function toSource(kind: SourceKind, url: string): Source {
 }
 
 function syncOrientationDefaults(): void {
-  flipXInput.checked = false;
-  flipYInput.checked = (kindSelect.value as SourceKind) === 'image';
+  const sourceKind = kindSelect.value as SourceKind;
+  flipXInput.checked = sourceKind !== 'image';
+  flipYInput.checked = sourceKind === 'image';
 }
 
 function startStatusLoop(): void {
@@ -236,6 +237,7 @@ async function loadCurrent(): Promise<void> {
       crossOrigin: 'anonymous',
       powerPreference: 'high-performance',
       preserveDrawingBuffer: smokeMode,
+      viewerControls: true,
       textureFlipX: flipXInput.checked,
       textureFlipY: flipYInput.checked,
       onReady: (nextHandle) => {

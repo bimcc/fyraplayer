@@ -56,6 +56,7 @@ export {
   type PanoramaLiteQosCode,
   type PanoramaLiteQosPayload,
   type PanoramaLiteView,
+  type PanoramaLiteViewerControlsOptions,
   type PanoramaLiteViewLimits,
   type SphereMeshOptions,
 } from './panoramalite.js';
