@@ -4,7 +4,12 @@ All notable changes to FyraPlayer will be recorded here.
 
 ## Unreleased
 
-- No changes yet.
+- Upgraded playback and build/test dependencies: `hls.js` to `^1.6.16`,
+  `dashjs` to `^5.1.1`, `vite` to `^8.0.13`, `esbuild` to `^0.28.0`,
+  `jest` to `^30.4.2`, `ts-jest` to `^29.4.10`, `@types/jest` to
+  `^30.0.0`, `typescript` to `^5.9.3`, and `fast-check` to `^4.8.0`.
+- Added pnpm build approval for `unrs-resolver`, which is pulled in by the
+  Jest 30 resolver stack.
 
 ## 1.0.0 - 2026-05-19
 

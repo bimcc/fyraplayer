@@ -2000,6 +2000,34 @@ Validation:
 
 ---
 
+### 2026-05-20 Dependency Version Iteration
+
+Summary:
+
+- Upgraded core playback libraries to the latest compatible patch baseline:
+  `hls.js` `^1.6.16` and `dashjs` `^5.1.1`.
+- Upgraded the current build/test toolchain:
+  `vite` `^8.0.13`, `esbuild` `^0.28.0`, `jest` `^30.4.2`,
+  `ts-jest` `^29.4.10`, `@types/jest` `^30.0.0`, `typescript` `^5.9.3`,
+  `fast-check` `^4.8.0`, and `@types/node` `^20.19.41`.
+- Added `unrs-resolver` to `pnpm-workspace.yaml` `allowBuilds` because Jest 30
+  pulls it through the resolver stack.
+- Vue was not upgraded or introduced because FyraPlayer currently has no Vue
+  runtime/build dependency.
+- `mp4box` remains on `^0.5.4` in this pass. Its 2.x upgrade should be handled
+  as a separate compatibility pass for the WebCodecs/fMP4 path.
+- `mpegts.js` remains on `^1.8.0`; dependency installation can still need
+  access to the upstream `xqq/webworkify-webpack` GitHub tarball, so replacing
+  or vendoring that path is a separate supply-chain hardening task.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest --runInBand`: passed, 27 suites / 145 tests.
+- `pnpm bundle:examples`: passed.
+
+---
+
 ## 9. How To Update This Document
 
 When work is done:

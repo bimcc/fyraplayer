@@ -65,8 +65,8 @@ FyraPlayer `1.0.0` 定位为可控场景下的商业基线 SDK：核心播放、
 
 | 库 | 版本 | 用途 |
 |----|------|------|
-| `hls.js` | ^1.6.15 | HLS/LL-HLS 流播放 |
-| `dashjs` | ^5.1.0 | DASH 流播放 |
+| `hls.js` | ^1.6.16 | HLS/LL-HLS 流播放 |
+| `dashjs` | ^5.1.1 | DASH 流播放 |
 | `mpegts.js` | ^1.8.0 | TS/FLV 容器解析 + MSE 播放 |
 | `mp4box` | ^0.5.4 | MP4 容器解析（WebCodecs 路径） |
 
