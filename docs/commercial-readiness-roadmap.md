@@ -1962,6 +1962,44 @@ Validation:
 
 ---
 
+### 2026-05-20 Source Metadata Trigger For PanoramaLite
+
+Summary:
+
+- Promoted panorama activation from demo-local `panorama: true` to a formal
+  source metadata contract:
+  - `source.presentation.mode = 'panorama'`;
+  - optional `source.presentation.projection = 'equirectangular'`;
+  - optional `source.presentation.renderer = 'panoramalite'`;
+  - optional `source.presentation.textureFlipX/Y`;
+  - optional `source.tags` / `source.meta.presentation` for upstream platform
+    API shapes.
+- Added public helpers `getSourcePresentation()` and `isPanoramaSource()` so
+  apps can turn a video-source platform tag into UI mode activation without
+  parsing URL names or waiting for frame-level metadata.
+- Updated the main demo and `examples/sources.js` to use the formal
+  presentation metadata for public panorama HLS presets while still accepting
+  older demo-only `panorama: true` as an inference path.
+- Updated source resolver middleware so `auto` sources keep presentation
+  metadata after being converted into concrete fallback sources.
+
+Validation:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm exec jest tests/source-presentation.test.ts tests/source-resolver.test.ts --runInBand`: passed.
+- `pnpm exec jest tests/source-presentation.test.ts tests/source-resolver.test.ts tests/panoramalite.test.ts --runInBand`: passed, 24 tests.
+- `pnpm check:sources`: passed, 18 example sources.
+- `pnpm check:public-api`: passed.
+- `pnpm bundle:examples`: passed.
+- `pnpm check:release`: passed, 27 suites / 145 tests plus public API,
+  exports, source contract, and IIFE bundle.
+- Playwright on `http://127.0.0.1:4247/basic.html`: Naver `[全景]`
+  preset exposed `presentation.mode = 'panorama'` and `tags: ['panorama']`
+  through `player.getCurrentSource()`, checked the panorama toggle, enabled
+  the PanoramaLite handle/canvas, and hid the ordinary UI shell.
+
+---
+
 ## 9. How To Update This Document
 
 When work is done:

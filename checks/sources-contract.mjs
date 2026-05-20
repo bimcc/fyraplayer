@@ -3,11 +3,33 @@ import sources from '../examples/sources.js';
 const validTypes = new Set(['webrtc', 'hls', 'dash', 'fmp4', 'ws-raw', 'file', 'gb28181']);
 const validTransports = new Set(['flv', 'ts', 'annexb']);
 const validCodecs = new Set(['h264', 'h265']);
+const validPresentationModes = new Set(['normal', 'panorama']);
+const validProjectionModes = new Set(['equirectangular']);
 
 const failures = [];
 
 function fail(index, message) {
   failures.push(`source[${index}]: ${message}`);
+}
+
+function validatePresentation(index, presentation, path = 'presentation') {
+  if (presentation === undefined) return;
+  if (!presentation || typeof presentation !== 'object' || Array.isArray(presentation)) {
+    fail(index, `${path} must be an object`);
+    return;
+  }
+  if (presentation.mode !== undefined && !validPresentationModes.has(presentation.mode)) {
+    fail(index, `${path}.mode must be normal or panorama`);
+  }
+  if (presentation.projection !== undefined && !validProjectionModes.has(presentation.projection)) {
+    fail(index, `${path}.projection must be equirectangular`);
+  }
+  if (presentation.textureFlipX !== undefined && typeof presentation.textureFlipX !== 'boolean') {
+    fail(index, `${path}.textureFlipX must be boolean`);
+  }
+  if (presentation.textureFlipY !== undefined && typeof presentation.textureFlipY !== 'boolean') {
+    fail(index, `${path}.textureFlipY must be boolean`);
+  }
 }
 
 sources.forEach((source, index) => {
@@ -43,6 +65,15 @@ sources.forEach((source, index) => {
 
   if (source.type === 'file' && source.url.startsWith('blob:') && !source.container) {
     fail(index, 'blob file sources must specify container');
+  }
+
+  validatePresentation(index, source.presentation);
+  validatePresentation(index, source.meta?.presentation, 'meta.presentation');
+  if (source.tags !== undefined && (!Array.isArray(source.tags) || source.tags.some((tag) => typeof tag !== 'string'))) {
+    fail(index, 'tags must be a string array');
+  }
+  if (source.meta?.tags !== undefined && (!Array.isArray(source.meta.tags) || source.meta.tags.some((tag) => typeof tag !== 'string'))) {
+    fail(index, 'meta.tags must be a string array');
   }
 });
 

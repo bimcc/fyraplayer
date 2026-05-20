@@ -188,6 +188,16 @@ function prioritizeSources(sources: Source[], preferTech?: TechName): Source[] {
   return [...preferred, ...rest];
 }
 
+function inheritAutoSourceMetadata(source: Source, autoSource: AutoSource): Source {
+  return {
+    ...source,
+    ...(source.presentation || !autoSource.presentation ? undefined : { presentation: autoSource.presentation }),
+    ...(source.meta || !autoSource.meta ? undefined : { meta: autoSource.meta }),
+    ...(source.tags || !autoSource.tags ? undefined : { tags: autoSource.tags }),
+    ...(source.request || !autoSource.request ? undefined : { request: autoSource.request })
+  };
+}
+
 export function engineUrlsToResolvedSources(
   urls: EngineUrls,
   options: EngineUrlsToSourcesOptions = {}
@@ -234,8 +244,8 @@ export function createSourceResolverMiddleware(options: SourceResolverMiddleware
         const sourceFallbacks = source.fallbacks ?? [];
         return {
           resolvedSources: {
-            primary: resolved.primary,
-            fallbacks: [...resolved.fallbacks, ...sourceFallbacks]
+            primary: inheritAutoSourceMetadata(resolved.primary, source),
+            fallbacks: [...resolved.fallbacks.map((fallback) => inheritAutoSourceMetadata(fallback, source)), ...sourceFallbacks]
           }
         };
       } catch (err) {

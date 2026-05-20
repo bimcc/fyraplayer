@@ -18,9 +18,9 @@ export default [
   { type: 'dash', url: 'https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd', preferTech: 'dash' },
   
   // === 全景视频测试流 (360°) ===
-  { label: 'Panorama HLS - Naver equirect', type: 'hls', url: 'https://naver.github.io/egjs-view360/pano/equirect/m3u8/equi.m3u8', preferTech: 'hls', panorama: true },
-  { label: 'Panorama HLS - Radiant Lac de Bimont', type: 'hls', url: 'https://cdn.radiantmediatechs.com/rmp/media/samples-for-rmp-site/04052024-lac-de-bimont/hls/playlist.m3u8', preferTech: 'hls', panorama: true },
-  { label: 'Panorama HLS - Electroteque Ultra Light Flight', type: 'hls', url: 'https://videos.electroteque.org/360/hls/ultra_light_flight.m3u8', preferTech: 'hls', panorama: true },
+  { label: 'Panorama HLS - Naver equirect', type: 'hls', url: 'https://naver.github.io/egjs-view360/pano/equirect/m3u8/equi.m3u8', preferTech: 'hls', presentation: { mode: 'panorama', projection: 'equirectangular', renderer: 'panoramalite' }, tags: ['panorama'] },
+  { label: 'Panorama HLS - Radiant Lac de Bimont', type: 'hls', url: 'https://cdn.radiantmediatechs.com/rmp/media/samples-for-rmp-site/04052024-lac-de-bimont/hls/playlist.m3u8', preferTech: 'hls', presentation: { mode: 'panorama', projection: 'equirectangular', renderer: 'panoramalite' }, tags: ['panorama'] },
+  { label: 'Panorama HLS - Electroteque Ultra Light Flight', type: 'hls', url: 'https://videos.electroteque.org/360/hls/ultra_light_flight.m3u8', preferTech: 'hls', presentation: { mode: 'panorama', projection: 'equirectangular', renderer: 'panoramalite' }, tags: ['panorama'] },
   
   // === MP4 文件 ===
   { type: 'file', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4' },

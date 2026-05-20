@@ -1,4 +1,10 @@
 ﻿import { FyraPlayer } from "../src/index.js";
+import {
+  getSourcePresentation,
+  isPanoramaSource,
+  type SourcePresentationConfig,
+  type SourceMetadata
+} from "../src/index.js";
 import defaultSources from "./sources.js";
 import { createUiComponentsPlugin } from "../src/ui/index.js";
 import { createPanoramaLitePlugin, type PanoramaLiteHandle } from "../src/plugins/panoramalite.js";
@@ -19,6 +25,9 @@ type SimpleSource = {
     isLive?: boolean;
   };
   webCodecs?: { enable?: boolean; preferMp4?: boolean; allowH265?: boolean };
+  presentation?: SourcePresentationConfig;
+  tags?: string[];
+  meta?: SourceMetadata;
   panorama?: boolean;
   textureFlipX?: boolean;
   textureFlipY?: boolean;
@@ -129,7 +138,7 @@ function sourceKey(source: SimpleSource): string {
     source.type,
     source.url,
     source.lowLatency === true ? "ll" : "normal",
-    source.panorama ? "pano" : "ordinary"
+    isPanoramaSource(source as any) ? "pano" : "ordinary"
   ].join("|");
 }
 
@@ -143,8 +152,33 @@ function pushPresetSource(source: SimpleSource): void {
 }
 
 function formatSourceLabel(source: SimpleSource): string {
-  if (!source.panorama) return source.label;
+  if (!isPanoramaSource(source as any)) return source.label;
   return source.label.startsWith("[全景]") ? source.label : `[全景] ${source.label}`;
+}
+
+function resolvePresentation(source: SimpleSource): SourcePresentationConfig | undefined {
+  return getSourcePresentation(source as any);
+}
+
+function resolveTextureFlip(source: SimpleSource): { textureFlipX: boolean; textureFlipY: boolean } {
+  const presentation = resolvePresentation(source);
+  return {
+    textureFlipX: typeof source.textureFlipX === "boolean" ? source.textureFlipX : !!presentation?.textureFlipX,
+    textureFlipY: typeof source.textureFlipY === "boolean" ? source.textureFlipY : !!presentation?.textureFlipY
+  };
+}
+
+function sourceBaseFields(src: SimpleSource): {
+  presentation?: SourcePresentationConfig;
+  tags?: string[];
+  meta?: SourceMetadata;
+} {
+  const presentation = resolvePresentation(src);
+  return {
+    ...(presentation ? { presentation } : undefined),
+    ...(src.tags ? { tags: src.tags } : undefined),
+    ...(src.meta ? { meta: src.meta } : undefined)
+  };
 }
 
 defaultSources?.forEach((s: any, idx: number) => {
@@ -153,6 +187,9 @@ defaultSources?.forEach((s: any, idx: number) => {
     type: s.type,
     url: s.url,
     lowLatency: (s as any).lowLatency,
+    presentation: (s as any).presentation,
+    tags: (s as any).tags,
+    meta: (s as any).meta,
     panorama: !!(s as any).panorama,
     textureFlipX: (s as any).textureFlipX,
     textureFlipY: (s as any).textureFlipY,
@@ -209,9 +246,10 @@ function syncUiWithSource(src: SimpleSource) {
   if (lowLatencyToggle && typeof src.lowLatency === "boolean") {
     lowLatencyToggle.checked = src.lowLatency;
   }
-  if (panoramaFlipXToggle) panoramaFlipXToggle.checked = !!src.textureFlipX;
-  if (panoramaFlipYToggle) panoramaFlipYToggle.checked = !!src.textureFlipY;
-  setPanoramaMode(!!src.panorama, { updateCurrentSource: false });
+  const texture = resolveTextureFlip(src);
+  if (panoramaFlipXToggle) panoramaFlipXToggle.checked = texture.textureFlipX;
+  if (panoramaFlipYToggle) panoramaFlipYToggle.checked = texture.textureFlipY;
+  setPanoramaMode(isPanoramaSource(src as any), { updateCurrentSource: false });
 }
 
 function setBusy(flag: string | false, message?: string) {
@@ -295,7 +333,8 @@ function collectLongRunSample() {
           type: currentSrc.type,
           url: currentSrc.url,
           lowLatency: currentSrc.lowLatency,
-          panorama: currentSrc.panorama
+          panorama: isPanoramaSource(currentSrc as any),
+          presentation: resolvePresentation(currentSrc)
         }
       : null,
     tech: qualityState?.tech || null,
@@ -388,10 +427,19 @@ function getPanoramaTextureSettings(): { textureFlipX: boolean; textureFlipY: bo
 
 function updateCurrentPanoramaSource(enabled = panoramaMode): SimpleSource | null {
   if (!currentSrc) return null;
+  const previousPresentation = resolvePresentation(currentSrc) || {};
+  const texture = getPanoramaTextureSettings();
   currentSrc = {
     ...currentSrc,
     panorama: enabled,
-    ...getPanoramaTextureSettings()
+    presentation: {
+      ...previousPresentation,
+      mode: enabled ? "panorama" : "normal",
+      projection: previousPresentation.projection || "equirectangular",
+      renderer: previousPresentation.renderer || "panoramalite",
+      ...texture
+    },
+    ...texture
   };
   return currentSrc;
 }
@@ -487,8 +535,9 @@ function syncGbFieldsFromInvite(): { deviceId?: string; channelId?: string } {
 
 function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
-  if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, preferTech: "hls" as const };
-  if (pick === "dash") return { type: "dash" as const, url: src.url, preferTech: "dash" as const };
+  const base = sourceBaseFields(src);
+  if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, ...base, preferTech: "hls" as const };
+  if (pick === "dash") return { type: "dash" as const, url: src.url, ...base, preferTech: "dash" as const };
   if (pick === "fmp4") {
     const fmp4 = src.fmp4 || {};
     const videoCodecString = fmp4.videoCodecString
@@ -513,10 +562,11 @@ function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
       videoCodecString,
       audioCodecString,
       isLive: fmp4.isLive ?? true,
+      ...base,
       preferTech: "fmp4" as const
     };
   }
-  if (pick === "ws-raw") return { type: "ws-raw" as const, url: src.url, codec: "h264" as const, transport: "flv" as const, preferTech: "ws-raw" as const };
+  if (pick === "ws-raw") return { type: "ws-raw" as const, url: src.url, codec: "h264" as const, transport: "flv" as const, ...base, preferTech: "ws-raw" as const };
   if (pick === "gb28181") {
     const gb = src.gb || {};
     const invite = gb.invite || "";
@@ -548,18 +598,20 @@ function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
         streamMode: gb.streamMode || undefined
       },
       responseMapping,
+      ...base,
       format: gb.format || "flv"
     };
   }
   if (pick === "webrtc-oven" || pick === "webrtc") {
     // WebRTC source - tech-webrtc 会自动检测 wss:// URL 并使用 oven-ws 信令
     // 对于 http(s):// URL，会自动使用 WHEP 信令
-    return { type: "webrtc" as const, url: src.url, preferTech: "webrtc" as const };
+    return { type: "webrtc" as const, url: src.url, ...base, preferTech: "webrtc" as const };
   }
   // File source - include container hint for blob URLs
   return { 
     type: "file" as const, 
     url: src.url, 
+    ...base,
     preferTech: "file" as const, 
     webCodecs: src.webCodecs,
     container: (src as any).container as 'ts' | 'mp4' | undefined
@@ -626,13 +678,22 @@ async function createPlayer(source: SimpleSource) {
     await previous.destroy().catch(() => {});
   }
   const effectiveSource = applyLowLatencyToggle(source);
-  const sourcePanoramaMode = !!effectiveSource.panorama || !!panoramaToggle?.checked;
+  const sourcePanoramaMode = isPanoramaSource(effectiveSource as any) || !!panoramaToggle?.checked;
   panoramaMode = sourcePanoramaMode;
   if (panoramaToggle) panoramaToggle.checked = sourcePanoramaMode;
   if (currentSrc === source || currentSrc?.url === source.url) {
+    const previousPresentation = resolvePresentation(source) || {};
     currentSrc = {
       ...source,
       panorama: sourcePanoramaMode,
+      presentation: {
+        ...previousPresentation,
+        mode: sourcePanoramaMode ? "panorama" : "normal",
+        projection: previousPresentation.projection || "equirectangular",
+        renderer: previousPresentation.renderer || "panoramalite",
+        textureFlipX: !!panoramaFlipXToggle?.checked,
+        textureFlipY: !!panoramaFlipYToggle?.checked
+      },
       textureFlipX: !!panoramaFlipXToggle?.checked,
       textureFlipY: !!panoramaFlipYToggle?.checked
     };
@@ -644,8 +705,9 @@ async function createPlayer(source: SimpleSource) {
   setNativeControlVisibility();
   const lowerUrl = effectiveSource.url.toLowerCase();
   const wcEnable = !!effectiveSource.webCodecs?.enable || (effectiveSource.type === "file" && lowerUrl.endsWith(".ts"));
-  activePanoramaTextureFlipX = !!effectiveSource.textureFlipX || !!panoramaFlipXToggle?.checked;
-  activePanoramaTextureFlipY = !!effectiveSource.textureFlipY || !!panoramaFlipYToggle?.checked;
+  const sourceTexture = resolveTextureFlip(effectiveSource);
+  activePanoramaTextureFlipX = sourceTexture.textureFlipX || !!panoramaFlipXToggle?.checked;
+  activePanoramaTextureFlipY = sourceTexture.textureFlipY || !!panoramaFlipYToggle?.checked;
   const plugins = [
     ...(useSkin
       ? [
@@ -758,6 +820,12 @@ loadBtn.onclick = () => {
       type,
       url,
       panorama: !!panoramaToggle?.checked,
+      presentation: {
+        mode: panoramaToggle?.checked ? "panorama" : "normal",
+        projection: "equirectangular",
+        renderer: "panoramalite",
+        ...getPanoramaTextureSettings()
+      },
       ...getPanoramaTextureSettings()
     };
     if (type === "gb28181") {
@@ -838,6 +906,12 @@ fileInput.onchange = () => {
       url: blobUrl,
       container,
       panorama: !!panoramaToggle?.checked,
+      presentation: {
+        mode: panoramaToggle?.checked ? "panorama" : "normal",
+        projection: "equirectangular",
+        renderer: "panoramalite",
+        ...getPanoramaTextureSettings()
+      },
       ...getPanoramaTextureSettings(),
       webCodecs: undefined // TS blob files use mpegts.js, not WebCodecs
     };

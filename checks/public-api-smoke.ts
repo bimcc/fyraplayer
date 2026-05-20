@@ -18,9 +18,13 @@ import {
   type PluginCtor,
   type Gb28181Source,
   type Source,
+  type SourceMetadata,
+  type SourcePresentationConfig,
   type Tech,
   type WebRTCSource,
   type WSRawSource,
+  getSourcePresentation,
+  isPanoramaSource,
   BaseTarget,
   CanvasFrameBuffer,
 } from 'fyraplayer';
@@ -259,6 +263,26 @@ player.currentTime.toFixed();
 player.getVideoElement().paused.valueOf();
 player.getSources().map((source) => source.type);
 player.getCurrentSource()?.type;
+const presentationSource: Source = {
+  type: 'hls',
+  url: 'https://example.com/live360.m3u8',
+  presentation: {
+    mode: 'panorama',
+    projection: 'equirectangular',
+    renderer: 'panoramalite',
+    textureFlipX: false,
+    textureFlipY: false,
+  },
+  tags: ['panorama'],
+};
+const presentationConfig: SourcePresentationConfig | undefined = getSourcePresentation(presentationSource);
+presentationConfig?.mode?.toString();
+isPanoramaSource(presentationSource).valueOf();
+const platformMeta: SourceMetadata = {
+  tags: ['inspection'],
+  presentation: { mode: 'normal' },
+};
+platformMeta.tags?.map((tag) => tag.toString());
 const qualityState: QualityState = player.getQualityState();
 const qualityLevels: QualityLevel[] = qualityState.levels;
 qualityState.tech?.toString();

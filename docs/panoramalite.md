@@ -107,6 +107,28 @@ const player = new FyraPlayer({
 Runtime mode guidance:
 
 - installing the plugin and entering panorama mode are separate decisions;
+- source platforms can request panorama mode through the stable source metadata
+  contract:
+
+  ```ts
+  {
+    type: 'hls',
+    url: 'https://example.com/live360.m3u8',
+    presentation: {
+      mode: 'panorama',
+      projection: 'equirectangular',
+      renderer: 'panoramalite',
+      textureFlipX: false,
+      textureFlipY: false
+    },
+    tags: ['panorama']
+  }
+  ```
+
+  Products should use `isPanoramaSource(source)` and
+  `getSourcePresentation(source)` to decide whether to enable PanoramaLite and
+  which source-specific orientation knobs to apply. `source.meta.presentation`
+  is accepted for upstream platform API shapes that nest metadata;
 - if `panoramalite` is installed when the player is created, it can bind the
   current `HTMLVideoElement`, so the current resource can be shown in panorama
   mode without changing Tech or reloading media. Use `enabled: false` to start
@@ -120,6 +142,10 @@ Runtime mode guidance:
   driven. A settings panel may show installed plugins and expose safe runtime
   options, but it should not let end users arbitrarily load heavy or privileged
   plugins from the UI.
+- frame-level KLV/SEI/container metadata should not be the first trigger for
+  the initial UI mode. It arrives after source selection and differs by
+  protocol; use source-platform metadata for startup, then use frame metadata
+  only for domain overlays or later calibration.
 
 Demo guidance:
 
@@ -459,6 +485,7 @@ Performance interpretation:
 | PLITE-011 | doing | Add in-view viewer controls | Optional viewer control bar exists for play/pause, seek, loop, mute/volume, reset view, and fullscreen; browser/manual fullscreen evidence remains pending |
 | PLITE-012 | pending | Add explicit gyro / VR mode boundary | Default screen mode remains yaw/pitch/fov with stable horizon; future gyro mode should handle DeviceOrientation permission/calibration/smoothing; future headset VR should be a separate WebXR-oriented plugin |
 | PLITE-013 | done | Merge ordinary and PanoramaLite product demo flow | Main demo has one source list, `[全景]` source prefixes, a runtime PanoramaLite switch, dynamic ordinary UI / viewer-control replacement, plugin status, and browser structural evidence |
+| PLITE-014 | done | Standardize source presentation metadata | `Source` includes `presentation`, `meta.presentation`, and `tags`; `isPanoramaSource()` / `getSourcePresentation()` provide the app/plugin decision helper; demo sources use the formal metadata instead of demo-only `panorama: true`; auto-source resolver preserves presentation metadata |
 
 ## 12. Review Log
 
@@ -725,6 +752,44 @@ Performance interpretation:
     source options, PanoramaLite auto-enable for Naver HLS, hidden normal UI
     in panorama mode, one PanoramaLite canvas, `handle.isEnabled() === true`,
     and ordinary UI restoration after disabling panorama mode.
+
+### 2026-05-20 Source Presentation Metadata Contract
+
+- Added formal source-level presentation metadata:
+  `source.presentation`, `source.meta.presentation`, and `source.tags`.
+- Added public helpers `getSourcePresentation()` and `isPanoramaSource()` so
+  product integrations can trigger PanoramaLite from a video-source platform
+  response instead of hard-coding URL lists or relying on frame metadata.
+- Updated `examples/sources.js` to mark public panorama HLS samples with:
+
+  ```ts
+  presentation: {
+    mode: 'panorama',
+    projection: 'equirectangular',
+    renderer: 'panoramalite'
+  },
+  tags: ['panorama']
+  ```
+
+- Kept the older demo-only `panorama: true` path as a compatibility inference
+  inside the helper/demo, but new platform integrations should use
+  `presentation`.
+- Updated source resolver middleware so an `auto` source returned by a video
+  platform keeps its presentation metadata after conversion into concrete
+  HLS/DASH/WebRTC fallback sources.
+- Validation:
+  - `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed;
+  - `pnpm exec jest tests/source-presentation.test.ts tests/source-resolver.test.ts --runInBand`: passed;
+  - `pnpm exec jest tests/source-presentation.test.ts tests/source-resolver.test.ts tests/panoramalite.test.ts --runInBand`: passed, 24 tests;
+  - `pnpm check:sources`: passed, 18 example sources;
+  - `pnpm check:public-api`: passed;
+  - `pnpm bundle:examples`: passed;
+  - `pnpm check:release`: passed, 27 suites / 145 tests plus public API,
+    exports, source contract, and IIFE bundle;
+  - Playwright on `http://127.0.0.1:4247/basic.html` confirmed the Naver
+    `[全景]` preset carries `presentation.mode = 'panorama'` and
+    `tags: ['panorama']`, auto-enables PanoramaLite, hides the ordinary UI
+    shell, and renders the PanoramaLite canvas.
 
 ## 13. Advanced Plugin Boundary
 

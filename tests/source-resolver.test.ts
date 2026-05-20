@@ -101,6 +101,52 @@ describe('source resolver middleware', () => {
     expect(result.resolvedSources?.fallbacks.map((source) => source.type)).toEqual(['webrtc', 'dash']);
   });
 
+  test('preserves auto-source presentation metadata on resolved sources', async () => {
+    const engineName = 'fixture-source-resolver-presentation';
+    registerFixtureEngine(engineName, {
+      hlsUrl: 'https://media.example/live360.m3u8',
+      dashUrl: 'https://media.example/live360.mpd',
+      fallbackChain: ['hls', 'dash']
+    });
+    const manager = new MiddlewareManager();
+    manager.use(createSourceResolverMiddleware());
+
+    const result = await manager.run(
+      'resolve',
+      makeResolveCtx({
+        type: 'auto',
+        url: 'rtsp://media.example/app/live360',
+        engine: engineName,
+        presentation: {
+          mode: 'panorama',
+          projection: 'equirectangular',
+          renderer: 'panoramalite'
+        },
+        tags: ['panorama']
+      })
+    );
+
+    expect(result.resolvedSources?.primary).toMatchObject({
+      type: 'hls',
+      url: 'https://media.example/live360.m3u8',
+      presentation: {
+        mode: 'panorama',
+        projection: 'equirectangular',
+        renderer: 'panoramalite'
+      },
+      tags: ['panorama']
+    });
+    expect(result.resolvedSources?.fallbacks[0]).toMatchObject({
+      type: 'dash',
+      presentation: {
+        mode: 'panorama',
+        projection: 'equirectangular',
+        renderer: 'panoramalite'
+      },
+      tags: ['panorama']
+    });
+  });
+
   test('supports default engine, custom protocol order, engine config, and explicit source fallbacks', async () => {
     const engineName = 'fixture-source-resolver-default';
     const seenConfigs: Array<EngineConfig | undefined> = [];

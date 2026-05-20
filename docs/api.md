@@ -243,6 +243,29 @@ type Source =
   | FileSource 
   | AutoSource
 
+interface SourcePresentationConfig {
+  mode?: 'normal' | 'panorama'
+  projection?: 'equirectangular' | string
+  renderer?: 'panoramalite' | string
+  textureFlipX?: boolean
+  textureFlipY?: boolean
+  [key: string]: unknown
+}
+
+interface SourceMetadata {
+  tags?: string[]
+  presentation?: SourcePresentationConfig
+  [key: string]: unknown
+}
+
+interface BaseSourceFields {
+  fallbacks?: Source[]
+  request?: SourceRequestConfig
+  presentation?: SourcePresentationConfig
+  tags?: string[]
+  meta?: SourceMetadata
+}
+
 // WebRTC 源
 interface WebRTCSource {
   type: 'webrtc'
@@ -1101,6 +1124,38 @@ interface PanoramaLiteViewerControlsOptions {
 }
 ```
 
+`presentation` is source-platform metadata for product surfaces, not a playback
+Tech selector. Use it when a catalog/stream API knows that a source should open
+in panorama mode:
+
+```ts
+import { getSourcePresentation, isPanoramaSource } from 'fyraplayer';
+
+const source: Source = {
+  type: 'hls',
+  url: 'https://example.com/live360.m3u8',
+  presentation: {
+    mode: 'panorama',
+    projection: 'equirectangular',
+    renderer: 'panoramalite',
+    textureFlipX: false,
+    textureFlipY: false
+  },
+  tags: ['panorama']
+};
+
+if (isPanoramaSource(source)) {
+  const presentation = getSourcePresentation(source);
+  // install/enable PanoramaLite and apply presentation texture options
+}
+```
+
+`source.presentation` is the recommended direct contract. `source.meta.presentation`
+and platform tags such as `panorama`, `360`, or `equirectangular` are also
+recognized by `getSourcePresentation()` for integrations that mirror an upstream
+API response shape. Source resolver middleware preserves this metadata when an
+`auto` source is converted into concrete HLS/DASH/WebRTC fallback sources.
+
 `PanoramaLiteHandle` exposes `setEnabled()`, `isEnabled()`, `setView()`,
 `getView()`, `resetView()`, `bindVideo()`, `setImage()`, `setInteractive()`,
 `resize()`, and `destroy()`.
@@ -1117,6 +1172,15 @@ stream. Use `enabled: false` to start in ordinary video mode, then call
 If the plugin is not installed on that player instance, the current public API
 does not support hot plugin installation; use deployment-level plugin
 configuration or recreate the player with the plugin enabled.
+
+For catalog/platform-driven playback, prefer source-level presentation metadata:
+`source.presentation.mode = 'panorama'` plus
+`projection: 'equirectangular'`. The main demo reads this metadata through
+`isPanoramaSource()` / `getSourcePresentation()` and automatically switches the
+visible player surface from the ordinary UI shell to PanoramaLite viewer
+controls. Frame-level SEI/KLV or container metadata can still be parsed by
+domain plugins, but it should not be the primary trigger for initial panorama
+mode because it arrives after source selection and differs by protocol.
 
 The default interaction model is screen-oriented. Pointer/touch controls change
 yaw/pitch and wheel/pinch changes fov; they do not change roll/Z-axis rotation,

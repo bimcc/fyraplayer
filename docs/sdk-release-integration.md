@@ -18,6 +18,10 @@ Supported example assets for 1.0 are intentionally small:
   sources share one selector, and the visible controls switch between the UI
   shell and PanoramaLite viewer controls at runtime.
 - `examples/sources.js`: the checked source preset manifest used by the demo.
+  Panorama-capable sources should use the stable source metadata contract:
+  `presentation.mode = 'panorama'`, `projection = 'equirectangular'`, and
+  optional `tags: ['panorama']`; the main demo uses
+  `isPanoramaSource()` / `getSourcePresentation()` to activate PanoramaLite.
 - `examples/minimal-iife.html`: the no-build browser/IIFE integration smoke.
 - `examples/panoramalite.html`: the focused PanoramaLite WebGL2 renderer demo
   and browser smoke target for orientation, pixels, and WebGL lifecycle checks.

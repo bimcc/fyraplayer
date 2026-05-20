@@ -63,12 +63,49 @@ export interface MetadataDetectedEvent {
 // Source Types
 // ============================================================================
 
+export type SourcePresentationMode = 'normal' | 'panorama';
+export type SourceProjection = 'equirectangular' | (string & {});
+
+export interface SourcePresentationConfig {
+  /**
+   * Presentation mode requested by the source platform.
+   * `panorama` means product UI may switch to a panorama renderer such as PanoramaLite.
+   */
+  mode?: SourcePresentationMode;
+  /** Projection used by panorama-capable renderers. */
+  projection?: SourceProjection;
+  /** Optional preferred renderer/plugin hint, e.g. `panoramalite`. */
+  renderer?: 'panoramalite' | (string & {});
+  /** Source-specific texture orientation correction for panorama renderers. */
+  textureFlipX?: boolean;
+  /** Source-specific texture orientation correction for panorama renderers. */
+  textureFlipY?: boolean;
+  [key: string]: unknown;
+}
+
+export interface SourceMetadata {
+  /** Platform/business tags, e.g. `panorama`, `360`, `drone`, `inspection`. */
+  tags?: string[];
+  /** Nested presentation metadata from a source platform response. */
+  presentation?: SourcePresentationConfig;
+  [key: string]: unknown;
+}
+
 /** Base source fields shared by all source types */
 interface BaseSourceFields {
   /** Fallback sources to try if this source fails */
   fallbacks?: Source[];
   /** Optional request configuration applied by Techs that perform fetch/XHR signaling or media requests. */
   request?: SourceRequestConfig;
+  /**
+   * Playback presentation metadata. This is not a Tech selector; apps/plugins
+   * use it to choose surfaces such as ordinary video or panorama rendering.
+   */
+  presentation?: SourcePresentationConfig;
+  /** Flat platform tags for app/plugin decisions. */
+  tags?: string[];
+  /** Structured platform metadata. Use `meta.presentation` when mirroring upstream API shapes. */
+  meta?: SourceMetadata;
 }
 
 export interface SourceRequestConfig {
@@ -244,6 +281,48 @@ export type CustomSource = keyof CustomSourceMap extends never
         preferTech?: TechName;
       };
 export type Source = BuiltinSource | CustomSource;
+
+const PANORAMA_SOURCE_TAGS = new Set(['panorama', '360', '360-video', 'equirect', 'equirectangular']);
+
+function getSourceTags(source: Source): string[] {
+  return [...(source.tags ?? []), ...(source.meta?.tags ?? [])]
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function hasPanoramaTag(source: Source): boolean {
+  return getSourceTags(source).some((tag) => PANORAMA_SOURCE_TAGS.has(tag));
+}
+
+function legacyPanoramaPresentation(source: Source): SourcePresentationConfig | undefined {
+  const legacy = source as Source & {
+    panorama?: boolean;
+    textureFlipX?: boolean;
+    textureFlipY?: boolean;
+  };
+  if (!legacy.panorama && !hasPanoramaTag(source)) return undefined;
+  return {
+    mode: 'panorama',
+    projection: 'equirectangular',
+    ...(typeof legacy.textureFlipX === 'boolean' ? { textureFlipX: legacy.textureFlipX } : undefined),
+    ...(typeof legacy.textureFlipY === 'boolean' ? { textureFlipY: legacy.textureFlipY } : undefined)
+  };
+}
+
+export function getSourcePresentation(source: Source | null | undefined): SourcePresentationConfig | undefined {
+  if (!source) return undefined;
+  const presentation = source.presentation ?? source.meta?.presentation;
+  const inferredMode = hasPanoramaTag(source) ? 'panorama' : undefined;
+  if (presentation) {
+    const mode = presentation.mode ?? inferredMode;
+    return mode ? { ...presentation, mode } : presentation;
+  }
+  return legacyPanoramaPresentation(source);
+}
+
+export function isPanoramaSource(source: Source | null | undefined): boolean {
+  return getSourcePresentation(source)?.mode === 'panorama';
+}
 
 // Type guards for Source discriminated union
 export function isWebRTCSource(s: Source): s is WebRTCSource {

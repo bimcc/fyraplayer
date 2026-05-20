@@ -13018,6 +13018,40 @@ var require_mp4box_all = __commonJS({
   }
 });
 
+// src/types.ts
+var PANORAMA_SOURCE_TAGS = /* @__PURE__ */ new Set(["panorama", "360", "360-video", "equirect", "equirectangular"]);
+function getSourceTags(source) {
+  return [...source.tags ?? [], ...source.meta?.tags ?? []].map((tag) => tag.trim().toLowerCase()).filter(Boolean);
+}
+function hasPanoramaTag(source) {
+  return getSourceTags(source).some((tag) => PANORAMA_SOURCE_TAGS.has(tag));
+}
+function legacyPanoramaPresentation(source) {
+  const legacy = source;
+  if (!legacy.panorama && !hasPanoramaTag(source))
+    return void 0;
+  return {
+    mode: "panorama",
+    projection: "equirectangular",
+    ...typeof legacy.textureFlipX === "boolean" ? { textureFlipX: legacy.textureFlipX } : void 0,
+    ...typeof legacy.textureFlipY === "boolean" ? { textureFlipY: legacy.textureFlipY } : void 0
+  };
+}
+function getSourcePresentation(source) {
+  if (!source)
+    return void 0;
+  const presentation = source.presentation ?? source.meta?.presentation;
+  const inferredMode = hasPanoramaTag(source) ? "panorama" : void 0;
+  if (presentation) {
+    const mode = presentation.mode ?? inferredMode;
+    return mode ? { ...presentation, mode } : presentation;
+  }
+  return legacyPanoramaPresentation(source);
+}
+function isPanoramaSource(source) {
+  return getSourcePresentation(source)?.mode === "panorama";
+}
+
 // src/core/eventBus.ts
 var EventBus = class {
   constructor() {
@@ -75607,9 +75641,9 @@ var sources_default = [
   { type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd", preferTech: "dash" },
   { type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd", preferTech: "dash" },
   // === 全景视频测试流 (360°) ===
-  { label: "Panorama HLS - Naver equirect", type: "hls", url: "https://naver.github.io/egjs-view360/pano/equirect/m3u8/equi.m3u8", preferTech: "hls", panorama: true },
-  { label: "Panorama HLS - Radiant Lac de Bimont", type: "hls", url: "https://cdn.radiantmediatechs.com/rmp/media/samples-for-rmp-site/04052024-lac-de-bimont/hls/playlist.m3u8", preferTech: "hls", panorama: true },
-  { label: "Panorama HLS - Electroteque Ultra Light Flight", type: "hls", url: "https://videos.electroteque.org/360/hls/ultra_light_flight.m3u8", preferTech: "hls", panorama: true },
+  { label: "Panorama HLS - Naver equirect", type: "hls", url: "https://naver.github.io/egjs-view360/pano/equirect/m3u8/equi.m3u8", preferTech: "hls", presentation: { mode: "panorama", projection: "equirectangular", renderer: "panoramalite" }, tags: ["panorama"] },
+  { label: "Panorama HLS - Radiant Lac de Bimont", type: "hls", url: "https://cdn.radiantmediatechs.com/rmp/media/samples-for-rmp-site/04052024-lac-de-bimont/hls/playlist.m3u8", preferTech: "hls", presentation: { mode: "panorama", projection: "equirectangular", renderer: "panoramalite" }, tags: ["panorama"] },
+  { label: "Panorama HLS - Electroteque Ultra Light Flight", type: "hls", url: "https://videos.electroteque.org/360/hls/ultra_light_flight.m3u8", preferTech: "hls", presentation: { mode: "panorama", projection: "equirectangular", renderer: "panoramalite" }, tags: ["panorama"] },
   // === MP4 文件 ===
   { type: "file", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4" },
   { type: "file", url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_30MB.mp4" },
@@ -77240,7 +77274,7 @@ function sourceKey(source) {
     source.type,
     source.url,
     source.lowLatency === true ? "ll" : "normal",
-    source.panorama ? "pano" : "ordinary"
+    isPanoramaSource(source) ? "pano" : "ordinary"
   ].join("|");
 }
 var knownSourceKeys = new Set(presetSources.map(sourceKey));
@@ -77252,9 +77286,27 @@ function pushPresetSource(source) {
   presetSources.push(source);
 }
 function formatSourceLabel(source) {
-  if (!source.panorama)
+  if (!isPanoramaSource(source))
     return source.label;
   return source.label.startsWith("[\u5168\u666F]") ? source.label : `[\u5168\u666F] ${source.label}`;
+}
+function resolvePresentation(source) {
+  return getSourcePresentation(source);
+}
+function resolveTextureFlip(source) {
+  const presentation = resolvePresentation(source);
+  return {
+    textureFlipX: typeof source.textureFlipX === "boolean" ? source.textureFlipX : !!presentation?.textureFlipX,
+    textureFlipY: typeof source.textureFlipY === "boolean" ? source.textureFlipY : !!presentation?.textureFlipY
+  };
+}
+function sourceBaseFields(src) {
+  const presentation = resolvePresentation(src);
+  return {
+    ...presentation ? { presentation } : void 0,
+    ...src.tags ? { tags: src.tags } : void 0,
+    ...src.meta ? { meta: src.meta } : void 0
+  };
 }
 sources_default?.forEach((s2, idx) => {
   pushPresetSource({
@@ -77262,6 +77314,9 @@ sources_default?.forEach((s2, idx) => {
     type: s2.type,
     url: s2.url,
     lowLatency: s2.lowLatency,
+    presentation: s2.presentation,
+    tags: s2.tags,
+    meta: s2.meta,
     panorama: !!s2.panorama,
     textureFlipX: s2.textureFlipX,
     textureFlipY: s2.textureFlipY,
@@ -77321,11 +77376,12 @@ function syncUiWithSource(src) {
   if (lowLatencyToggle && typeof src.lowLatency === "boolean") {
     lowLatencyToggle.checked = src.lowLatency;
   }
+  const texture = resolveTextureFlip(src);
   if (panoramaFlipXToggle)
-    panoramaFlipXToggle.checked = !!src.textureFlipX;
+    panoramaFlipXToggle.checked = texture.textureFlipX;
   if (panoramaFlipYToggle)
-    panoramaFlipYToggle.checked = !!src.textureFlipY;
-  setPanoramaMode(!!src.panorama, { updateCurrentSource: false });
+    panoramaFlipYToggle.checked = texture.textureFlipY;
+  setPanoramaMode(isPanoramaSource(src), { updateCurrentSource: false });
 }
 function setBusy(flag, message) {
   busy = flag;
@@ -77406,7 +77462,8 @@ function collectLongRunSample() {
       type: currentSrc.type,
       url: currentSrc.url,
       lowLatency: currentSrc.lowLatency,
-      panorama: currentSrc.panorama
+      panorama: isPanoramaSource(currentSrc),
+      presentation: resolvePresentation(currentSrc)
     } : null,
     tech: qualityState?.tech || null,
     quality: qualityState || null,
@@ -77492,10 +77549,19 @@ function getPanoramaTextureSettings() {
 function updateCurrentPanoramaSource(enabled = panoramaMode) {
   if (!currentSrc)
     return null;
+  const previousPresentation = resolvePresentation(currentSrc) || {};
+  const texture = getPanoramaTextureSettings();
   currentSrc = {
     ...currentSrc,
     panorama: enabled,
-    ...getPanoramaTextureSettings()
+    presentation: {
+      ...previousPresentation,
+      mode: enabled ? "panorama" : "normal",
+      projection: previousPresentation.projection || "equirectangular",
+      renderer: previousPresentation.renderer || "panoramalite",
+      ...texture
+    },
+    ...texture
   };
   return currentSrc;
 }
@@ -77577,10 +77643,11 @@ function syncGbFieldsFromInvite() {
 }
 function toPlayerSource(src) {
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
+  const base = sourceBaseFields(src);
   if (pick === "hls")
-    return { type: "hls", url: src.url, lowLatency: src.lowLatency, preferTech: "hls" };
+    return { type: "hls", url: src.url, lowLatency: src.lowLatency, ...base, preferTech: "hls" };
   if (pick === "dash")
-    return { type: "dash", url: src.url, preferTech: "dash" };
+    return { type: "dash", url: src.url, ...base, preferTech: "dash" };
   if (pick === "fmp4") {
     const fmp4 = src.fmp4 || {};
     const videoCodecString = fmp4.videoCodecString || (fmp4.codec === "h265" ? "hvc1.1.6.L93.B0" : fmp4.codec === "av1" ? "av01.0.04M.08" : "avc1.4d401f");
@@ -77595,11 +77662,12 @@ function toPlayerSource(src) {
       videoCodecString,
       audioCodecString,
       isLive: fmp4.isLive ?? true,
+      ...base,
       preferTech: "fmp4"
     };
   }
   if (pick === "ws-raw")
-    return { type: "ws-raw", url: src.url, codec: "h264", transport: "flv", preferTech: "ws-raw" };
+    return { type: "ws-raw", url: src.url, codec: "h264", transport: "flv", ...base, preferTech: "ws-raw" };
   if (pick === "gb28181") {
     const gb = src.gb || {};
     const invite = gb.invite || "";
@@ -77631,15 +77699,17 @@ function toPlayerSource(src) {
         streamMode: gb.streamMode || void 0
       },
       responseMapping,
+      ...base,
       format: gb.format || "flv"
     };
   }
   if (pick === "webrtc-oven" || pick === "webrtc") {
-    return { type: "webrtc", url: src.url, preferTech: "webrtc" };
+    return { type: "webrtc", url: src.url, ...base, preferTech: "webrtc" };
   }
   return {
     type: "file",
     url: src.url,
+    ...base,
     preferTech: "file",
     webCodecs: src.webCodecs,
     container: src.container
@@ -77712,14 +77782,23 @@ async function createPlayer(source) {
     });
   }
   const effectiveSource = applyLowLatencyToggle(source);
-  const sourcePanoramaMode = !!effectiveSource.panorama || !!panoramaToggle?.checked;
+  const sourcePanoramaMode = isPanoramaSource(effectiveSource) || !!panoramaToggle?.checked;
   panoramaMode = sourcePanoramaMode;
   if (panoramaToggle)
     panoramaToggle.checked = sourcePanoramaMode;
   if (currentSrc === source || currentSrc?.url === source.url) {
+    const previousPresentation = resolvePresentation(source) || {};
     currentSrc = {
       ...source,
       panorama: sourcePanoramaMode,
+      presentation: {
+        ...previousPresentation,
+        mode: sourcePanoramaMode ? "panorama" : "normal",
+        projection: previousPresentation.projection || "equirectangular",
+        renderer: previousPresentation.renderer || "panoramalite",
+        textureFlipX: !!panoramaFlipXToggle?.checked,
+        textureFlipY: !!panoramaFlipYToggle?.checked
+      },
       textureFlipX: !!panoramaFlipXToggle?.checked,
       textureFlipY: !!panoramaFlipYToggle?.checked
     };
@@ -77731,8 +77810,9 @@ async function createPlayer(source) {
   setNativeControlVisibility();
   const lowerUrl = effectiveSource.url.toLowerCase();
   const wcEnable = !!effectiveSource.webCodecs?.enable || effectiveSource.type === "file" && lowerUrl.endsWith(".ts");
-  activePanoramaTextureFlipX = !!effectiveSource.textureFlipX || !!panoramaFlipXToggle?.checked;
-  activePanoramaTextureFlipY = !!effectiveSource.textureFlipY || !!panoramaFlipYToggle?.checked;
+  const sourceTexture = resolveTextureFlip(effectiveSource);
+  activePanoramaTextureFlipX = sourceTexture.textureFlipX || !!panoramaFlipXToggle?.checked;
+  activePanoramaTextureFlipY = sourceTexture.textureFlipY || !!panoramaFlipYToggle?.checked;
   const plugins = [
     ...useSkin ? [
       createUiComponentsPlugin({
@@ -77832,6 +77912,12 @@ loadBtn.onclick = () => {
       type,
       url,
       panorama: !!panoramaToggle?.checked,
+      presentation: {
+        mode: panoramaToggle?.checked ? "panorama" : "normal",
+        projection: "equirectangular",
+        renderer: "panoramalite",
+        ...getPanoramaTextureSettings()
+      },
       ...getPanoramaTextureSettings()
     };
     if (type === "gb28181") {
@@ -77909,6 +77995,12 @@ fileInput.onchange = () => {
       url: blobUrl,
       container,
       panorama: !!panoramaToggle?.checked,
+      presentation: {
+        mode: panoramaToggle?.checked ? "panorama" : "normal",
+        projection: "equirectangular",
+        renderer: "panoramalite",
+        ...getPanoramaTextureSettings()
+      },
       ...getPanoramaTextureSettings(),
       webCodecs: void 0
       // TS blob files use mpegts.js, not WebCodecs
