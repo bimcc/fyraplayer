@@ -1,5 +1,7 @@
 import { FyraPlayer } from '../src/player.js';
 import { mockTechInstances, resetMockTechInstances } from './mocks/tech-base.js';
+import { DASHTech } from './mocks/tech-dash.mock.js';
+import type { PluginCtor } from '../src/types.js';
 
 (globalThis as any).window = { localStorage: null };
 
@@ -35,6 +37,13 @@ function createVideoStub(): HTMLVideoElement {
     ...video,
     __listenerCount: (event: string) => listeners.get(event)?.size ?? 0
   } as unknown as HTMLVideoElement;
+}
+
+function createMockDashPlugin(): PluginCtor {
+  return ({ techs }) => {
+    const handle = techs.register('dash', new DASHTech(), { techOrder: 'append' });
+    return { destroy: () => handle.unregister() };
+  };
 }
 
 describe('FyraPlayer P0/P1 regressions', () => {
@@ -447,7 +456,8 @@ describe('FyraPlayer P0/P1 regressions', () => {
         { type: 'hls', url: 'https://origin/live.m3u8' },
         { type: 'dash', url: 'https://origin/vod.mpd' }
       ],
-      techOrder: ['hls', 'dash']
+      techOrder: ['hls', 'dash'],
+      plugins: [createMockDashPlugin()]
     });
 
     const playEvents = jest.fn();
@@ -601,6 +611,7 @@ describe('FyraPlayer P0/P1 regressions', () => {
         { type: 'dash', url: 'https://origin/live.mpd' }
       ],
       techOrder: ['hls', 'dash'],
+      plugins: [createMockDashPlugin()],
       reconnect: { enabled: true, maxRetries: 2, baseDelayMs: 100, maxDelayMs: 100, jitter: 0 }
     });
 

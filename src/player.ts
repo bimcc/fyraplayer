@@ -6,7 +6,6 @@ import { enhanceNetworkEvent, isFatalNetworkEvent, type NetworkEventPayload } fr
 import { enhanceQosEvent, type QosEventPayload } from './core/qosEvents.js';
 import { WebRTCTech } from './techs/tech-webrtc.js';
 import { HLSTech } from './techs/tech-hls.js';
-import { DASHTech } from './techs/tech-dash.js';
 import { FMP4Tech } from './techs/tech-fmp4.js';
 import { WSRawTech } from './techs/tech-ws-raw.js';
 import { FileTech } from './techs/tech-file.js';
@@ -92,7 +91,6 @@ export class FyraPlayer implements PlayerAPI {
     // register built-in techs
     this.techManager.register('webrtc', new WebRTCTech());
     this.techManager.register('hls', new HLSTech());
-    this.techManager.register('dash', new DASHTech());
     this.techManager.register('fmp4', new FMP4Tech());
     this.techManager.register('ws-raw', new WSRawTech());
     this.techManager.register('gb28181', new Gb28181Tech());

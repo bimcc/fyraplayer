@@ -8,6 +8,7 @@
       "fyraplayer": ["./src/index.ts"],
       "fyraplayer/plugins": ["./src/plugins/index.ts"],
       "fyraplayer/plugins/auth": ["./src/plugins/auth.ts"],
+      "fyraplayer/plugins/dash": ["./src/plugins/dash.ts"],
       "fyraplayer/plugins/engines": ["./src/plugins/engines/index.ts"],
       "fyraplayer/plugins/metadata": ["./src/plugins/metadata/index.ts"],
       "fyraplayer/plugins/metrics": ["./src/plugins/metrics.ts"],

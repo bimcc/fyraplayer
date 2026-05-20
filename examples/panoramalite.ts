@@ -1,5 +1,6 @@
 import { FyraPlayer } from '../src/index.js';
 import { createPanoramaLitePlugin, type PanoramaLiteHandle } from '../src/plugins/panoramalite.js';
+import { createDashTechPlugin } from '../src/plugins/dash.js';
 import type { Source } from '../src/types.js';
 
 type SourceKind = 'image' | 'file' | 'hls' | 'dash' | 'webrtc';
@@ -297,6 +298,7 @@ async function loadCurrent(): Promise<void> {
       },
       onError: (error) => appendLog(`panoramalite error: ${error instanceof Error ? error.message : String(error)}`),
     }),
+    createDashTechPlugin(),
   ];
 
   if (mode === 'image') {

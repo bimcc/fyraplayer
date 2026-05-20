@@ -10,6 +10,11 @@ All notable changes to FyraPlayer will be recorded here.
   `^30.0.0`, `typescript` to `^5.9.3`, and `fast-check` to `^4.8.0`.
 - Added pnpm build approval for `unrs-resolver`, which is pulled in by the
   Jest 30 resolver stack.
+- Moved DASH playback behind the optional `fyraplayer/plugins/dash` entry so
+  default consumers do not pull dash.js into Vite/Rolldown builds unless DASH is
+  explicitly enabled.
+- Made MP4Box an optional peer path for the experimental MP4 WebCodecs file
+  pipeline via `webCodecs.mp4boxLoader` or a global `MP4Box`.
 
 ## 1.0.0 - 2026-05-19
 

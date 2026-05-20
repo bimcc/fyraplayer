@@ -505,7 +505,25 @@ HLS/LL-HLS 自适应码率播放：
 DASH 自适应码率播放：
 
 - 基于 dash.js
+- DASH Tech is optional and is not registered by the core `FyraPlayer`
+  constructor. Install `dashjs` and enable `createDashTechPlugin()` when DASH
+  playback is required. This keeps default Vite/Rolldown application builds
+  from parsing dash.js when they only use HLS/WebRTC/file sources.
 - 支持 ABR 自适应码率
+
+```typescript
+import { createDashTechPlugin } from 'fyraplayer/plugins/dash';
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [
+    { type: 'dash', url: '...mpd', preferTech: 'dash' }
+  ],
+  plugins: [createDashTechPlugin()]
+});
+```
+
+Source shape:
 
 ```typescript
 { type: 'dash', url: '...mpd', preferTech: 'dash' }

@@ -20,7 +20,6 @@ export * from './core/defaults.js';
 // Techs (播放技术)
 export * from './techs/tech-webrtc.js';
 export * from './techs/tech-hls.js';
-export * from './techs/tech-dash.js';
 export * from './techs/tech-fmp4.js';
 export * from './techs/tech-ws-raw.js';
 export * from './techs/tech-gb28181.js';

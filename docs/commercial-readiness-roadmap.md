@@ -2020,6 +2020,15 @@ Summary:
   access to the upstream `xqq/webworkify-webpack` GitHub tarball, so replacing
   or vendoring that path is a separate supply-chain hardening task.
 
+Follow-up packaging hardening:
+
+- Moved DASH playback behind `fyraplayer/plugins/dash` so default consumers do
+  not parse dash.js in Vite/Rolldown builds unless DASH is explicitly enabled.
+- Kept `dashjs` as an optional peer dependency for the DASH plugin path.
+- Made MP4Box optional for the experimental MP4 WebCodecs file path through
+  `webCodecs.mp4boxLoader` or a global `MP4Box`; ordinary file playback no
+  longer causes the package source to import `mp4box`.
+
 Validation:
 
 - `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.

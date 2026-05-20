@@ -110,6 +110,7 @@ import {
   type RecordingApiPluginOptions,
   type RecordingApiResponse,
 } from 'fyraplayer/plugins/recording-api';
+import { createDashTechPlugin, type DashTechPluginOptions } from 'fyraplayer/plugins/dash';
 import { Demuxer, type DemuxerCallbacks } from 'fyraplayer/techs/wsRaw/demuxer';
 
 declare module 'fyraplayer' {
@@ -194,6 +195,8 @@ const uiOptions: UiComponentsOptions = {
   },
 };
 createUiComponentsPlugin(uiOptions);
+const dashOptions: DashTechPluginOptions = { techOrder: 'append' };
+createDashTechPlugin(dashOptions);
 
 const resolverOptions: SourceResolverMiddlewareOptions = {
   defaultEngine: 'mediamtx',

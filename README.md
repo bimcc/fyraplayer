@@ -41,7 +41,7 @@ FyraPlayer `1.0.0` 定位为可控场景下的商业基线 SDK：核心播放、
 |------|------|------|--------|
 | `webrtc` | tech-webrtc.ts | WebRTC 低延迟播放 (WHIP/WHEP/Oven-WS) | 原生 WebRTC |
 | `hls` | tech-hls.ts | HLS/LL-HLS 自适应码率播放 (.m3u8) | hls.js |
-| `dash` | tech-dash.ts | DASH 自适应码率播放 (.mpd) | dash.js |
+| `dash` | tech-dash.ts | DASH 自适应码率播放 (.mpd) | dash.js（通过 `fyraplayer/plugins/dash` 显式启用） |
 | `fmp4` | tech-fmp4.ts | fMP4 直播流 (无清单，HTTP/WS + MSE) | 原生 MSE |
 | `ws-raw` | tech-ws-raw.ts | WebSocket + WebCodecs (FLV/TS) | 自研 + mpegts.js |
 | `gb28181` | tech-gb28181.ts | 服务端 GB28181 网关 invite/control + FLV/TS 播放适配 | mpegts.js |
@@ -66,15 +66,27 @@ FyraPlayer `1.0.0` 定位为可控场景下的商业基线 SDK：核心播放、
 | 库 | 版本 | 用途 |
 |----|------|------|
 | `hls.js` | ^1.6.16 | HLS/LL-HLS 流播放 |
-| `dashjs` | ^5.1.1 | DASH 流播放 |
+| `dashjs` | ^5.1.1 | DASH 流播放（optional peer，使用 DASH 插件时安装） |
 | `mpegts.js` | ^1.8.0 | TS/FLV 容器解析 + MSE 播放 |
-| `mp4box` | ^0.5.4 | MP4 容器解析（WebCodecs 路径） |
+| `mp4box` | ^0.5.4 | MP4 容器解析（optional peer，仅 `webCodecs.mp4boxLoader` / 全局 MP4Box 路径需要） |
 
 ## 安装
 
 ```bash
 pnpm install
 pnpm build
+```
+
+DASH is optional to keep default application bundles quiet under Vite/Rolldown:
+
+```typescript
+import { createDashTechPlugin } from 'fyraplayer/plugins/dash';
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'dash', url: 'https://example.com/manifest.mpd', preferTech: 'dash' }],
+  plugins: [createDashTechPlugin()]
+});
 ```
 
 ## 快速开始

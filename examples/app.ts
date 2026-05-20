@@ -8,6 +8,7 @@ import {
 import defaultSources from "./sources.js";
 import { createUiComponentsPlugin } from "../src/ui/index.js";
 import { createPanoramaLitePlugin, type PanoramaLiteHandle } from "../src/plugins/panoramalite.js";
+import { createDashTechPlugin } from "../src/plugins/dash.js";
 
 type SourceType = "auto" | "hls" | "dash" | "fmp4" | "ws-raw" | "file" | "webrtc" | "webrtc-oven" | "gb28181";
 type SimpleSource = {
@@ -737,6 +738,7 @@ async function createPlayer(source: SimpleSource) {
       }
     })
   ];
+  plugins.push(createDashTechPlugin());
   syncPanoramaModeUi();
   player = new FyraPlayer({
     video,

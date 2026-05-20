@@ -8,5 +8,6 @@ export * from './plugins/reconnect.js';
 export * from './plugins/metrics.js';
 export * from './plugins/performance.js';
 export * from './plugins/panoramalite.js';
+export * from './plugins/dash.js';
 export * from './plugins/engines/index.js';
 export * from './plugins/metadata/index.js';

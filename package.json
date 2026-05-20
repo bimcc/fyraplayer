@@ -60,6 +60,10 @@
       "import": "./dist/plugins/auth.js",
       "types": "./dist/plugins/auth.d.ts"
     },
+    "./plugins/dash": {
+      "import": "./dist/plugins/dash.js",
+      "types": "./dist/plugins/dash.d.ts"
+    },
     "./plugins/storage": {
       "import": "./dist/plugins/storage.js",
       "types": "./dist/plugins/storage.d.ts"

@@ -338,7 +338,7 @@ export class FileTech extends AbstractTech {
 
   // MP4 WebCodecs path via MP4Box streaming demux (video only)
   private async loadMp4WithWebCodecs(url: string, video: HTMLVideoElement, codec: string, wcConfig?: WebCodecsConfig): Promise<void> {
-    await this.ensureMp4Box();
+    await this.ensureMp4Box(wcConfig?.mp4boxLoader);
     if (!mp4boxModule) throw new Error('MP4Box not available');
     const moduleLike = mp4boxModule as Mp4BoxModuleLike;
     this.cleanupMp4WebCodecs();
@@ -471,23 +471,22 @@ export class FileTech extends AbstractTech {
     return new Uint8Array(out);
   }
 
-  private async ensureMp4Box(): Promise<void> {
+  private async ensureMp4Box(loader?: () => Promise<unknown> | unknown): Promise<void> {
     if (this.mp4BoxReady && mp4boxModule) return;
-    // Try to import mp4box as ES module first (npm install mp4box)
-    try {
-      mp4boxModule = await import('mp4box');
+
+    if (loader) {
+      mp4boxModule = await loader();
       this.mp4BoxReady = true;
       return;
-    } catch {
-      // mp4box not installed as npm dependency
     }
+
     // Fallback: check if MP4Box is globally available
     if (typeof MP4Box !== 'undefined') {
       mp4boxModule = { createFile: MP4Box.createFile };
       this.mp4BoxReady = true;
       return;
     }
-    throw new Error('MP4Box not available. Please install via: npm install mp4box');
+    throw new Error('MP4Box not available. Provide webCodecs.mp4boxLoader or load MP4Box globally.');
   }
 
   override async seek(time: number): Promise<void> {

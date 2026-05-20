@@ -465,6 +465,12 @@ export interface WebCodecsConfig {
   allowH265?: boolean;
   /** Prefer MP4 WebCodecs path for file sources when available */
   preferMp4?: boolean;
+  /**
+   * Optional MP4Box loader for the experimental MP4 WebCodecs file path.
+   * Keeping this app-provided avoids forcing bundlers to scan mp4box unless
+   * that path is explicitly used.
+   */
+  mp4boxLoader?: () => Promise<unknown> | unknown;
 }
 
 export interface WasmDecoderConfig {
