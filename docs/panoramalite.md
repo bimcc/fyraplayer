@@ -121,6 +121,19 @@ Runtime mode guidance:
   options, but it should not let end users arbitrarily load heavy or privileged
   plugins from the UI.
 
+Demo guidance:
+
+- `examples/basic.html` is now the product-style unified demo. Its source list
+  includes ordinary and `[全景]` sources in one selector. Selecting a panorama
+  source automatically enables PanoramaLite mode; the normal UI shell is hidden
+  and the PanoramaLite in-view controls take over playback/fullscreen actions.
+- `examples/panoramalite.html` remains the focused renderer fixture and smoke
+  automation target. Use it for orientation, canvas pixels, source-specific
+  texture flips, and WebGL lifecycle checks.
+- The main demo installs PanoramaLite with each player instance and starts it
+  in standby for ordinary sources. This keeps runtime ordinary/panorama mode
+  switching available without exposing arbitrary plugin installation in the UI.
+
 Options:
 
 ```ts
@@ -440,11 +453,12 @@ Performance interpretation:
 | PLITE-005 | done | Implement video texture binding | Edge smoke verifies MP4/file, HLS VOD, live HLS, and live WebRTC video texture rendering |
 | PLITE-006 | done | Implement interaction controls | Pointer drag changes view state and browser canvas pixels in smoke evidence |
 | PLITE-007 | doing | Implement lifecycle and context recovery | Destroy/init-failure cleanup is unit-covered; smoke verifies canvas removal after destroy; source switch/context-restored browser evidence remains pending |
-| PLITE-008 | done | Add example/demo preset | `examples/panoramalite.html` can load image/video/HLS/WebRTC presets, keeps custom DASH URLs available through the smoke/API path, includes generated grid/Naver HLS/Radiant HLS/Electroteque HLS/MediaMTX/local-file presets, shows configured/active plugin status, and exposes a smoke API |
+| PLITE-008 | done | Add example/demo preset | `examples/basic.html` is the unified ordinary/panorama product demo; `examples/panoramalite.html` can load image/video/HLS/WebRTC presets, keeps custom DASH URLs available through the smoke/API path, includes generated grid/Naver HLS/Radiant HLS/Electroteque HLS/MediaMTX/local-file presets, shows configured/active plugin status, and exposes a smoke API |
 | PLITE-009 | done for smoke scope | Add browser verification records | Matrix documents image, file/video, HLS VOD, live HLS, and live WebRTC smoke evidence; long-run/resource-leak evidence can be tracked separately |
 | PLITE-010 | doing | Add orientation/performance hardening | Default demo calibration grid exists; image and video sources now use zero-flip defaults, the sphere mesh uses non-mirrored equirectangular U coordinates, non-degrading scheduling/upload/layout/context optimizations are implemented, and default-quality live WebRTC/HLS smoke evidence exists |
 | PLITE-011 | doing | Add in-view viewer controls | Optional viewer control bar exists for play/pause, seek, loop, mute/volume, reset view, and fullscreen; browser/manual fullscreen evidence remains pending |
 | PLITE-012 | pending | Add explicit gyro / VR mode boundary | Default screen mode remains yaw/pitch/fov with stable horizon; future gyro mode should handle DeviceOrientation permission/calibration/smoothing; future headset VR should be a separate WebXR-oriented plugin |
+| PLITE-013 | done | Merge ordinary and PanoramaLite product demo flow | Main demo has one source list, `[全景]` source prefixes, a runtime PanoramaLite switch, dynamic ordinary UI / viewer-control replacement, plugin status, and browser structural evidence |
 
 ## 12. Review Log
 
@@ -678,6 +692,39 @@ Performance interpretation:
   - Playwright check on `http://127.0.0.1:4240/panoramalite.html` confirmed
     the Z-axis locking switch is absent, the status shows
     `roll 0.0`, and pointer drag changed `yaw/pitch` while `rollDelta = 0`.
+
+### 2026-05-20 Unified Product Demo Integration
+
+- Merged the ordinary player demo and PanoramaLite demo behavior into
+  `examples/basic.html` / `examples/app.ts`.
+- The main source selector now shows one combined list. Sources marked
+  `panorama: true` in `examples/sources.js` are displayed with a `[全景]`
+  prefix and automatically enable PanoramaLite mode when selected.
+- The demo installs PanoramaLite on each player instance, keeps it in standby
+  for ordinary sources, and exposes `window.fyraPanorama` for browser/manual
+  diagnostics.
+- Runtime mode switching now replaces the visible control surface: ordinary
+  mode shows the normal UI plugin shell; panorama mode hides that shell and
+  shows PanoramaLite viewer controls. Native video controls are also hidden in
+  panorama mode.
+- Panorama-specific options are shown only while panorama mode is active.
+  `Flip X` / `Flip Y` remain explicit source/integration correction knobs and
+  reload the current player because texture coordinate transforms are renderer
+  construction options.
+- Validation:
+  - `pnpm bundle:examples`: passed;
+  - `pnpm check:sources`: passed, 18 example sources;
+  - `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed;
+  - `pnpm check:public-api`: passed;
+  - `pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed,
+    14 tests;
+  - `git diff --check`: passed;
+  - `pnpm check:release`: passed, 26 suites / 142 tests plus public API,
+    exports, source contract, and IIFE bundle;
+  - Playwright on `http://127.0.0.1:4246/basic.html` confirmed three `[全景]`
+    source options, PanoramaLite auto-enable for Naver HLS, hidden normal UI
+    in panorama mode, one PanoramaLite canvas, `handle.isEnabled() === true`,
+    and ordinary UI restoration after disabling panorama mode.
 
 ## 13. Advanced Plugin Boundary
 

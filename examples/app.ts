@@ -1,6 +1,7 @@
 ﻿import { FyraPlayer } from "../src/index.js";
 import defaultSources from "./sources.js";
 import { createUiComponentsPlugin } from "../src/ui/index.js";
+import { createPanoramaLitePlugin, type PanoramaLiteHandle } from "../src/plugins/panoramalite.js";
 
 type SourceType = "auto" | "hls" | "dash" | "fmp4" | "ws-raw" | "file" | "webrtc" | "webrtc-oven" | "gb28181";
 type SimpleSource = {
@@ -18,6 +19,9 @@ type SimpleSource = {
     isLive?: boolean;
   };
   webCodecs?: { enable?: boolean; preferMp4?: boolean; allowH265?: boolean };
+  panorama?: boolean;
+  textureFlipX?: boolean;
+  textureFlipY?: boolean;
   gb?: {
     invite?: string;
     deviceId?: string;
@@ -50,6 +54,13 @@ const logEl = document.getElementById("log") as HTMLDivElement;
 const skinToggle = document.getElementById("toggle-skin") as HTMLInputElement;
 const nativeToggle = document.getElementById("toggle-native") as HTMLInputElement;
 const lowLatencyToggle = document.getElementById("toggle-low-latency") as HTMLInputElement;
+const panoramaToggle = document.getElementById("toggle-panorama") as HTMLInputElement | null;
+const panoramaOptions = document.getElementById("panorama-options") as HTMLDivElement | null;
+const panoramaFlipXToggle = document.getElementById("toggle-panorama-flip-x") as HTMLInputElement | null;
+const panoramaFlipYToggle = document.getElementById("toggle-panorama-flip-y") as HTMLInputElement | null;
+const panoramaResetBtn = document.getElementById("btn-panorama-reset") as HTMLButtonElement | null;
+const panoramaStatus = document.getElementById("panorama-status") as HTMLDivElement | null;
+const pluginStatus = document.getElementById("plugin-status") as HTMLDivElement | null;
 const overlay = document.getElementById("overlay") as HTMLDivElement | null;
 const overlayText = document.getElementById("overlay-text") as HTMLDivElement | null;
 const gbInviteInput = document.getElementById("gb-invite") as HTMLInputElement | null;
@@ -68,6 +79,10 @@ let busy: string | false = false;
 let operationQueue: Promise<void> = Promise.resolve();
 let uiStatus: "idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "error" | "buffering" = "idle";
 let currentSrc: SimpleSource | null = null;
+let panoramaHandle: PanoramaLiteHandle | null = null;
+let panoramaMode = false;
+let activePanoramaTextureFlipX = false;
+let activePanoramaTextureFlipY = false;
 let useSkin = true;
 let hideNativeControls = false;
 let latestStatsEvent: any = null;
@@ -109,12 +124,38 @@ const presetSources: SimpleSource[] = [
   { label: "FLV demo (ws-raw)", type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv" }
 ];
 
+function sourceKey(source: SimpleSource): string {
+  return [
+    source.type,
+    source.url,
+    source.lowLatency === true ? "ll" : "normal",
+    source.panorama ? "pano" : "ordinary"
+  ].join("|");
+}
+
+const knownSourceKeys = new Set(presetSources.map(sourceKey));
+
+function pushPresetSource(source: SimpleSource): void {
+  const key = sourceKey(source);
+  if (knownSourceKeys.has(key)) return;
+  knownSourceKeys.add(key);
+  presetSources.push(source);
+}
+
+function formatSourceLabel(source: SimpleSource): string {
+  if (!source.panorama) return source.label;
+  return source.label.startsWith("[全景]") ? source.label : `[全景] ${source.label}`;
+}
+
 defaultSources?.forEach((s: any, idx: number) => {
-  presetSources.push({
+  pushPresetSource({
     label: s.label || `Default ${idx} - ${s.type}`,
     type: s.type,
     url: s.url,
     lowLatency: (s as any).lowLatency,
+    panorama: !!(s as any).panorama,
+    textureFlipX: (s as any).textureFlipX,
+    textureFlipY: (s as any).textureFlipY,
     fmp4: s.type === "fmp4"
       ? {
           transport: (s as any).transport,
@@ -139,7 +180,7 @@ function populateSelect() {
   presetSources.forEach((s, idx) => {
     const opt = document.createElement("option");
     opt.value = String(idx);
-    opt.textContent = s.label;
+    opt.textContent = formatSourceLabel(s);
     select.appendChild(opt);
   });
   select.value = CUSTOM_VALUE;
@@ -168,13 +209,16 @@ function syncUiWithSource(src: SimpleSource) {
   if (lowLatencyToggle && typeof src.lowLatency === "boolean") {
     lowLatencyToggle.checked = src.lowLatency;
   }
+  if (panoramaFlipXToggle) panoramaFlipXToggle.checked = !!src.textureFlipX;
+  if (panoramaFlipYToggle) panoramaFlipYToggle.checked = !!src.textureFlipY;
+  setPanoramaMode(!!src.panorama, { updateCurrentSource: false });
 }
 
 function setBusy(flag: string | false, message?: string) {
   busy = flag;
-  // When skin is enabled, the UI shell has its own spinner, so hide the demo overlay
+  // Normal skin has its own spinner; PanoramaLite mode hides the skin and uses this overlay.
   if (overlay && overlayText) {
-    if (flag && !useSkin) {
+    if (flag && (!useSkin || panoramaMode)) {
       overlay.classList.add("visible");
       overlayText.textContent = message || `${flag}...`;
     } else {
@@ -189,6 +233,10 @@ function setBusy(flag: string | false, message?: string) {
   select.disabled = disabled;
   typeSelect.disabled = disabled;
   urlInput.disabled = disabled;
+  if (panoramaToggle) panoramaToggle.disabled = disabled;
+  if (panoramaFlipXToggle) panoramaFlipXToggle.disabled = disabled || !panoramaMode;
+  if (panoramaFlipYToggle) panoramaFlipYToggle.disabled = disabled || !panoramaMode;
+  if (panoramaResetBtn) panoramaResetBtn.disabled = disabled || !panoramaMode;
 }
 
 function setStatus(status: typeof uiStatus, message?: string) {
@@ -241,7 +289,15 @@ function collectLongRunSample() {
     ts: new Date().toISOString(),
     elapsedSec: longRunStartedAt ? Math.round((Date.now() - longRunStartedAt) / 1000) : 0,
     state: player?.getState?.() || uiStatus,
-    source: currentSrc ? { label: currentSrc.label, type: currentSrc.type, url: currentSrc.url, lowLatency: currentSrc.lowLatency } : null,
+    source: currentSrc
+      ? {
+          label: currentSrc.label,
+          type: currentSrc.type,
+          url: currentSrc.url,
+          lowLatency: currentSrc.lowLatency,
+          panorama: currentSrc.panorama
+        }
+      : null,
     tech: qualityState?.tech || null,
     quality: qualityState || null,
     video: {
@@ -258,7 +314,8 @@ function collectLongRunSample() {
     dom: {
       video: document.querySelectorAll("video").length,
       audio: document.querySelectorAll("audio").length,
-      uiShell: document.querySelectorAll("fyra-ui-shell").length
+      uiShell: document.querySelectorAll("fyra-ui-shell").length,
+      panoramaCanvas: document.querySelectorAll(".fyra-panoramalite").length
     },
     memory: memory
       ? {
@@ -312,6 +369,73 @@ function applyLowLatencyToggle(src: SimpleSource): SimpleSource {
   if (pick !== "hls") return src;
   if (src.lowLatency === lowLatencyToggle.checked) return src;
   return { ...src, lowLatency: lowLatencyToggle.checked };
+}
+
+function getPlayerHost(): HTMLElement | null {
+  return document.querySelector(".player-shell") as HTMLElement | null;
+}
+
+function setNativeControlVisibility(): void {
+  video.controls = !hideNativeControls && !useSkin && !panoramaMode;
+}
+
+function getPanoramaTextureSettings(): { textureFlipX: boolean; textureFlipY: boolean } {
+  return {
+    textureFlipX: !!panoramaFlipXToggle?.checked,
+    textureFlipY: !!panoramaFlipYToggle?.checked
+  };
+}
+
+function updateCurrentPanoramaSource(enabled = panoramaMode): SimpleSource | null {
+  if (!currentSrc) return null;
+  currentSrc = {
+    ...currentSrc,
+    panorama: enabled,
+    ...getPanoramaTextureSettings()
+  };
+  return currentSrc;
+}
+
+function syncPanoramaModeUi(): void {
+  const host = getPlayerHost();
+  host?.classList.toggle("panorama-mode", panoramaMode);
+  if (panoramaOptions) panoramaOptions.hidden = !panoramaMode;
+  if (panoramaStatus) {
+    const flipLabel = `flipX=${activePanoramaTextureFlipX ? "on" : "off"} / flipY=${activePanoramaTextureFlipY ? "on" : "off"}`;
+    const rendererState = panoramaHandle ? (panoramaHandle.isEnabled() ? "active" : "standby") : "not-ready";
+    panoramaStatus.textContent = panoramaMode
+      ? `PanoramaLite: ${rendererState} / ${flipLabel}`
+      : `PanoramaLite: standby / ${flipLabel}`;
+  }
+  if (pluginStatus) {
+    pluginStatus.textContent = `plugins: ui=${useSkin ? "on" : "off"} | panoramalite=${panoramaHandle ? (panoramaMode ? "on" : "standby") : "not-ready"}`;
+  }
+  setNativeControlVisibility();
+  if (busy) setBusy(busy);
+}
+
+function setPanoramaMode(
+  enabled: boolean,
+  options: { updateCurrentSource?: boolean; reloadIfTextureChanged?: boolean } = {}
+): void {
+  const next = !!enabled;
+  const texture = getPanoramaTextureSettings();
+  panoramaMode = next;
+  if (panoramaToggle) panoramaToggle.checked = next;
+  if (options.updateCurrentSource !== false) {
+    updateCurrentPanoramaSource(next);
+  }
+  const textureChanged = next && (
+    texture.textureFlipX !== activePanoramaTextureFlipX ||
+    texture.textureFlipY !== activePanoramaTextureFlipY
+  );
+  if (options.reloadIfTextureChanged && textureChanged && currentSrc) {
+    void safeRun("load", () => createPlayer(updateCurrentPanoramaSource(next) as SimpleSource));
+    syncPanoramaModeUi();
+    return;
+  }
+  panoramaHandle?.setEnabled(next);
+  syncPanoramaModeUi();
 }
 
 function parseGbInviteUrl(inviteUrl: string): {
@@ -448,6 +572,7 @@ function detectType(url: string): Exclude<SourceType, "auto"> {
   if (lower.endsWith(".mpd")) return "dash";
   if (lower.endsWith(".fmp4") || lower.includes("/fmp4/") || lower.includes("stream.fmp4")) return "fmp4";
   if (lower.endsWith(".flv")) return "ws-raw";
+  if (lower.includes("/whep") || lower.includes(":8889/") || lower.includes(":28889/")) return "webrtc";
   if (lower.startsWith("ws://") || lower.startsWith("wss://")) return "webrtc-oven";
   if (lower.endsWith(".ts") || lower.endsWith(".mp4")) return "file";
   return "file";
@@ -496,28 +621,67 @@ async function createPlayer(source: SimpleSource) {
     const previous = player;
     player = null;
     (window as any).fyraPlayer = null;
+    (window as any).fyraPanoramaHandle = null;
+    panoramaHandle = null;
     await previous.destroy().catch(() => {});
   }
   const effectiveSource = applyLowLatencyToggle(source);
-  const host = document.querySelector(".player-shell") as HTMLElement | null;
+  const sourcePanoramaMode = !!effectiveSource.panorama || !!panoramaToggle?.checked;
+  panoramaMode = sourcePanoramaMode;
+  if (panoramaToggle) panoramaToggle.checked = sourcePanoramaMode;
+  if (currentSrc === source || currentSrc?.url === source.url) {
+    currentSrc = {
+      ...source,
+      panorama: sourcePanoramaMode,
+      textureFlipX: !!panoramaFlipXToggle?.checked,
+      textureFlipY: !!panoramaFlipYToggle?.checked
+    };
+  }
+  const host = getPlayerHost();
   if (!useSkin && host) {
     host.querySelectorAll("fyra-ui-shell").forEach((el) => el.remove());
   }
-  video.controls = !hideNativeControls && !useSkin;
+  setNativeControlVisibility();
   const lowerUrl = effectiveSource.url.toLowerCase();
   const wcEnable = !!effectiveSource.webCodecs?.enable || (effectiveSource.type === "file" && lowerUrl.endsWith(".ts"));
-  player = new FyraPlayer({
-    video,
-    sources: [toPlayerSource(effectiveSource)],
-    techOrder: ["gb28181", "webrtc", "ws-raw", "hls", "dash", "fmp4", "file"],
-    webCodecs: wcEnable ? { ...(effectiveSource.webCodecs || {}), enable: true } : undefined,
-    plugins: useSkin
+  activePanoramaTextureFlipX = !!effectiveSource.textureFlipX || !!panoramaFlipXToggle?.checked;
+  activePanoramaTextureFlipY = !!effectiveSource.textureFlipY || !!panoramaFlipYToggle?.checked;
+  const plugins = [
+    ...(useSkin
       ? [
           createUiComponentsPlugin({
             target: ".player-shell"
           })
         ]
-      : []
+      : []),
+    createPanoramaLitePlugin({
+      target: ".player-shell",
+      media: "video",
+      enabled: sourcePanoramaMode,
+      viewerControls: true,
+      crossOrigin: "anonymous",
+      powerPreference: "high-performance",
+      textureFlipX: activePanoramaTextureFlipX,
+      textureFlipY: activePanoramaTextureFlipY,
+      onReady: (handle) => {
+        panoramaHandle = handle;
+        (window as any).fyraPanoramaHandle = handle;
+        handle.setEnabled(panoramaMode);
+        syncPanoramaModeUi();
+      },
+      onError: (error) => {
+        appendLog(`panoramalite error: ${error instanceof Error ? error.message : String(error)}`);
+        syncPanoramaModeUi();
+      }
+    })
+  ];
+  syncPanoramaModeUi();
+  player = new FyraPlayer({
+    video,
+    sources: [toPlayerSource(effectiveSource)],
+    techOrder: ["gb28181", "webrtc", "ws-raw", "hls", "dash", "fmp4", "file"],
+    webCodecs: wcEnable ? { ...(effectiveSource.webCodecs || {}), enable: true } : undefined,
+    plugins
   });
   (window as any).fyraPlayer = player;
   bindPlayerEvents(player);
@@ -562,7 +726,10 @@ async function stopPlayback(reason?: string) {
     }
     player = null;
     (window as any).fyraPlayer = null;
+    (window as any).fyraPanoramaHandle = null;
+    panoramaHandle = null;
   }
+  setPanoramaMode(false, { updateCurrentSource: false });
   setStatus("idle", reason ? `stopped: ${reason}` : "stopped");
 }
 
@@ -586,7 +753,13 @@ loadBtn.onclick = () => {
       alert("请输入 URL");
       throw new Error("missing url");
     }
-    const src: SimpleSource = { label: `Custom ${type}`, type, url };
+    const src: SimpleSource = {
+      label: `Custom ${type}`,
+      type,
+      url,
+      panorama: !!panoramaToggle?.checked,
+      ...getPanoramaTextureSettings()
+    };
     if (type === "gb28181") {
       const invite = gbInviteInput?.value.trim() || "";
       if (!invite) {
@@ -664,12 +837,15 @@ fileInput.onchange = () => {
       type: "file",
       url: blobUrl,
       container,
+      panorama: !!panoramaToggle?.checked,
+      ...getPanoramaTextureSettings(),
       webCodecs: undefined // TS blob files use mpegts.js, not WebCodecs
     };
     currentSrc = src;
     select.value = CUSTOM_VALUE;
     urlInput.value = `[本地文件] ${file.name}`;
     typeSelect.value = "file";
+    setPanoramaMode(!!src.panorama, { updateCurrentSource: false });
     appendLog(`已选择本地文件: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB), 格式: ${ext.toUpperCase()}`);
     return createPlayer(src);
   });
@@ -683,7 +859,7 @@ if (skinToggle) {
     if (!useSkin) {
       const host = document.querySelector(".player-shell") as HTMLElement | null;
       host?.querySelectorAll("fyra-ui-shell").forEach((el) => el.remove());
-      video.controls = !hideNativeControls;
+      setNativeControlVisibility();
     }
     // Hide demo overlay when skin is enabled (UI shell has its own spinner)
     if (useSkin && overlay) {
@@ -698,7 +874,7 @@ if (nativeToggle) {
   nativeToggle.checked = hideNativeControls;
   nativeToggle.onchange = () => {
     hideNativeControls = nativeToggle.checked;
-    video.controls = !hideNativeControls && !useSkin;
+    setNativeControlVisibility();
   };
 }
 if (lowLatencyToggle) {
@@ -710,6 +886,41 @@ if (lowLatencyToggle) {
     safeRun("load", () => createPlayer(currentSrc as SimpleSource));
   };
 }
+if (panoramaToggle) {
+  panoramaToggle.checked = panoramaMode;
+  panoramaToggle.onchange = () => {
+    setPanoramaMode(panoramaToggle.checked, {
+      updateCurrentSource: true,
+      reloadIfTextureChanged: true
+    });
+  };
+}
+panoramaResetBtn?.addEventListener("click", () => {
+  panoramaHandle?.resetView();
+});
+for (const input of [panoramaFlipXToggle, panoramaFlipYToggle]) {
+  input?.addEventListener("change", () => {
+    updateCurrentPanoramaSource(panoramaMode);
+    if (panoramaMode && currentSrc) {
+      safeRun("load", () => createPlayer(currentSrc as SimpleSource));
+      return;
+    }
+    syncPanoramaModeUi();
+  });
+}
+
+(window as any).fyraPanorama = {
+  getHandle: () => panoramaHandle,
+  isEnabled: () => panoramaMode,
+  setEnabled: (enabled: boolean) => setPanoramaMode(enabled, { updateCurrentSource: true, reloadIfTextureChanged: true }),
+  resetView: () => panoramaHandle?.resetView(),
+  getPlugins: () => ({
+    ui: useSkin,
+    panoramalite: !!panoramaHandle,
+    panoramaliteMode: panoramaMode ? "panorama" : "ordinary"
+  })
+};
+syncPanoramaModeUi();
 
 FyraPlayer.probeWebCodecs()
   .then((support) => {

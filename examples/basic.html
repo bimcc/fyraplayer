@@ -32,6 +32,9 @@
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         background: #000;
       }
+      .player-shell.panorama-mode fyra-ui-shell {
+        display: none !important;
+      }
       video {
         width: 100%;
         aspect-ratio: 16 / 9;
@@ -78,6 +81,22 @@
       .row + .row {
         margin-top: 12px;
       }
+      .panorama-options[hidden] {
+        display: none;
+      }
+      .panorama-options {
+        padding-top: 10px;
+        border-top: 1px solid #eef0f3;
+      }
+      .status-pill {
+        padding: 7px 10px;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #475569;
+        font-size: 12px;
+        line-height: 1.2;
+      }
       
       /* Form Elements */
       button {
@@ -122,6 +141,7 @@
       .options {
         display: flex;
         gap: 16px;
+        flex-wrap: wrap;
         margin-left: auto;
       }
       .opt {
@@ -267,6 +287,7 @@
             <label class="opt"><input id="toggle-skin" type="checkbox" checked /> 皮肤</label>
             <label class="opt"><input id="toggle-native" type="checkbox" /> 隐藏控件</label>
             <label class="opt"><input id="toggle-low-latency" type="checkbox" /> LL-HLS</label>
+            <label class="opt"><input id="toggle-panorama" type="checkbox" /> 全景模式</label>
           </div>
         </div>
         <div class="row">
@@ -284,6 +305,12 @@
           <button id="btn-load" class="primary">Load</button>
           <input type="file" id="file-input" accept="video/*,.ts,.mp4,.mkv,.webm,.flv" style="display:none;" />
           <button id="btn-open-file">📁 本地文件</button>
+        </div>
+        <div class="row panorama-options" id="panorama-options" hidden>
+          <label class="opt"><input id="toggle-panorama-flip-x" type="checkbox" /> Flip X</label>
+          <label class="opt"><input id="toggle-panorama-flip-y" type="checkbox" /> Flip Y</label>
+          <button id="btn-panorama-reset" type="button">重置视角</button>
+          <div id="panorama-status" class="status-pill">PanoramaLite: standby</div>
         </div>
       </div>
 
@@ -342,6 +369,7 @@
       <div class="info-bar">
         <div id="stats">bitrate: - | fps: - | res: -</div>
         <div id="wc-support">WebCodecs: checking...</div>
+        <div id="plugin-status">plugins: ui=on | panoramalite=not-ready</div>
         <div id="ts-note"></div>
       </div>
 

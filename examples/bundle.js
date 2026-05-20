@@ -75620,6 +75620,1543 @@ var sources_default = [
   { type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv", codec: "h264", transport: "flv", preferTech: "ws-raw" }
 ];
 
+// src/plugins/panoramalite/renderer/math.ts
+var DEG_TO_RAD = Math.PI / 180;
+function degToRad(value) {
+  return value * DEG_TO_RAD;
+}
+function clamp2(value, min, max) {
+  if (value < min)
+    return min;
+  if (value > max)
+    return max;
+  return value;
+}
+function wrapDegrees(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  let wrapped = value % 360;
+  if (wrapped <= -180)
+    wrapped += 360;
+  if (wrapped > 180)
+    wrapped -= 360;
+  return wrapped;
+}
+function multiplyMat4(a2, b2) {
+  const out = new Float32Array(16);
+  const av = a2.values;
+  const bv = b2.values;
+  for (let row = 0; row < 4; row += 1) {
+    for (let col = 0; col < 4; col += 1) {
+      out[col * 4 + row] = av[0 * 4 + row] * bv[col * 4 + 0] + av[1 * 4 + row] * bv[col * 4 + 1] + av[2 * 4 + row] * bv[col * 4 + 2] + av[3 * 4 + row] * bv[col * 4 + 3];
+    }
+  }
+  return { values: out };
+}
+function perspectiveMat4(fovDeg, aspect, near = 0.1, far = 100) {
+  const fov = degToRad(clamp2(fovDeg, 1, 179));
+  const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
+  const f2 = 1 / Math.tan(fov / 2);
+  const nf = 1 / (near - far);
+  return {
+    values: new Float32Array([
+      f2 / safeAspect,
+      0,
+      0,
+      0,
+      0,
+      f2,
+      0,
+      0,
+      0,
+      0,
+      (far + near) * nf,
+      -1,
+      0,
+      0,
+      2 * far * near * nf,
+      0
+    ])
+  };
+}
+function rotationMat4(yawDeg, pitchDeg, rollDeg) {
+  const yaw = degToRad(yawDeg);
+  const pitch = degToRad(pitchDeg);
+  const roll = degToRad(rollDeg);
+  const cy = Math.cos(yaw);
+  const sy = Math.sin(yaw);
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
+  const cr = Math.cos(roll);
+  const sr = Math.sin(roll);
+  const yawMatrix = {
+    values: new Float32Array([
+      cy,
+      0,
+      -sy,
+      0,
+      0,
+      1,
+      0,
+      0,
+      sy,
+      0,
+      cy,
+      0,
+      0,
+      0,
+      0,
+      1
+    ])
+  };
+  const pitchMatrix = {
+    values: new Float32Array([
+      1,
+      0,
+      0,
+      0,
+      0,
+      cp,
+      sp,
+      0,
+      0,
+      -sp,
+      cp,
+      0,
+      0,
+      0,
+      0,
+      1
+    ])
+  };
+  const rollMatrix = {
+    values: new Float32Array([
+      cr,
+      sr,
+      0,
+      0,
+      -sr,
+      cr,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+    ])
+  };
+  return multiplyMat4(multiplyMat4(yawMatrix, pitchMatrix), rollMatrix);
+}
+
+// src/plugins/panoramalite/renderer/camera.ts
+var DEFAULT_PANORAMA_VIEW = {
+  yaw: 0,
+  pitch: 0,
+  roll: 0,
+  fov: 80
+};
+var DEFAULT_PANORAMA_LIMITS = {
+  minPitch: -85,
+  maxPitch: 85,
+  minFov: 35,
+  maxFov: 110
+};
+function normalizeView(view2, limits = DEFAULT_PANORAMA_LIMITS, base = DEFAULT_PANORAMA_VIEW) {
+  const yaw = typeof view2?.yaw === "number" ? view2.yaw : base.yaw;
+  const pitch = typeof view2?.pitch === "number" ? view2.pitch : base.pitch;
+  const roll = typeof view2?.roll === "number" ? view2.roll : base.roll;
+  const fov = typeof view2?.fov === "number" ? view2.fov : base.fov;
+  return {
+    yaw: wrapDegrees(yaw),
+    pitch: clamp2(pitch, limits.minPitch, limits.maxPitch),
+    roll: wrapDegrees(roll),
+    fov: clamp2(fov, limits.minFov, limits.maxFov)
+  };
+}
+function mergeLimits(limits) {
+  const merged = {
+    ...DEFAULT_PANORAMA_LIMITS,
+    ...limits
+  };
+  if (merged.minPitch > merged.maxPitch) {
+    [merged.minPitch, merged.maxPitch] = [merged.maxPitch, merged.minPitch];
+  }
+  if (merged.minFov > merged.maxFov) {
+    [merged.minFov, merged.maxFov] = [merged.maxFov, merged.minFov];
+  }
+  return merged;
+}
+function createViewProjection(view2, aspect) {
+  const projection = perspectiveMat4(view2.fov, aspect);
+  const rotation = rotationMat4(-view2.yaw, -view2.pitch, -view2.roll);
+  return multiplyMat4(projection, rotation).values;
+}
+
+// src/plugins/panoramalite/renderer/sphereMesh.ts
+function createEquirectSphereMesh(options = {}) {
+  const widthSegments = Math.max(8, Math.floor(options.widthSegments ?? 64));
+  const heightSegments = Math.max(4, Math.floor(options.heightSegments ?? 32));
+  const radius = options.radius ?? 1;
+  const vertexCount = (widthSegments + 1) * (heightSegments + 1);
+  const vertices = new Float32Array(vertexCount * 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  const indexCount = widthSegments * heightSegments * 6;
+  const useUint32 = vertexCount > 65535;
+  const indices = useUint32 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
+  let vertexOffset = 0;
+  let uvOffset = 0;
+  for (let y2 = 0; y2 <= heightSegments; y2 += 1) {
+    const v2 = y2 / heightSegments;
+    const theta = v2 * Math.PI;
+    const sinTheta = Math.sin(theta);
+    const cosTheta = Math.cos(theta);
+    for (let x = 0; x <= widthSegments; x += 1) {
+      const u2 = x / widthSegments;
+      const phi = u2 * Math.PI * 2;
+      const sinPhi = Math.sin(phi);
+      const cosPhi = Math.cos(phi);
+      vertices[vertexOffset] = -radius * sinTheta * sinPhi;
+      vertices[vertexOffset + 1] = radius * cosTheta;
+      vertices[vertexOffset + 2] = radius * sinTheta * cosPhi;
+      vertexOffset += 3;
+      uvs[uvOffset] = u2;
+      uvs[uvOffset + 1] = v2;
+      uvOffset += 2;
+    }
+  }
+  let indexOffset = 0;
+  for (let y2 = 0; y2 < heightSegments; y2 += 1) {
+    for (let x = 0; x < widthSegments; x += 1) {
+      const a2 = y2 * (widthSegments + 1) + x;
+      const b2 = a2 + widthSegments + 1;
+      const c2 = b2 + 1;
+      const d2 = a2 + 1;
+      indices[indexOffset] = a2;
+      indices[indexOffset + 1] = b2;
+      indices[indexOffset + 2] = d2;
+      indices[indexOffset + 3] = d2;
+      indices[indexOffset + 4] = b2;
+      indices[indexOffset + 5] = c2;
+      indexOffset += 6;
+    }
+  }
+  return {
+    vertices,
+    uvs,
+    indices,
+    indexType: useUint32 ? "uint32" : "uint16"
+  };
+}
+
+// src/plugins/panoramalite/renderer/shaders.ts
+var PANORAMA_VERTEX_SHADER = `#version 300 es
+precision mediump float;
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec2 aUv;
+
+uniform mat4 uViewProjection;
+uniform vec4 uTextureTransform;
+
+out vec2 vUv;
+
+void main() {
+  vUv = aUv * uTextureTransform.xy + uTextureTransform.zw;
+  gl_Position = uViewProjection * vec4(aPosition, 1.0);
+}
+`;
+var PANORAMA_FRAGMENT_SHADER = `#version 300 es
+precision mediump float;
+
+uniform sampler2D uTexture;
+
+in vec2 vUv;
+out vec4 outColor;
+
+void main() {
+  outColor = texture(uTexture, vUv);
+}
+`;
+
+// src/plugins/panoramalite/renderer/texture.ts
+function isTextureSourceReady(source) {
+  if ("readyState" in source) {
+    return source.readyState >= 2 && source.videoWidth > 0 && source.videoHeight > 0;
+  }
+  if ("complete" in source) {
+    return source.complete && source.naturalWidth > 0 && source.naturalHeight > 0;
+  }
+  return source.width > 0 && source.height > 0;
+}
+function getTextureSourceSize(source) {
+  if ("videoWidth" in source) {
+    return { width: source.videoWidth, height: source.videoHeight };
+  }
+  if ("naturalWidth" in source) {
+    return { width: source.naturalWidth, height: source.naturalHeight };
+  }
+  return { width: source.width, height: source.height };
+}
+
+// src/plugins/panoramalite/renderer/PanoramaLiteRenderer.ts
+var PanoramaLiteRenderer = class {
+  constructor(options) {
+    this.gl = null;
+    this.program = null;
+    this.vao = null;
+    this.vertexBuffer = null;
+    this.uvBuffer = null;
+    this.indexBuffer = null;
+    this.texture = null;
+    this.mesh = null;
+    this.viewProjectionLocation = null;
+    this.textureLocation = null;
+    this.textureTransformLocation = null;
+    this.textureSource = null;
+    this.textureSize = null;
+    this.resizeDirty = true;
+    this.maxTextureSize = null;
+    this.destroyed = false;
+    this.handleContextLost = (event) => {
+      event.preventDefault();
+      this.options.onContextLost?.();
+    };
+    this.handleContextRestored = () => {
+      if (this.destroyed)
+        return;
+      this.initialize();
+      if (this.textureSource) {
+        this.setTextureSource(this.textureSource);
+      }
+      this.options.onContextRestored?.();
+    };
+    this.canvas = options.canvas;
+    this.options = options;
+    this.canvas.addEventListener("webglcontextlost", this.handleContextLost);
+    this.canvas.addEventListener("webglcontextrestored", this.handleContextRestored);
+    this.initialize();
+  }
+  static isSupported() {
+    if (typeof document === "undefined")
+      return false;
+    const canvas = document.createElement("canvas");
+    try {
+      return !!canvas.getContext("webgl2");
+    } catch {
+      return false;
+    }
+  }
+  setTextureSource(source) {
+    this.textureSource = source;
+    if (!this.gl || !this.texture)
+      return;
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    this.textureSize = null;
+    if (isTextureSourceReady(source)) {
+      this.uploadTextureSource(source);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+      this.textureSize = { width: 1, height: 1 };
+    }
+  }
+  setTextureTransform(options) {
+    if (options.textureFlipX !== void 0) {
+      this.options.textureFlipX = options.textureFlipX;
+    }
+    if (options.textureFlipY !== void 0) {
+      this.options.textureFlipY = options.textureFlipY;
+    }
+  }
+  requestResize() {
+    this.resizeDirty = true;
+  }
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    const ratio = this.resolvePixelRatio(rect);
+    const width = Math.max(1, Math.floor((rect.width || this.canvas.clientWidth || 1) * ratio));
+    const height = Math.max(1, Math.floor((rect.height || this.canvas.clientHeight || 1) * ratio));
+    if (this.canvas.width !== width)
+      this.canvas.width = width;
+    if (this.canvas.height !== height)
+      this.canvas.height = height;
+    this.gl?.viewport(0, 0, width, height);
+    this.resizeDirty = false;
+  }
+  render(view2, options = {}) {
+    const gl = this.gl;
+    if (!gl || !this.program || !this.vao || !this.texture || !this.mesh)
+      return;
+    if (this.resizeDirty)
+      this.resize();
+    if (options.uploadTexture !== false) {
+      this.uploadTextureFrame();
+    }
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.useProgram(this.program);
+    gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    if (this.textureLocation)
+      gl.uniform1i(this.textureLocation, 0);
+    if (this.textureTransformLocation) {
+      const scaleX = this.options.textureFlipX ? -1 : 1;
+      const scaleY = this.options.textureFlipY ? -1 : 1;
+      gl.uniform4f(
+        this.textureTransformLocation,
+        scaleX,
+        scaleY,
+        this.options.textureFlipX ? 1 : 0,
+        this.options.textureFlipY ? 1 : 0
+      );
+    }
+    const aspect = this.canvas.width / Math.max(1, this.canvas.height);
+    if (this.viewProjectionLocation) {
+      gl.uniformMatrix4fv(this.viewProjectionLocation, false, createViewProjection(view2, aspect));
+    }
+    gl.drawElements(
+      gl.TRIANGLES,
+      this.mesh.indices.length,
+      this.mesh.indexType === "uint32" ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
+      0
+    );
+    gl.bindVertexArray(null);
+  }
+  destroy() {
+    this.destroyed = true;
+    this.canvas.removeEventListener("webglcontextlost", this.handleContextLost);
+    this.canvas.removeEventListener("webglcontextrestored", this.handleContextRestored);
+    this.releaseGlResources();
+    this.textureSource = null;
+  }
+  initialize() {
+    this.releaseGlResources();
+    const gl = this.canvas.getContext("webgl2", {
+      antialias: false,
+      alpha: false,
+      premultipliedAlpha: false,
+      powerPreference: this.options.powerPreference ?? "high-performance",
+      preserveDrawingBuffer: !!this.options.preserveDrawingBuffer
+    });
+    if (!gl) {
+      throw new Error("WebGL2 is not available");
+    }
+    this.gl = gl;
+    this.mesh = createEquirectSphereMesh();
+    this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    this.program = this.createProgram(PANORAMA_VERTEX_SHADER, PANORAMA_FRAGMENT_SHADER);
+    this.viewProjectionLocation = gl.getUniformLocation(this.program, "uViewProjection");
+    this.textureLocation = gl.getUniformLocation(this.program, "uTexture");
+    this.textureTransformLocation = gl.getUniformLocation(this.program, "uTextureTransform");
+    this.texture = gl.createTexture();
+    this.createBuffers();
+    gl.disable(gl.CULL_FACE);
+    gl.disable(gl.DEPTH_TEST);
+    this.resize();
+  }
+  createBuffers() {
+    const gl = this.requireGl();
+    const mesh = this.mesh;
+    if (!mesh || !this.program)
+      return;
+    this.vao = gl.createVertexArray();
+    this.vertexBuffer = gl.createBuffer();
+    this.uvBuffer = gl.createBuffer();
+    this.indexBuffer = gl.createBuffer();
+    gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.vertices, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.uvs, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+  }
+  uploadTextureFrame() {
+    const gl = this.gl;
+    const source = this.textureSource;
+    if (!gl || !this.texture || !source || !isTextureSourceReady(source))
+      return;
+    const maxTextureSize = this.maxTextureSize ?? gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    this.maxTextureSize = maxTextureSize;
+    const size = getTextureSourceSize(source);
+    if (size.width > maxTextureSize || size.height > maxTextureSize) {
+      throw new Error(`panoramalite texture exceeds MAX_TEXTURE_SIZE: ${size.width}x${size.height}`);
+    }
+    this.uploadTextureSource(source, size);
+  }
+  uploadTextureSource(source, knownSize = getTextureSourceSize(source)) {
+    const gl = this.gl;
+    if (!gl || !this.texture)
+      return;
+    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    if (!this.textureSize || this.textureSize.width !== knownSize.width || this.textureSize.height !== knownSize.height) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      this.textureSize = { ...knownSize };
+      return;
+    }
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  }
+  createProgram(vertexSource, fragmentSource) {
+    const gl = this.requireGl();
+    const vertexShader = this.createShader(gl.VERTEX_SHADER, vertexSource);
+    const fragmentShader = this.createShader(gl.FRAGMENT_SHADER, fragmentSource);
+    const program = gl.createProgram();
+    if (!program)
+      throw new Error("Failed to create WebGL program");
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const info = gl.getProgramInfoLog(program) || "unknown program link error";
+      gl.deleteProgram(program);
+      throw new Error(info);
+    }
+    return program;
+  }
+  createShader(type, source) {
+    const gl = this.requireGl();
+    const shader = gl.createShader(type);
+    if (!shader)
+      throw new Error("Failed to create WebGL shader");
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(shader) || "unknown shader compile error";
+      gl.deleteShader(shader);
+      throw new Error(info);
+    }
+    return shader;
+  }
+  releaseGlResources() {
+    const gl = this.gl;
+    if (!gl)
+      return;
+    if (this.vao)
+      gl.deleteVertexArray(this.vao);
+    if (this.vertexBuffer)
+      gl.deleteBuffer(this.vertexBuffer);
+    if (this.uvBuffer)
+      gl.deleteBuffer(this.uvBuffer);
+    if (this.indexBuffer)
+      gl.deleteBuffer(this.indexBuffer);
+    if (this.texture)
+      gl.deleteTexture(this.texture);
+    if (this.program)
+      gl.deleteProgram(this.program);
+    this.vao = null;
+    this.vertexBuffer = null;
+    this.uvBuffer = null;
+    this.indexBuffer = null;
+    this.texture = null;
+    this.textureSize = null;
+    this.program = null;
+    this.gl = null;
+    this.textureTransformLocation = null;
+    this.maxTextureSize = null;
+    this.resizeDirty = true;
+  }
+  requireGl() {
+    if (!this.gl)
+      throw new Error("WebGL2 renderer is not initialized");
+    return this.gl;
+  }
+  resolvePixelRatio(rect) {
+    const max = this.options.maxPixelRatio ?? 1.5;
+    let ratio;
+    if (typeof this.options.pixelRatio === "number") {
+      ratio = Math.max(0.25, Math.min(max, this.options.pixelRatio));
+    } else {
+      const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+      ratio = Math.max(0.25, Math.min(max, dpr));
+    }
+    const maxCanvasPixels = this.options.maxCanvasPixels;
+    if (typeof maxCanvasPixels === "number" && Number.isFinite(maxCanvasPixels) && maxCanvasPixels > 0) {
+      const cssPixels = Math.max(1, (rect.width || this.canvas.clientWidth || 1) * (rect.height || this.canvas.clientHeight || 1));
+      ratio = Math.min(ratio, Math.max(0.25, Math.sqrt(maxCanvasPixels / cssPixels)));
+    }
+    return ratio;
+  }
+};
+
+// src/plugins/panoramalite/media/imageLoader.ts
+async function loadPanoramaImage(image) {
+  if (typeof image !== "string")
+    return image;
+  if (typeof Image === "undefined") {
+    throw new Error("Image constructor is not available in this environment");
+  }
+  const element = new Image();
+  element.crossOrigin = "anonymous";
+  const promise = new Promise((resolve, reject) => {
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error(`Failed to load panorama image: ${image}`));
+  });
+  element.src = image;
+  return promise;
+}
+
+// src/plugins/panoramalite/input/controls.ts
+function createPanoramaLiteControls(options) {
+  let enabled = options.enabled !== false;
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  const activeTouches = /* @__PURE__ */ new Map();
+  let lastPinchDistance = null;
+  const onPointerDown = (event) => {
+    if (!enabled)
+      return;
+    dragging = true;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    try {
+      options.element.setPointerCapture?.(event.pointerId);
+    } catch {
+    }
+  };
+  const onPointerMove = (event) => {
+    if (!enabled || !dragging)
+      return;
+    const dx = event.clientX - lastX;
+    const dy = event.clientY - lastY;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    const view2 = options.getView();
+    options.setView({
+      yaw: view2.yaw - dx * 0.18,
+      pitch: view2.pitch + dy * 0.18
+    });
+  };
+  const onPointerUp = (event) => {
+    dragging = false;
+    try {
+      options.element.releasePointerCapture?.(event.pointerId);
+    } catch {
+    }
+  };
+  const onWheel = (event) => {
+    if (!enabled)
+      return;
+    event.preventDefault();
+    const view2 = options.getView();
+    options.setView({ fov: view2.fov + event.deltaY * 0.04 });
+  };
+  const onTouchStart = (event) => {
+    if (!enabled)
+      return;
+    for (const touch of Array.from(event.changedTouches)) {
+      activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    lastPinchDistance = getPinchDistance();
+  };
+  const onTouchMove = (event) => {
+    if (!enabled)
+      return;
+    event.preventDefault();
+    if (activeTouches.size >= 2) {
+      for (const touch2 of Array.from(event.changedTouches)) {
+        activeTouches.set(touch2.identifier, { x: touch2.clientX, y: touch2.clientY });
+      }
+      const nextDistance = getPinchDistance();
+      if (nextDistance !== null && lastPinchDistance !== null) {
+        const view3 = options.getView();
+        options.setView({ fov: view3.fov - (nextDistance - lastPinchDistance) * 0.08 });
+      }
+      lastPinchDistance = nextDistance;
+      return;
+    }
+    const touch = event.changedTouches[0];
+    const previous = activeTouches.get(touch.identifier);
+    if (!previous)
+      return;
+    const dx = touch.clientX - previous.x;
+    const dy = touch.clientY - previous.y;
+    activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    const view2 = options.getView();
+    options.setView({
+      yaw: view2.yaw - dx * 0.18,
+      pitch: view2.pitch + dy * 0.18
+    });
+  };
+  const onTouchEnd = (event) => {
+    for (const touch of Array.from(event.changedTouches)) {
+      activeTouches.delete(touch.identifier);
+    }
+    lastPinchDistance = getPinchDistance();
+  };
+  function getPinchDistance() {
+    const touches = Array.from(activeTouches.values());
+    if (touches.length < 2)
+      return null;
+    const [a2, b2] = touches;
+    return Math.hypot(a2.x - b2.x, a2.y - b2.y);
+  }
+  options.element.addEventListener("pointerdown", onPointerDown);
+  options.element.addEventListener("pointermove", onPointerMove);
+  options.element.addEventListener("pointerup", onPointerUp);
+  options.element.addEventListener("pointercancel", onPointerUp);
+  options.element.addEventListener("wheel", onWheel, { passive: false });
+  options.element.addEventListener("touchstart", onTouchStart, { passive: false });
+  options.element.addEventListener("touchmove", onTouchMove, { passive: false });
+  options.element.addEventListener("touchend", onTouchEnd);
+  options.element.addEventListener("touchcancel", onTouchEnd);
+  return {
+    setEnabled(value) {
+      enabled = value;
+    },
+    destroy() {
+      options.element.removeEventListener("pointerdown", onPointerDown);
+      options.element.removeEventListener("pointermove", onPointerMove);
+      options.element.removeEventListener("pointerup", onPointerUp);
+      options.element.removeEventListener("pointercancel", onPointerUp);
+      options.element.removeEventListener("wheel", onWheel);
+      options.element.removeEventListener("touchstart", onTouchStart);
+      options.element.removeEventListener("touchmove", onTouchMove);
+      options.element.removeEventListener("touchend", onTouchEnd);
+      options.element.removeEventListener("touchcancel", onTouchEnd);
+      activeTouches.clear();
+    }
+  };
+}
+
+// src/plugins/panoramalite/viewerControls.ts
+var STYLE_ID = "fyra-panoramalite-viewer-controls-style";
+var HIDDEN_CLASS = "fyra-panoramalite-hidden";
+function createPanoramaLiteViewerControls(config) {
+  const normalizedOptions = normalizeOptions(config.options);
+  if (!normalizedOptions)
+    return null;
+  const options = normalizedOptions;
+  injectViewerControlsStyles();
+  let video2 = config.video;
+  let media = config.media;
+  const disposers = [];
+  const videoDisposers = [];
+  const root = document.createElement("div");
+  root.className = ["fyra-panoramalite-viewer-controls", options.className].filter(Boolean).join(" ");
+  root.setAttribute("role", "group");
+  root.setAttribute("aria-label", "Panorama controls");
+  const playButton = createButton(">", "Play or pause");
+  const resetButton = createButton("\u21BA", "Reset view");
+  const loopButton = createButton("\u21BB", "Loop playback");
+  const muteButton = createButton("\u266A", "Mute audio");
+  const fullscreenButton = createButton("[ ]", "Toggle fullscreen");
+  const timeLabel = document.createElement("span");
+  timeLabel.className = "fyra-panoramalite-time";
+  const seek = document.createElement("input");
+  seek.className = "fyra-panoramalite-seek";
+  seek.type = "range";
+  seek.min = "0";
+  seek.max = "1000";
+  seek.step = "1";
+  seek.value = "0";
+  seek.setAttribute("aria-label", "Seek");
+  const volume = document.createElement("input");
+  volume.className = "fyra-panoramalite-volume";
+  volume.type = "range";
+  volume.min = "0";
+  volume.max = "100";
+  volume.step = "1";
+  volume.value = "100";
+  volume.setAttribute("aria-label", "Volume");
+  root.appendChild(playButton);
+  root.appendChild(timeLabel);
+  root.appendChild(seek);
+  root.appendChild(loopButton);
+  root.appendChild(muteButton);
+  root.appendChild(volume);
+  root.appendChild(resetButton);
+  root.appendChild(fullscreenButton);
+  config.host.appendChild(root);
+  const listen = (target, event, handler) => {
+    target.addEventListener(event, handler);
+    disposers.push(() => target.removeEventListener(event, handler));
+  };
+  const listenVideo = (event, handler) => {
+    video2.addEventListener(event, handler);
+    videoDisposers.push(() => video2.removeEventListener(event, handler));
+  };
+  const bindVideoEvents2 = () => {
+    for (const event of ["play", "pause", "ended", "timeupdate", "durationchange", "loadedmetadata", "volumechange"]) {
+      listenVideo(event, update);
+    }
+  };
+  const clearVideoEvents = () => {
+    while (videoDisposers.length)
+      videoDisposers.pop()?.();
+  };
+  listen(root, "pointerdown", (event) => event.stopPropagation());
+  listen(root, "touchstart", (event) => event.stopPropagation());
+  listen(playButton, "click", () => {
+    if (media === "image")
+      return;
+    if (video2.paused) {
+      config.play().catch(config.onError);
+    } else {
+      config.pause().catch(config.onError);
+    }
+    update();
+  });
+  listen(resetButton, "click", () => {
+    config.resetView();
+    update();
+  });
+  listen(loopButton, "click", () => {
+    if (media === "image")
+      return;
+    video2.loop = !video2.loop;
+    update();
+  });
+  listen(muteButton, "click", () => {
+    if (media === "image")
+      return;
+    video2.muted = !video2.muted;
+    update();
+  });
+  listen(seek, "input", () => {
+    if (!hasFiniteDuration(video2))
+      return;
+    const ratio = clampNumber(Number(seek.value) / 1e3, 0, 1);
+    video2.currentTime = video2.duration * ratio;
+    update();
+  });
+  listen(volume, "input", () => {
+    if (media === "image")
+      return;
+    const nextVolume = clampNumber(Number(volume.value) / 100, 0, 1);
+    video2.volume = nextVolume;
+    video2.muted = nextVolume === 0;
+    update();
+  });
+  listen(fullscreenButton, "click", () => {
+    toggleFullscreen2(config.host).catch(config.onError).finally(() => {
+      config.resize();
+      update();
+    });
+  });
+  listen(document, "fullscreenchange", () => {
+    config.resize();
+    update();
+  });
+  listen(document, "webkitfullscreenchange", () => {
+    config.resize();
+    update();
+  });
+  const timer = window.setInterval(update, 500);
+  disposers.push(() => window.clearInterval(timer));
+  bindVideoEvents2();
+  update();
+  function update() {
+    const image = media === "image";
+    const finiteDuration = !image && hasFiniteDuration(video2);
+    const live = !image && !finiteDuration;
+    toggleElement(playButton, options.playback && !image);
+    toggleElement(timeLabel, finiteDuration);
+    toggleElement(seek, options.seek && finiteDuration);
+    toggleElement(loopButton, options.loop && finiteDuration);
+    toggleElement(muteButton, options.volume && !image);
+    toggleElement(volume, options.volume && finiteDuration);
+    toggleElement(resetButton, options.resetView);
+    toggleElement(fullscreenButton, options.fullscreen);
+    playButton.textContent = video2.paused ? ">" : "II";
+    playButton.title = video2.paused ? "Play" : "Pause";
+    playButton.setAttribute("aria-label", playButton.title);
+    loopButton.textContent = "\u21BB";
+    loopButton.title = video2.loop ? "Disable loop" : "Loop playback";
+    loopButton.setAttribute("aria-label", loopButton.title);
+    loopButton.setAttribute("aria-pressed", String(video2.loop));
+    muteButton.textContent = video2.muted || video2.volume === 0 ? "\xD7" : "\u266A";
+    muteButton.title = video2.muted || video2.volume === 0 ? "Unmute audio" : "Mute audio";
+    muteButton.setAttribute("aria-label", muteButton.title);
+    muteButton.setAttribute("aria-pressed", String(video2.muted || video2.volume === 0));
+    fullscreenButton.textContent = isFullscreen2(config.host) ? "\u25A1" : "[ ]";
+    fullscreenButton.title = isFullscreen2(config.host) ? "Exit fullscreen" : "Enter fullscreen";
+    fullscreenButton.setAttribute("aria-label", fullscreenButton.title);
+    volume.value = String(Math.round((video2.muted ? 0 : video2.volume) * 100));
+    if (image) {
+      timeLabel.textContent = "";
+      seek.value = "0";
+    } else if (finiteDuration) {
+      const ratio = clampNumber(video2.currentTime / video2.duration, 0, 1);
+      seek.value = String(Math.round(ratio * 1e3));
+      timeLabel.textContent = `${formatTime2(video2.currentTime)} / ${formatTime2(video2.duration)}`;
+    } else {
+      timeLabel.textContent = "LIVE";
+      seek.value = "0";
+    }
+  }
+  return {
+    bindVideo(nextVideo, nextMedia) {
+      clearVideoEvents();
+      video2 = nextVideo;
+      media = nextMedia;
+      bindVideoEvents2();
+      update();
+    },
+    setMedia(nextMedia) {
+      media = nextMedia;
+      update();
+    },
+    setVisible(visible) {
+      toggleElement(root, visible);
+    },
+    update,
+    destroy() {
+      clearVideoEvents();
+      while (disposers.length)
+        disposers.pop()?.();
+      root.remove();
+    }
+  };
+}
+function normalizeOptions(options) {
+  if (options === void 0)
+    return null;
+  if (options === false)
+    return null;
+  const value = typeof options === "object" ? options : {};
+  if (value.enabled === false)
+    return null;
+  return {
+    playback: value.playback !== false,
+    seek: value.seek !== false,
+    loop: value.loop !== false,
+    volume: value.volume !== false,
+    fullscreen: value.fullscreen !== false,
+    resetView: value.resetView !== false,
+    className: value.className
+  };
+}
+function createButton(text, title) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = text;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  return button;
+}
+function toggleElement(element, visible) {
+  element.classList.toggle(HIDDEN_CLASS, !visible);
+}
+function hasFiniteDuration(video2) {
+  return Number.isFinite(video2.duration) && video2.duration > 0;
+}
+function formatTime2(value) {
+  if (!Number.isFinite(value) || value < 0)
+    return "0:00";
+  const total = Math.floor(value);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value))
+    return min;
+  return Math.max(min, Math.min(max, value));
+}
+async function toggleFullscreen2(host) {
+  if (isFullscreen2(host)) {
+    await exitFullscreen();
+    return;
+  }
+  const candidate = host;
+  if (candidate.requestFullscreen) {
+    await candidate.requestFullscreen();
+    return;
+  }
+  await candidate.webkitRequestFullscreen?.();
+}
+async function exitFullscreen() {
+  const doc = document;
+  if (document.exitFullscreen) {
+    await document.exitFullscreen();
+    return;
+  }
+  await doc.webkitExitFullscreen?.();
+}
+function isFullscreen2(host) {
+  const doc = document;
+  const element = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+  return element === host;
+}
+function injectViewerControlsStyles() {
+  if (document.getElementById(STYLE_ID))
+    return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = `
+.fyra-panoramalite-viewer-controls {
+  position: absolute;
+  left: 50%;
+  right: auto;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  max-width: calc(100% - 24px);
+  padding: 0;
+  color: #f8fafc;
+  background: transparent;
+  border: 0;
+  pointer-events: none;
+}
+.fyra-panoramalite-viewer-controls button {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border: 1px solid rgba(226, 232, 240, 0.28);
+  border-radius: 999px;
+  background: rgba(7, 15, 27, 0.62);
+  color: #f8fafc;
+  font: 600 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;
+}
+.fyra-panoramalite-viewer-controls button:hover {
+  background: rgba(15, 23, 42, 0.78);
+}
+.fyra-panoramalite-viewer-controls input[type="range"] {
+  accent-color: #22c55e;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(7, 15, 27, 0.52);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  pointer-events: auto;
+}
+.fyra-panoramalite-seek {
+  flex: 0 1 220px;
+  width: min(220px, 30vw);
+  min-width: 88px;
+}
+.fyra-panoramalite-volume {
+  flex: 0 0 56px;
+  min-width: 52px;
+}
+.fyra-panoramalite-time {
+  min-width: 38px;
+  padding: 0 8px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(7, 15, 27, 0.52);
+  color: #cbd5e1;
+  font: 600 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  pointer-events: auto;
+}
+.fyra-panoramalite-hidden {
+  display: none !important;
+}
+:fullscreen .fyra-panoramalite-viewer-controls {
+  position: fixed;
+  bottom: 16px;
+}
+@media (max-width: 560px) {
+  .fyra-panoramalite-viewer-controls {
+    left: 50%;
+    right: auto;
+    bottom: 8px;
+    max-width: calc(100% - 16px);
+  }
+  .fyra-panoramalite-viewer-controls button {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+  }
+  .fyra-panoramalite-time {
+    display: none;
+  }
+  .fyra-panoramalite-seek {
+    width: min(170px, 42vw);
+  }
+  .fyra-panoramalite-volume {
+    flex-basis: 52px;
+  }
+}
+`;
+  document.head?.appendChild(style);
+}
+
+// src/plugins/panoramalite/plugin.ts
+var PLUGIN_CLASS = "fyra-panoramalite";
+function createPanoramaLitePlugin(options = {}) {
+  return ({ player: player2, coreBus }) => {
+    if (typeof document === "undefined") {
+      const error = new Error("PanoramaLite requires a DOM document");
+      emitQos(coreBus, "PANORAMALITE_UNSUPPORTED", "warning", error.message);
+      options.onError?.(error);
+      return;
+    }
+    if (!PanoramaLiteRenderer.isSupported()) {
+      const error = new Error("WebGL2 is not available");
+      emitQos(coreBus, "PANORAMALITE_UNSUPPORTED", "warning", error.message);
+      options.onError?.(error);
+      return;
+    }
+    let instance = null;
+    try {
+      instance = new PanoramaLiteInstance(player2, coreBus, options);
+      options.onReady?.(instance.handle);
+      return {
+        destroy: () => instance?.destroy()
+      };
+    } catch (error) {
+      const code = error instanceof Error && error.message === "WebGL2 is not available" ? "PANORAMALITE_UNSUPPORTED" : "PANORAMALITE_RENDER_ERROR";
+      emitQos(coreBus, code, "warning", getErrorMessage(error));
+      options.onError?.(error);
+      return;
+    }
+  };
+}
+var PanoramaLiteInstance = class {
+  constructor(player2, coreBus, options) {
+    this.controls = null;
+    this.viewerControls = null;
+    this.video = null;
+    this.lastVideoRenderAt = 0;
+    this.lastPresentedFrames = null;
+    this.lastVideoMediaTime = null;
+    this.videoFrameDirty = false;
+    this.rafId = null;
+    this.videoFrameId = null;
+    this.pendingRenderUpload = false;
+    this.destroyed = false;
+    this.resizeObserver = null;
+    this.previousVideoVisibility = null;
+    this.previousHostPosition = null;
+    this.videoEventHandlers = [];
+    this.onReady = () => this.rebindCurrentVideo();
+    this.onPlay = () => {
+      this.scheduleRender();
+      this.scheduleVideoFrameLoop();
+    };
+    this.onPause = () => this.scheduleRender();
+    this.onVisibilityChange = () => {
+      if (isDocumentHidden()) {
+        this.cancelRenderScheduling();
+        return;
+      }
+      this.scheduleRender();
+      this.scheduleVideoFrameLoop();
+    };
+    this.handle = {
+      setEnabled: (enabled) => this.setEnabled(enabled),
+      isEnabled: () => this.enabled,
+      setView: (view2) => this.setView(view2),
+      getView: () => ({ ...this.view }),
+      resetView: () => this.setView(this.initialView),
+      bindVideo: (video2) => this.bindVideo(video2),
+      setImage: (image) => this.setImage(image),
+      setInteractive: (enabled) => this.setInteractive(enabled),
+      resize: () => this.resize(),
+      destroy: () => this.destroy()
+    };
+    this.player = player2;
+    this.coreBus = coreBus;
+    this.options = options;
+    this.enabled = options.enabled !== false;
+    this.interactiveEnabled = options.interactive !== false;
+    this.limits = mergeLimits(options.limits);
+    this.initialView = normalizeView(options.initialView, this.limits, DEFAULT_PANORAMA_VIEW);
+    this.view = { ...this.initialView };
+    this.minVideoFrameIntervalMs = resolveVideoFrameIntervalMs(options.maxVideoFps);
+    this.host = resolveTarget(options.target, player2.getVideoElement());
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = [PLUGIN_CLASS, options.className].filter(Boolean).join(" ");
+    this.ensureHostPositioning();
+    this.applyCanvasStyle();
+    this.host.appendChild(this.canvas);
+    try {
+      this.renderer = new PanoramaLiteRenderer({
+        canvas: this.canvas,
+        pixelRatio: options.pixelRatio ?? "auto",
+        maxPixelRatio: options.maxPixelRatio ?? 1.5,
+        maxCanvasPixels: options.maxCanvasPixels,
+        powerPreference: options.powerPreference,
+        textureFlipX: resolveTextureFlipX(options),
+        textureFlipY: resolveTextureFlipY(options),
+        preserveDrawingBuffer: !!options.preserveDrawingBuffer,
+        onContextLost: () => emitQos(this.coreBus, "PANORAMALITE_CONTEXT_LOST", "warning", "PanoramaLite WebGL context lost"),
+        onContextRestored: () => {
+          emitQos(this.coreBus, "PANORAMALITE_CONTEXT_RESTORED", "info", "PanoramaLite WebGL context restored");
+          this.scheduleRender();
+        }
+      });
+    } catch (error) {
+      this.canvas.remove();
+      this.restoreHostPositioning();
+      throw error;
+    }
+    this.observeResize();
+    this.controls = createPanoramaLiteControls({
+      element: this.canvas,
+      getView: () => this.view,
+      setView: (view2) => this.setView(view2),
+      enabled: this.interactiveEnabled
+    });
+    this.viewerControls = createPanoramaLiteViewerControls({
+      host: this.host,
+      video: player2.getVideoElement(),
+      media: options.media ?? "video",
+      options: options.viewerControls,
+      play: () => this.player.play(),
+      pause: () => this.player.pause(),
+      resetView: () => this.handle.resetView(),
+      resize: () => this.resize(),
+      onError: (error) => this.handleError(error, "PANORAMALITE_RENDER_ERROR")
+    });
+    player2.on("ready", this.onReady);
+    player2.on("play", this.onPlay);
+    player2.on("pause", this.onPause);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
+    if ((options.media ?? "video") === "image" && options.image) {
+      this.setImage(options.image).catch((error) => this.handleError(error, "PANORAMALITE_TEXTURE_ERROR"));
+    } else {
+      this.bindVideo(player2.getVideoElement());
+    }
+    this.applyEnabledState();
+    emitQos(this.coreBus, "PANORAMALITE_READY", "info", "PanoramaLite renderer ready");
+  }
+  setEnabled(enabled) {
+    if (this.enabled === enabled)
+      return;
+    this.enabled = enabled;
+    this.applyEnabledState();
+    if (enabled) {
+      this.scheduleRender();
+      this.scheduleVideoFrameLoop();
+    } else {
+      this.cancelRenderScheduling();
+    }
+  }
+  setView(view2) {
+    this.view = normalizeView(view2, this.limits, this.view);
+    this.scheduleRender(false);
+  }
+  bindVideo(video2) {
+    this.cancelRenderScheduling();
+    this.detachVideoFrameEvents();
+    this.restoreVideoStyle();
+    this.video = video2;
+    this.videoFrameDirty = true;
+    this.lastPresentedFrames = null;
+    this.lastVideoMediaTime = null;
+    this.lastVideoRenderAt = 0;
+    if (this.options.crossOrigin !== void 0) {
+      video2.crossOrigin = this.options.crossOrigin;
+    }
+    this.renderer.setTextureTransform({
+      textureFlipX: resolveTextureFlipX(this.options),
+      textureFlipY: resolveTextureFlipY(this.options)
+    });
+    this.viewerControls?.bindVideo(video2, "video");
+    this.renderer.setTextureSource(video2);
+    this.attachVideoFrameEvents(video2);
+    this.updateVideoVisibility();
+    this.scheduleRender();
+    this.scheduleVideoFrameLoop();
+  }
+  async setImage(image) {
+    const loaded = await loadPanoramaImage(image);
+    this.cancelRenderScheduling();
+    this.detachVideoFrameEvents();
+    this.restoreVideoStyle();
+    this.video = null;
+    this.videoFrameDirty = false;
+    this.renderer.setTextureTransform({
+      textureFlipX: resolveTextureFlipX(this.options),
+      textureFlipY: resolveTextureFlipY(this.options)
+    });
+    this.viewerControls?.setMedia("image");
+    this.renderer.setTextureSource(loaded);
+    this.scheduleRender();
+  }
+  setInteractive(enabled) {
+    this.interactiveEnabled = enabled;
+    this.controls?.setEnabled(enabled && this.enabled);
+  }
+  resize() {
+    this.renderer.requestResize();
+    this.renderer.resize();
+    this.scheduleRender(false);
+  }
+  destroy() {
+    if (this.destroyed)
+      return;
+    this.destroyed = true;
+    this.cancelRenderScheduling();
+    this.player.off("ready", this.onReady);
+    this.player.off("play", this.onPlay);
+    this.player.off("pause", this.onPause);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    this.detachVideoFrameEvents();
+    this.controls?.destroy();
+    this.controls = null;
+    this.viewerControls?.destroy();
+    this.viewerControls = null;
+    this.renderer.destroy();
+    this.restoreVideoStyle();
+    this.canvas.remove();
+    this.restoreHostPositioning();
+  }
+  rebindCurrentVideo() {
+    this.bindVideo(this.player.getVideoElement());
+  }
+  scheduleRender(uploadTexture = true) {
+    if (this.destroyed || !this.enabled)
+      return;
+    this.pendingRenderUpload ||= uploadTexture;
+    if (this.rafId !== null)
+      return;
+    this.rafId = requestAnimationFrame(() => {
+      this.rafId = null;
+      const shouldUpload = this.pendingRenderUpload;
+      this.pendingRenderUpload = false;
+      this.renderOnce(shouldUpload);
+    });
+  }
+  scheduleVideoFrameLoop() {
+    const video2 = this.video;
+    if (this.destroyed || !this.enabled || !video2?.requestVideoFrameCallback || video2.paused || isDocumentHidden() || this.videoFrameId !== null) {
+      return;
+    }
+    this.videoFrameId = video2.requestVideoFrameCallback((now2, metadata) => {
+      this.videoFrameId = null;
+      if (!this.destroyed && !isDocumentHidden() && this.shouldRenderVideoFrame(now2, metadata)) {
+        this.videoFrameDirty = true;
+        this.scheduleRender();
+      }
+      this.scheduleVideoFrameLoop();
+    });
+  }
+  shouldRenderVideoFrame(now2, metadata) {
+    const frame = normalizeVideoFrameMetadata(metadata);
+    if (frame.presentedFrames !== null && frame.presentedFrames === this.lastPresentedFrames)
+      return false;
+    if (frame.presentedFrames === null && frame.mediaTime !== null && frame.mediaTime === this.lastVideoMediaTime)
+      return false;
+    if (this.minVideoFrameIntervalMs <= 0 || this.lastVideoRenderAt <= 0) {
+      this.lastVideoRenderAt = now2;
+      this.lastPresentedFrames = frame.presentedFrames;
+      this.lastVideoMediaTime = frame.mediaTime;
+      return true;
+    }
+    if (now2 - this.lastVideoRenderAt < this.minVideoFrameIntervalMs)
+      return false;
+    this.lastVideoRenderAt = now2;
+    this.lastPresentedFrames = frame.presentedFrames;
+    this.lastVideoMediaTime = frame.mediaTime;
+    return true;
+  }
+  renderOnce(uploadTexture = true) {
+    if (!this.enabled)
+      return;
+    const shouldUpload = uploadTexture && (!this.video || !this.video.requestVideoFrameCallback || this.videoFrameDirty);
+    try {
+      this.renderer.render(this.view, { uploadTexture: shouldUpload });
+      if (shouldUpload)
+        this.videoFrameDirty = false;
+    } catch (error) {
+      this.handleError(error, "PANORAMALITE_RENDER_ERROR");
+    }
+  }
+  cancelRenderScheduling() {
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    this.pendingRenderUpload = false;
+    if (this.videoFrameId !== null && this.video?.cancelVideoFrameCallback) {
+      this.video.cancelVideoFrameCallback(this.videoFrameId);
+      this.videoFrameId = null;
+    }
+  }
+  handleError(error, code) {
+    emitQos(this.coreBus, code, "warning", getErrorMessage(error));
+    this.options.onError?.(error);
+  }
+  applyCanvasStyle() {
+    const style = this.canvas.style;
+    style.display = "block";
+    style.position = "absolute";
+    style.inset = "0";
+    style.width = "100%";
+    style.height = "100%";
+    style.touchAction = "none";
+    style.background = "#000";
+  }
+  applyEnabledState() {
+    this.canvas.style.display = this.enabled ? "block" : "none";
+    this.canvas.style.pointerEvents = this.enabled ? "auto" : "none";
+    this.controls?.setEnabled(this.enabled && this.interactiveEnabled);
+    this.viewerControls?.setVisible(this.enabled);
+    this.updateVideoVisibility();
+  }
+  updateVideoVisibility() {
+    const video2 = this.video;
+    if (!video2)
+      return;
+    if (!this.enabled || this.options.hideSourceVideo === false) {
+      this.restoreVideoStyle();
+      return;
+    }
+    if (!this.previousVideoVisibility) {
+      this.previousVideoVisibility = {
+        visibility: video2.style.visibility,
+        opacity: video2.style.opacity,
+        pointerEvents: video2.style.pointerEvents
+      };
+    }
+    video2.style.visibility = "hidden";
+    video2.style.opacity = "0";
+    video2.style.pointerEvents = "none";
+  }
+  restoreVideoStyle() {
+    if (!this.video || !this.previousVideoVisibility)
+      return;
+    this.video.style.visibility = this.previousVideoVisibility.visibility ?? "";
+    this.video.style.opacity = this.previousVideoVisibility.opacity ?? "";
+    this.video.style.pointerEvents = this.previousVideoVisibility.pointerEvents ?? "";
+    this.previousVideoVisibility = null;
+  }
+  attachVideoFrameEvents(video2) {
+    const events = ["loadeddata", "loadedmetadata", "canplay", "playing", "timeupdate", "seeked"];
+    for (const event of events) {
+      const handler = () => {
+        this.scheduleRender();
+        this.scheduleVideoFrameLoop();
+      };
+      video2.addEventListener?.(event, handler);
+      this.videoEventHandlers.push({ event, handler });
+    }
+  }
+  detachVideoFrameEvents() {
+    if (!this.video || !this.videoEventHandlers.length) {
+      this.videoEventHandlers.length = 0;
+      return;
+    }
+    for (const { event, handler } of this.videoEventHandlers) {
+      this.video.removeEventListener?.(event, handler);
+    }
+    this.videoEventHandlers.length = 0;
+  }
+  ensureHostPositioning() {
+    const inlinePosition = this.host.style.position ?? "";
+    const computedPosition = typeof window !== "undefined" && typeof window.getComputedStyle === "function" ? window.getComputedStyle(this.host).position : inlinePosition;
+    if (computedPosition && computedPosition !== "static")
+      return;
+    this.previousHostPosition = inlinePosition;
+    this.host.style.position = "relative";
+  }
+  restoreHostPositioning() {
+    if (this.previousHostPosition === null)
+      return;
+    this.host.style.position = this.previousHostPosition;
+    this.previousHostPosition = null;
+  }
+  observeResize() {
+    if (typeof ResizeObserver === "undefined")
+      return;
+    this.resizeObserver = new ResizeObserver(() => {
+      this.renderer.requestResize();
+      this.scheduleRender(false);
+    });
+    this.resizeObserver.observe(this.host);
+  }
+};
+function resolveTarget(target, video2) {
+  if (isHTMLElement(target))
+    return target;
+  if (typeof target === "string") {
+    const found = document.querySelector(target);
+    if (!isHTMLElement(found)) {
+      throw new Error(`PanoramaLite target not found: ${target}`);
+    }
+    return found;
+  }
+  if (video2.parentElement)
+    return video2.parentElement;
+  if (isHTMLElement(document.body))
+    return document.body;
+  throw new Error("PanoramaLite target is required when the video element has no parent");
+}
+function isDocumentHidden() {
+  return document.visibilityState === "hidden";
+}
+function isHTMLElement(value) {
+  return typeof HTMLElement !== "undefined" && value instanceof HTMLElement;
+}
+function resolveVideoFrameIntervalMs(maxVideoFps) {
+  if (typeof maxVideoFps !== "number" || !Number.isFinite(maxVideoFps) || maxVideoFps <= 0) {
+    return 0;
+  }
+  return 1e3 / Math.min(120, Math.max(1, maxVideoFps));
+}
+function resolveTextureFlipX(options) {
+  if (typeof options.textureFlipX === "boolean")
+    return options.textureFlipX;
+  return false;
+}
+function resolveTextureFlipY(options) {
+  if (typeof options.textureFlipY === "boolean")
+    return options.textureFlipY;
+  return false;
+}
+function normalizeVideoFrameMetadata(metadata) {
+  if (!metadata || typeof metadata !== "object")
+    return { presentedFrames: null, mediaTime: null };
+  const candidate = metadata;
+  return {
+    presentedFrames: typeof candidate.presentedFrames === "number" ? candidate.presentedFrames : null,
+    mediaTime: typeof candidate.mediaTime === "number" ? candidate.mediaTime : null
+  };
+}
+function emitQos(coreBus, code, severity, message) {
+  const payload = {
+    type: code.toLowerCase().replace(/_/g, "-"),
+    code,
+    severity,
+    message,
+    ts: Date.now()
+  };
+  coreBus.emit("qos", payload);
+}
+function getErrorMessage(error) {
+  if (error instanceof Error)
+    return error.message;
+  if (typeof error === "string")
+    return error;
+  return "PanoramaLite error";
+}
+
 // examples/app.ts
 var video = document.getElementById("player");
 var select = document.getElementById("source-select");
@@ -75635,6 +77172,13 @@ var logEl = document.getElementById("log");
 var skinToggle = document.getElementById("toggle-skin");
 var nativeToggle = document.getElementById("toggle-native");
 var lowLatencyToggle = document.getElementById("toggle-low-latency");
+var panoramaToggle = document.getElementById("toggle-panorama");
+var panoramaOptions = document.getElementById("panorama-options");
+var panoramaFlipXToggle = document.getElementById("toggle-panorama-flip-x");
+var panoramaFlipYToggle = document.getElementById("toggle-panorama-flip-y");
+var panoramaResetBtn = document.getElementById("btn-panorama-reset");
+var panoramaStatus = document.getElementById("panorama-status");
+var pluginStatus = document.getElementById("plugin-status");
 var overlay = document.getElementById("overlay");
 var overlayText = document.getElementById("overlay-text");
 var gbInviteInput = document.getElementById("gb-invite");
@@ -75652,6 +77196,10 @@ var busy = false;
 var operationQueue = Promise.resolve();
 var uiStatus = "idle";
 var currentSrc = null;
+var panoramaHandle = null;
+var panoramaMode = false;
+var activePanoramaTextureFlipX = false;
+var activePanoramaTextureFlipY = false;
 var useSkin = true;
 var hideNativeControls = false;
 var latestStatsEvent = null;
@@ -75687,12 +77235,36 @@ var presetSources = [
   { label: "MP4 \u672C\u5730 (/testvideo/Rec 0017.mp4)", type: "file", url: "/testvideo/Rec%200017.mp4", webCodecs: { enable: true, preferMp4: true } },
   { label: "FLV demo (ws-raw)", type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv" }
 ];
+function sourceKey(source) {
+  return [
+    source.type,
+    source.url,
+    source.lowLatency === true ? "ll" : "normal",
+    source.panorama ? "pano" : "ordinary"
+  ].join("|");
+}
+var knownSourceKeys = new Set(presetSources.map(sourceKey));
+function pushPresetSource(source) {
+  const key = sourceKey(source);
+  if (knownSourceKeys.has(key))
+    return;
+  knownSourceKeys.add(key);
+  presetSources.push(source);
+}
+function formatSourceLabel(source) {
+  if (!source.panorama)
+    return source.label;
+  return source.label.startsWith("[\u5168\u666F]") ? source.label : `[\u5168\u666F] ${source.label}`;
+}
 sources_default?.forEach((s2, idx) => {
-  presetSources.push({
+  pushPresetSource({
     label: s2.label || `Default ${idx} - ${s2.type}`,
     type: s2.type,
     url: s2.url,
     lowLatency: s2.lowLatency,
+    panorama: !!s2.panorama,
+    textureFlipX: s2.textureFlipX,
+    textureFlipY: s2.textureFlipY,
     fmp4: s2.type === "fmp4" ? {
       transport: s2.transport,
       codec: s2.codec,
@@ -75714,7 +77286,7 @@ function populateSelect() {
   presetSources.forEach((s2, idx) => {
     const opt = document.createElement("option");
     opt.value = String(idx);
-    opt.textContent = s2.label;
+    opt.textContent = formatSourceLabel(s2);
     select.appendChild(opt);
   });
   select.value = CUSTOM_VALUE;
@@ -75749,11 +77321,16 @@ function syncUiWithSource(src) {
   if (lowLatencyToggle && typeof src.lowLatency === "boolean") {
     lowLatencyToggle.checked = src.lowLatency;
   }
+  if (panoramaFlipXToggle)
+    panoramaFlipXToggle.checked = !!src.textureFlipX;
+  if (panoramaFlipYToggle)
+    panoramaFlipYToggle.checked = !!src.textureFlipY;
+  setPanoramaMode(!!src.panorama, { updateCurrentSource: false });
 }
 function setBusy(flag, message) {
   busy = flag;
   if (overlay && overlayText) {
-    if (flag && !useSkin) {
+    if (flag && (!useSkin || panoramaMode)) {
       overlay.classList.add("visible");
       overlayText.textContent = message || `${flag}...`;
     } else {
@@ -75768,6 +77345,14 @@ function setBusy(flag, message) {
   select.disabled = disabled;
   typeSelect.disabled = disabled;
   urlInput.disabled = disabled;
+  if (panoramaToggle)
+    panoramaToggle.disabled = disabled;
+  if (panoramaFlipXToggle)
+    panoramaFlipXToggle.disabled = disabled || !panoramaMode;
+  if (panoramaFlipYToggle)
+    panoramaFlipYToggle.disabled = disabled || !panoramaMode;
+  if (panoramaResetBtn)
+    panoramaResetBtn.disabled = disabled || !panoramaMode;
 }
 function setStatus(status2, message) {
   uiStatus = status2;
@@ -75816,7 +77401,13 @@ function collectLongRunSample() {
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     elapsedSec: longRunStartedAt ? Math.round((Date.now() - longRunStartedAt) / 1e3) : 0,
     state: player?.getState?.() || uiStatus,
-    source: currentSrc ? { label: currentSrc.label, type: currentSrc.type, url: currentSrc.url, lowLatency: currentSrc.lowLatency } : null,
+    source: currentSrc ? {
+      label: currentSrc.label,
+      type: currentSrc.type,
+      url: currentSrc.url,
+      lowLatency: currentSrc.lowLatency,
+      panorama: currentSrc.panorama
+    } : null,
     tech: qualityState?.tech || null,
     quality: qualityState || null,
     video: {
@@ -75833,7 +77424,8 @@ function collectLongRunSample() {
     dom: {
       video: document.querySelectorAll("video").length,
       audio: document.querySelectorAll("audio").length,
-      uiShell: document.querySelectorAll("fyra-ui-shell").length
+      uiShell: document.querySelectorAll("fyra-ui-shell").length,
+      panoramaCanvas: document.querySelectorAll(".fyra-panoramalite").length
     },
     memory: memory ? {
       usedJSHeapSize: memory.usedJSHeapSize,
@@ -75884,6 +77476,63 @@ function applyLowLatencyToggle(src) {
   if (src.lowLatency === lowLatencyToggle.checked)
     return src;
   return { ...src, lowLatency: lowLatencyToggle.checked };
+}
+function getPlayerHost() {
+  return document.querySelector(".player-shell");
+}
+function setNativeControlVisibility() {
+  video.controls = !hideNativeControls && !useSkin && !panoramaMode;
+}
+function getPanoramaTextureSettings() {
+  return {
+    textureFlipX: !!panoramaFlipXToggle?.checked,
+    textureFlipY: !!panoramaFlipYToggle?.checked
+  };
+}
+function updateCurrentPanoramaSource(enabled = panoramaMode) {
+  if (!currentSrc)
+    return null;
+  currentSrc = {
+    ...currentSrc,
+    panorama: enabled,
+    ...getPanoramaTextureSettings()
+  };
+  return currentSrc;
+}
+function syncPanoramaModeUi() {
+  const host = getPlayerHost();
+  host?.classList.toggle("panorama-mode", panoramaMode);
+  if (panoramaOptions)
+    panoramaOptions.hidden = !panoramaMode;
+  if (panoramaStatus) {
+    const flipLabel = `flipX=${activePanoramaTextureFlipX ? "on" : "off"} / flipY=${activePanoramaTextureFlipY ? "on" : "off"}`;
+    const rendererState = panoramaHandle ? panoramaHandle.isEnabled() ? "active" : "standby" : "not-ready";
+    panoramaStatus.textContent = panoramaMode ? `PanoramaLite: ${rendererState} / ${flipLabel}` : `PanoramaLite: standby / ${flipLabel}`;
+  }
+  if (pluginStatus) {
+    pluginStatus.textContent = `plugins: ui=${useSkin ? "on" : "off"} | panoramalite=${panoramaHandle ? panoramaMode ? "on" : "standby" : "not-ready"}`;
+  }
+  setNativeControlVisibility();
+  if (busy)
+    setBusy(busy);
+}
+function setPanoramaMode(enabled, options = {}) {
+  const next = !!enabled;
+  const texture = getPanoramaTextureSettings();
+  panoramaMode = next;
+  if (panoramaToggle)
+    panoramaToggle.checked = next;
+  if (options.updateCurrentSource !== false) {
+    updateCurrentPanoramaSource(next);
+  }
+  const textureChanged = next && (texture.textureFlipX !== activePanoramaTextureFlipX || texture.textureFlipY !== activePanoramaTextureFlipY);
+  if (options.reloadIfTextureChanged && textureChanged && currentSrc) {
+    void safeRun("load", () => createPlayer(updateCurrentPanoramaSource(next)));
+    syncPanoramaModeUi();
+    return;
+  }
+  panoramaHandle?.setEnabled(next);
+  syncPanoramaModeUi();
 }
 function parseGbInviteUrl(inviteUrl) {
   if (!inviteUrl)
@@ -76006,6 +77655,8 @@ function detectType(url) {
     return "fmp4";
   if (lower.endsWith(".flv"))
     return "ws-raw";
+  if (lower.includes("/whep") || lower.includes(":8889/") || lower.includes(":28889/"))
+    return "webrtc";
   if (lower.startsWith("ws://") || lower.startsWith("wss://"))
     return "webrtc-oven";
   if (lower.endsWith(".ts") || lower.endsWith(".mp4"))
@@ -76055,27 +77706,67 @@ async function createPlayer(source) {
     const previous = player;
     player = null;
     window.fyraPlayer = null;
+    window.fyraPanoramaHandle = null;
+    panoramaHandle = null;
     await previous.destroy().catch(() => {
     });
   }
   const effectiveSource = applyLowLatencyToggle(source);
-  const host = document.querySelector(".player-shell");
+  const sourcePanoramaMode = !!effectiveSource.panorama || !!panoramaToggle?.checked;
+  panoramaMode = sourcePanoramaMode;
+  if (panoramaToggle)
+    panoramaToggle.checked = sourcePanoramaMode;
+  if (currentSrc === source || currentSrc?.url === source.url) {
+    currentSrc = {
+      ...source,
+      panorama: sourcePanoramaMode,
+      textureFlipX: !!panoramaFlipXToggle?.checked,
+      textureFlipY: !!panoramaFlipYToggle?.checked
+    };
+  }
+  const host = getPlayerHost();
   if (!useSkin && host) {
     host.querySelectorAll("fyra-ui-shell").forEach((el) => el.remove());
   }
-  video.controls = !hideNativeControls && !useSkin;
+  setNativeControlVisibility();
   const lowerUrl = effectiveSource.url.toLowerCase();
   const wcEnable = !!effectiveSource.webCodecs?.enable || effectiveSource.type === "file" && lowerUrl.endsWith(".ts");
+  activePanoramaTextureFlipX = !!effectiveSource.textureFlipX || !!panoramaFlipXToggle?.checked;
+  activePanoramaTextureFlipY = !!effectiveSource.textureFlipY || !!panoramaFlipYToggle?.checked;
+  const plugins = [
+    ...useSkin ? [
+      createUiComponentsPlugin({
+        target: ".player-shell"
+      })
+    ] : [],
+    createPanoramaLitePlugin({
+      target: ".player-shell",
+      media: "video",
+      enabled: sourcePanoramaMode,
+      viewerControls: true,
+      crossOrigin: "anonymous",
+      powerPreference: "high-performance",
+      textureFlipX: activePanoramaTextureFlipX,
+      textureFlipY: activePanoramaTextureFlipY,
+      onReady: (handle) => {
+        panoramaHandle = handle;
+        window.fyraPanoramaHandle = handle;
+        handle.setEnabled(panoramaMode);
+        syncPanoramaModeUi();
+      },
+      onError: (error) => {
+        appendLog(`panoramalite error: ${error instanceof Error ? error.message : String(error)}`);
+        syncPanoramaModeUi();
+      }
+    })
+  ];
+  syncPanoramaModeUi();
   player = new FyraPlayer({
     video,
     sources: [toPlayerSource(effectiveSource)],
     techOrder: ["gb28181", "webrtc", "ws-raw", "hls", "dash", "fmp4", "file"],
     webCodecs: wcEnable ? { ...effectiveSource.webCodecs || {}, enable: true } : void 0,
-    plugins: useSkin ? [
-      createUiComponentsPlugin({
-        target: ".player-shell"
-      })
-    ] : []
+    plugins
   });
   window.fyraPlayer = player;
   bindPlayerEvents(player);
@@ -76111,7 +77802,10 @@ async function stopPlayback(reason) {
     }
     player = null;
     window.fyraPlayer = null;
+    window.fyraPanoramaHandle = null;
+    panoramaHandle = null;
   }
+  setPanoramaMode(false, { updateCurrentSource: false });
   setStatus("idle", reason ? `stopped: ${reason}` : "stopped");
 }
 populateSelect();
@@ -76133,7 +77827,13 @@ loadBtn.onclick = () => {
       alert("\u8BF7\u8F93\u5165 URL");
       throw new Error("missing url");
     }
-    const src = { label: `Custom ${type}`, type, url };
+    const src = {
+      label: `Custom ${type}`,
+      type,
+      url,
+      panorama: !!panoramaToggle?.checked,
+      ...getPanoramaTextureSettings()
+    };
     if (type === "gb28181") {
       const invite = gbInviteInput?.value.trim() || "";
       if (!invite) {
@@ -76208,6 +77908,8 @@ fileInput.onchange = () => {
       type: "file",
       url: blobUrl,
       container,
+      panorama: !!panoramaToggle?.checked,
+      ...getPanoramaTextureSettings(),
       webCodecs: void 0
       // TS blob files use mpegts.js, not WebCodecs
     };
@@ -76215,6 +77917,7 @@ fileInput.onchange = () => {
     select.value = CUSTOM_VALUE;
     urlInput.value = `[\u672C\u5730\u6587\u4EF6] ${file.name}`;
     typeSelect.value = "file";
+    setPanoramaMode(!!src.panorama, { updateCurrentSource: false });
     appendLog(`\u5DF2\u9009\u62E9\u672C\u5730\u6587\u4EF6: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB), \u683C\u5F0F: ${ext.toUpperCase()}`);
     return createPlayer(src);
   });
@@ -76227,7 +77930,7 @@ if (skinToggle) {
     if (!useSkin) {
       const host = document.querySelector(".player-shell");
       host?.querySelectorAll("fyra-ui-shell").forEach((el) => el.remove());
-      video.controls = !hideNativeControls;
+      setNativeControlVisibility();
     }
     if (useSkin && overlay) {
       overlay.classList.remove("visible");
@@ -76241,7 +77944,7 @@ if (nativeToggle) {
   nativeToggle.checked = hideNativeControls;
   nativeToggle.onchange = () => {
     hideNativeControls = nativeToggle.checked;
-    video.controls = !hideNativeControls && !useSkin;
+    setNativeControlVisibility();
   };
 }
 if (lowLatencyToggle) {
@@ -76255,6 +77958,40 @@ if (lowLatencyToggle) {
     safeRun("load", () => createPlayer(currentSrc));
   };
 }
+if (panoramaToggle) {
+  panoramaToggle.checked = panoramaMode;
+  panoramaToggle.onchange = () => {
+    setPanoramaMode(panoramaToggle.checked, {
+      updateCurrentSource: true,
+      reloadIfTextureChanged: true
+    });
+  };
+}
+panoramaResetBtn?.addEventListener("click", () => {
+  panoramaHandle?.resetView();
+});
+for (const input of [panoramaFlipXToggle, panoramaFlipYToggle]) {
+  input?.addEventListener("change", () => {
+    updateCurrentPanoramaSource(panoramaMode);
+    if (panoramaMode && currentSrc) {
+      safeRun("load", () => createPlayer(currentSrc));
+      return;
+    }
+    syncPanoramaModeUi();
+  });
+}
+window.fyraPanorama = {
+  getHandle: () => panoramaHandle,
+  isEnabled: () => panoramaMode,
+  setEnabled: (enabled) => setPanoramaMode(enabled, { updateCurrentSource: true, reloadIfTextureChanged: true }),
+  resetView: () => panoramaHandle?.resetView(),
+  getPlugins: () => ({
+    ui: useSkin,
+    panoramalite: !!panoramaHandle,
+    panoramaliteMode: panoramaMode ? "panorama" : "ordinary"
+  })
+};
+syncPanoramaModeUi();
 FyraPlayer.probeWebCodecs().then((support) => {
   wcSupport.textContent = `WebCodecs: h264=${support.h264 ? "\u2714" : "\u2716"} | h265=${support.h265 ? "\u2714" : "\u2716"} | av1=${support.av1 ? "\u2714" : "\u2716"} | vp9=${support.vp9 ? "\u2714" : "\u2716"}`;
 }).catch(() => {

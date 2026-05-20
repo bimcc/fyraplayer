@@ -13,11 +13,14 @@
 
 Supported example assets for 1.0 are intentionally small:
 
-- `examples/basic.html`: the primary ESM demo and protocol playground.
+- `examples/basic.html`: the primary ESM demo and protocol playground. It is
+  also the unified ordinary/PanoramaLite product demo: ordinary and `[全景]`
+  sources share one selector, and the visible controls switch between the UI
+  shell and PanoramaLite viewer controls at runtime.
 - `examples/sources.js`: the checked source preset manifest used by the demo.
 - `examples/minimal-iife.html`: the no-build browser/IIFE integration smoke.
-- `examples/panoramalite.html`: the PanoramaLite WebGL2 renderer demo and
-  browser smoke target.
+- `examples/panoramalite.html`: the focused PanoramaLite WebGL2 renderer demo
+  and browser smoke target for orientation, pixels, and WebGL lifecycle checks.
 
 Older standalone HLS debug pages and placeholder PSV/Cesium HTML demos were
 removed from `examples/` because they bypassed the current SDK integration path

@@ -1925,6 +1925,43 @@ Validation:
 
 ---
 
+### 2026-05-20 Unified Basic Demo For PanoramaLite
+
+Summary:
+
+- Merged the ordinary player and PanoramaLite product-demo behavior into
+  `examples/basic.html` / `examples/app.ts`.
+- `examples/sources.js` panorama entries now flow into the main source
+  selector with a `[全景]` prefix instead of living only in the focused
+  PanoramaLite demo.
+- Selecting a panorama source automatically enables PanoramaLite mode. Manual
+  runtime switching is also available through the `全景模式` toggle and
+  `window.fyraPanorama`.
+- In ordinary mode the UI plugin shell remains visible. In panorama mode the
+  normal UI shell is hidden and PanoramaLite viewer controls become the visible
+  playback/fullscreen surface. Native controls stay hidden in panorama mode.
+- Panorama status and plugin status are shown in the main demo so QA can verify
+  configured plugins, active mode, and texture flip state without opening the
+  console.
+
+Validation:
+
+- `pnpm bundle:examples`: passed.
+- `pnpm check:sources`: passed, 18 example sources.
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
+- `pnpm check:public-api`: passed.
+- `pnpm exec jest tests/panoramalite.test.ts --runInBand`: passed,
+  14 tests.
+- `git diff --check`: passed.
+- `pnpm check:release`: passed, 26 suites / 142 tests plus public API,
+  exports, source contract, and IIFE bundle.
+- Playwright on `http://127.0.0.1:4246/basic.html`: passed for source-list
+  structure, Naver panorama source auto-enable, UI-shell replacement,
+  PanoramaLite canvas/handle activation, and ordinary UI restoration after
+  disabling panorama mode.
+
+---
+
 ## 9. How To Update This Document
 
 When work is done:
