@@ -82,14 +82,14 @@ UI controls are enabled only through `plugins: [createUiComponentsPlugin(...)]`.
 ### Source Resolver Middleware
 
 `auto` sources are resolved through `resolve` middleware. The standard engine
-integration helper lives in `fyraplayer/plugins/engines`:
+integration helper lives in `@bimccfyra/fyraplayer/plugins/engines`:
 
 ```typescript
-import { FyraPlayer } from 'fyraplayer';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
 import {
   createSourceResolverMiddleware,
   registerDefaultEngines
-} from 'fyraplayer/plugins/engines';
+} from '@bimccfyra/fyraplayer/plugins/engines';
 
 registerDefaultEngines();
 
@@ -122,7 +122,7 @@ Resolver notes:
 ### UI 插件
 
 ```typescript
-import { createUiComponentsPlugin } from 'fyraplayer/plugins/ui-components';
+import { createUiComponentsPlugin } from '@bimccfyra/fyraplayer/plugins/ui-components';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -144,9 +144,9 @@ External protocols should be added through a plugin, not by patching the
 return a lifecycle cleanup that calls the handle's `unregister()`.
 
 ```typescript
-import type { PluginCtor, Source, Tech } from 'fyraplayer';
+import type { PluginCtor, Source, Tech } from '@bimccfyra/fyraplayer';
 
-declare module 'fyraplayer' {
+declare module '@bimccfyra/fyraplayer' {
   interface CustomTechNameMap {
     acme: true;
   }
@@ -512,13 +512,13 @@ DASH 自适应码率播放：
   builds do not parse dash.js when they only use HLS/WebRTC/file sources.
   Hosts can also provide `dashjsLoader` to use a custom CDN or app bundle.
   Vite/Rolldown host applications should import
-  `fyraplayer/vendor/dash.all.min.js?url` and pass it as `scriptUrl` so the
+  `@bimccfyra/fyraplayer/vendor/dash.all.min.js?url` and pass it as `scriptUrl` so the
   vendor script is emitted with the app build.
 - 支持 ABR 自适应码率
 
 ```typescript
-import { createDashTechPlugin } from 'fyraplayer/plugins/dash';
-import dashJsScriptUrl from 'fyraplayer/vendor/dash.all.min.js?url';
+import { createDashTechPlugin } from '@bimccfyra/fyraplayer/plugins/dash';
+import dashJsScriptUrl from '@bimccfyra/fyraplayer/vendor/dash.all.min.js?url';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -850,7 +850,7 @@ WebCodecs configuration, fallback diagnostics, and optional performance-budget w
 Performance monitoring is optional and lives outside core playback:
 
 ```typescript
-import { createPerformanceMonitorPlugin } from 'fyraplayer/plugins/performance';
+import { createPerformanceMonitorPlugin } from '@bimccfyra/fyraplayer/plugins/performance';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -893,7 +893,7 @@ JSON export. It does not control playback, reconnect, quality, or source
 selection.
 
 ```typescript
-import { createDiagnosticsPlugin } from 'fyraplayer/plugins/diagnostics';
+import { createDiagnosticsPlugin } from '@bimccfyra/fyraplayer/plugins/diagnostics';
 
 let diagnostics: DiagnosticsHandle | undefined;
 
@@ -930,7 +930,7 @@ The snapshot includes:
 For a built-in visual support surface, enable the debug panel wrapper:
 
 ```typescript
-import { createDebugPanelPlugin } from 'fyraplayer/plugins/diagnostics';
+import { createDebugPanelPlugin } from '@bimccfyra/fyraplayer/plugins/diagnostics';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -959,11 +959,11 @@ URL signatures before a source is loaded or before WebRTC WHEP/WHIP signaling
 runs:
 
 ```typescript
-import { FyraPlayer } from 'fyraplayer';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
 import {
   createAuthRecoveryPlugin,
   createAuthSigningMiddleware
-} from 'fyraplayer/plugins/auth';
+} from '@bimccfyra/fyraplayer/plugins/auth';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -1038,9 +1038,9 @@ VMS, and live operations, prefer server-side recording and connect the UI
 recording toggle to `createRecordingApiPlugin()`:
 
 ```typescript
-import { FyraPlayer } from 'fyraplayer';
-import { createRecordingApiPlugin, type RecordingApiHandle } from 'fyraplayer/plugins/recording-api';
-import { createUiComponentsPlugin } from 'fyraplayer/plugins/ui-components';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
+import { createRecordingApiPlugin, type RecordingApiHandle } from '@bimccfyra/fyraplayer/plugins/recording-api';
+import { createUiComponentsPlugin } from '@bimccfyra/fyraplayer/plugins/ui-components';
 
 let recording: RecordingApiHandle | undefined;
 
@@ -1097,8 +1097,8 @@ quality selection, reconnect, and source switching. The plugin consumes the
 player video element or an image and renders it to a WebGL2 canvas.
 
 ```typescript
-import { FyraPlayer } from 'fyraplayer';
-import { createPanoramaLitePlugin } from 'fyraplayer/plugins/panoramalite';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
+import { createPanoramaLitePlugin } from '@bimccfyra/fyraplayer/plugins/panoramalite';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -1174,7 +1174,7 @@ Tech selector. Use it when a catalog/stream API knows that a source should open
 in panorama mode:
 
 ```ts
-import { getSourcePresentation, isPanoramaSource } from 'fyraplayer';
+import { getSourcePresentation, isPanoramaSource } from '@bimccfyra/fyraplayer';
 
 const source: Source = {
   type: 'hls',
@@ -1265,8 +1265,8 @@ evidence for image, file/video, HLS, live HLS, and live WebRTC is tracked in
 Utility plugins are optional and lifecycle-safe:
 
 ```typescript
-import { createStoragePlugin } from 'fyraplayer/plugins/storage';
-import { createReconnectPlugin } from 'fyraplayer/plugins/reconnect';
+import { createStoragePlugin } from '@bimccfyra/fyraplayer/plugins/storage';
+import { createReconnectPlugin } from '@bimccfyra/fyraplayer/plugins/reconnect';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -1325,7 +1325,7 @@ import {
   createUiComponentsPlugin,
   type UiRecordToggleEvent,
   type UiScreenshotEvent
-} from 'fyraplayer/plugins/ui-components';
+} from '@bimccfyra/fyraplayer/plugins/ui-components';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -1422,7 +1422,7 @@ covered for MediaMTX WHEP `404 no stream is available`.
 FyraPlayer 提供格式检测工具，可根据 URL、Content-Type 或文件头自动识别格式：
 
 ```typescript
-import { detectFormatFromUrl, detectFormatFromBytes, autoDetectSourceType } from 'fyraplayer';
+import { detectFormatFromUrl, detectFormatFromBytes, autoDetectSourceType } from '@bimccfyra/fyraplayer';
 
 // URL 检测
 const format = detectFormatFromUrl('https://example.com/stream.m3u8');
@@ -1443,7 +1443,7 @@ const format = detectFormatFromBytes(bytes);
 ### 基础播放
 
 ```typescript
-import { FyraPlayer } from 'fyraplayer';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -1527,7 +1527,7 @@ player.on('metadata', (evt) => {
 ## 与 @aspect/openklv 集成
 
 ```typescript
-import { FyraPlayer } from 'fyraplayer';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
 import { KLVParser, SyncEngine } from '@aspect/openklv';
 
 const parser = new KLVParser();
@@ -1588,7 +1588,7 @@ function render() {
 Core playback emits raw metadata events and does not parse KLV/MISB/SEI business semantics. Use the optional metadata plugin to connect a domain parser:
 
 ```typescript
-import { createMetadataPlugin } from 'fyraplayer/plugins/metadata';
+import { createMetadataPlugin } from '@bimccfyra/fyraplayer/plugins/metadata';
 
 const player = new FyraPlayer({
   video: '#video',

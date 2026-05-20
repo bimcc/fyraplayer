@@ -4,7 +4,7 @@
 
 ## 依赖项
 
-- `fyraplayer` - 播放器核心
+- `@bimccfyra/fyraplayer` - 播放器核心
 - `@beeviz/cesium` - Cesium 集成（包含 FyraPlayerCesiumAdapter、VideoSource、UAVVisualizer）
 - `@aspect/openklv` - KLV/MISB 元数据解析
 
@@ -15,7 +15,7 @@
 | 组件                      | 所在包                        | 说明                              |
 | ------------------------- | ----------------------------- | --------------------------------- |
 | `FyraPlayerCesiumAdapter` | `@beeviz/cesium`              | 将 FyraPlayer 视频输出接入 Cesium |
-| `KlvBridge`               | `fyraplayer/plugins/metadata` | 元数据事件桥接                    |
+| `KlvBridge`               | `@bimccfyra/fyraplayer/plugins/metadata` | 元数据事件桥接                    |
 
 ## 快速开始
 
@@ -26,7 +26,7 @@ import {
   VideoSource,
   UAVVisualizer,
 } from "@beeviz/cesium";
-import { KlvBridge } from "fyraplayer/plugins/metadata";
+import { KlvBridge } from "@bimccfyra/fyraplayer/plugins/metadata";
 import { KLVStreamManager } from "@aspect/openklv";
 
 const videoEl = document.querySelector("#video") as HTMLVideoElement;

@@ -27,9 +27,9 @@ import {
   isPanoramaSource,
   BaseTarget,
   CanvasFrameBuffer,
-} from 'fyraplayer';
-import { createMetadataPlugin, KlvBridge, type MetadataPluginOptions } from 'fyraplayer/plugins/metadata';
-import { createMetricsPlugin, type MetricsPluginOptions } from 'fyraplayer/plugins/metrics';
+} from '@bimccfyra/fyraplayer';
+import { createMetadataPlugin, KlvBridge, type MetadataPluginOptions } from '@bimccfyra/fyraplayer/plugins/metadata';
+import { createMetricsPlugin, type MetricsPluginOptions } from '@bimccfyra/fyraplayer/plugins/metrics';
 import {
   createDebugPanelPlugin,
   createDiagnosticsPlugin,
@@ -37,7 +37,7 @@ import {
   type DiagnosticsHandle,
   type DiagnosticsPluginOptions,
   type DiagnosticsSnapshot,
-} from 'fyraplayer/plugins/diagnostics';
+} from '@bimccfyra/fyraplayer/plugins/diagnostics';
 import {
   createAuthRecoveryPlugin,
   createAuthSigningMiddleware,
@@ -47,7 +47,7 @@ import {
   type AuthRecoveryPluginOptions,
   type AuthSigningPluginOptions,
   type AuthTokenResult,
-} from 'fyraplayer/plugins/auth';
+} from '@bimccfyra/fyraplayer/plugins/auth';
 import {
   createPerformanceMonitorPlugin,
   DEFAULT_PERFORMANCE_BUDGET,
@@ -55,7 +55,7 @@ import {
   type PerformanceMonitorOptions,
   type PerformanceSample,
   type PerformanceViolation,
-} from 'fyraplayer/plugins/performance';
+} from '@bimccfyra/fyraplayer/plugins/performance';
 import {
   createPanoramaLitePlugin,
   createEquirectSphereMesh,
@@ -63,23 +63,23 @@ import {
   type PanoramaLiteHandle,
   type PanoramaLitePluginOptions,
   type PanoramaLiteQosCode,
-} from 'fyraplayer/plugins/panoramalite';
-import { createReconnectPlugin, type ReconnectPluginOptions } from 'fyraplayer/plugins/reconnect';
-import { createStoragePlugin, type StoragePluginOptions } from 'fyraplayer/plugins/storage';
+} from '@bimccfyra/fyraplayer/plugins/panoramalite';
+import { createReconnectPlugin, type ReconnectPluginOptions } from '@bimccfyra/fyraplayer/plugins/reconnect';
+import { createStoragePlugin, type StoragePluginOptions } from '@bimccfyra/fyraplayer/plugins/storage';
 import {
   createUiComponentsPlugin,
   type UiActionContext,
   type UiComponentsOptions,
   type UiRecordToggleEvent,
   type UiScreenshotEvent,
-} from 'fyraplayer/plugins/ui-components';
+} from '@bimccfyra/fyraplayer/plugins/ui-components';
 import {
   createSourceResolverMiddleware,
   engineUrlsToResolvedSources,
   registerDefaultEngines,
   type SourceResolverMiddlewareOptions,
   type SourceResolverProtocol,
-} from 'fyraplayer/plugins/engines';
+} from '@bimccfyra/fyraplayer/plugins/engines';
 import {
   createSourceResolverMiddleware as createSourceResolverMiddlewareFromPlugins,
   engineUrlsToResolvedSources as engineUrlsToResolvedSourcesFromPlugins,
@@ -102,18 +102,18 @@ import {
   type ReconnectPluginOptions as ReconnectPluginOptionsFromPlugins,
   type SourceResolverMiddlewareOptions as SourceResolverMiddlewareOptionsFromPlugins,
   type StoragePluginOptions as StoragePluginOptionsFromPlugins,
-} from 'fyraplayer/plugins';
+} from '@bimccfyra/fyraplayer/plugins';
 import {
   RecordingApiError,
   createRecordingApiPlugin,
   type RecordingApiHandle,
   type RecordingApiPluginOptions,
   type RecordingApiResponse,
-} from 'fyraplayer/plugins/recording-api';
-import { createDashTechPlugin, type DashTechPluginOptions } from 'fyraplayer/plugins/dash';
-import { Demuxer, type DemuxerCallbacks } from 'fyraplayer/techs/wsRaw/demuxer';
+} from '@bimccfyra/fyraplayer/plugins/recording-api';
+import { createDashTechPlugin, type DashTechPluginOptions } from '@bimccfyra/fyraplayer/plugins/dash';
+import { Demuxer, type DemuxerCallbacks } from '@bimccfyra/fyraplayer/techs/wsRaw/demuxer';
 
-declare module 'fyraplayer' {
+declare module '@bimccfyra/fyraplayer' {
   interface CustomTechNameMap {
     acme: true;
   }

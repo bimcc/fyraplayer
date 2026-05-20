@@ -16,7 +16,7 @@
 
 ### 2.1 架构与入口
 - `src/core.ts` 与 `src/index.ts` 导出高度重叠，`core` 的“最小包”定位与实际不一致。
-- `package.json` 未导出 `./core`，`fyraplayer/core` 无法按包子路径使用。
+- `package.json` 未导出 `./core`，`@bimccfyra/fyraplayer/core` 无法按包子路径使用。
 
 ### 2.2 类型与实现一致性
 - `PluginCtor` 类型定义为仅返回 `void`，但运行时支持返回带 `destroy` 的对象（类型与行为不一致）。
@@ -243,7 +243,7 @@
 
 ## 16. Commercial Readiness Follow-up (2026-05-16)
 
-- Restored package-local build/test reproducibility for `fyraplayer` and recorded it in `docs/commercial-readiness-roadmap.md`.
+- Restored package-local build/test reproducibility for `@bimccfyra/fyraplayer` and recorded it in `docs/commercial-readiness-roadmap.md`.
 - Began `CR-003` API consistency work:
   - `FyraPlayer.currentTime` now exists and is covered by a Jest regression test.
   - `PlayerAPI` now exposes typed event overloads plus the existing ws-raw metadata helper methods.
@@ -262,9 +262,9 @@
 - Closed `CR-004` release hygiene:
   - `pnpm build` now cleans `dist/` before emitting, preventing stale ignored build artifacts from leaking into package releases.
   - Added `pnpm check:exports` and `checks/export-contract.mjs` to verify all package export files exist after a clean build.
-  - Added explicit `fyraplayer/techs/wsRaw/demuxer` export for documented offline parsing usage.
+  - Added explicit `@bimccfyra/fyraplayer/techs/wsRaw/demuxer` export for documented offline parsing usage.
   - Updated `checks/public-api-smoke.ts` to compile the demuxer subpath import.
-  - Updated PSV docs to use external `@beeviz/fyrapano` integration rather than a nonexistent `fyraplayer` helper export.
+  - Updated PSV docs to use external `@beeviz/fyrapano` integration rather than a nonexistent `@bimccfyra/fyraplayer` helper export.
   - Removed `tests/` from `.gitignore` so test assets are not hidden from source-control review.
 - Validation:
   - `pnpm check:public-api` passed.
@@ -295,7 +295,7 @@
 
 - Closed `PL-002` under `CR-017` plugin boundary work:
   - Added `src/plugins/engines/sourceResolver.ts`.
-  - Exported `createSourceResolverMiddleware()` and `engineUrlsToResolvedSources()` from `fyraplayer/plugins/engines` and `fyraplayer/plugins`.
+  - Exported `createSourceResolverMiddleware()` and `engineUrlsToResolvedSources()` from `@bimccfyra/fyraplayer/plugins/engines` and `@bimccfyra/fyraplayer/plugins`.
   - `auto` sources can now resolve through `EngineFactory` into a primary source plus ordered fallbacks.
   - Resolver behavior covers engine `fallbackChain`, explicit `protocols`, `AutoSource.preferTech`, stable `ws-raw` MSE FLV defaults, URL deduplication, and explicit source fallbacks.
 - Added `tests/source-resolver.test.ts` for resolver ordering, deduplication, missing-engine behavior, config forwarding, fallback handling, and throw-on-unknown behavior.
@@ -384,7 +384,7 @@
 
 - Started `CR-013` without claiming final performance optimization:
   - Added optional `createPerformanceMonitorPlugin()` under `src/plugins/performance.ts`.
-  - Added package subpath `fyraplayer/plugins/performance` and aggregate export from `fyraplayer/plugins`.
+  - Added package subpath `@bimccfyra/fyraplayer/plugins/performance` and aggregate export from `@bimccfyra/fyraplayer/plugins`.
   - Plugin consumes public `stats` events, normalizes `PerformanceSample`, evaluates budgets, reports `PerformanceViolation`, and can emit `qos` events with `code: 'PERFORMANCE_BUDGET'`.
   - Added public `PERFORMANCE_BUDGET` QoS code.
   - Corrected built-in HTML video stats so `fps` is derived from frame-count deltas instead of exposing cumulative `totalVideoFrames`.
@@ -400,7 +400,7 @@
 - Continued lifecycle reliability work:
   - `createStoragePlugin()` now exposes explicit storage key/restore options, validates restored source indexes, and unregisters its `play` listener on destroy.
   - `createReconnectPlugin()` now exposes callback/logging options and unregisters `network` / `error` listeners on destroy.
-  - Both factories are available from package subpaths and the aggregate `fyraplayer/plugins` entry.
+  - Both factories are available from package subpaths and the aggregate `@bimccfyra/fyraplayer/plugins` entry.
 - Updated `docs/pluginization-map.md`, `docs/api.md`, `docs/supported-scenarios.md`, and `docs/commercial-readiness-roadmap.md`.
 - Validation:
   - `pnpm exec jest tests/storage-reconnect-plugin.test.ts --runInBand` passed, 1 suite / 5 tests.

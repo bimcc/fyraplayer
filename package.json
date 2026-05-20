@@ -1,9 +1,12 @@
 {
-  "name": "fyraplayer",
+  "name": "@bimccfyra/fyraplayer",
   "version": "1.0.0",
   "description": "Modern, extensible low-latency web player (WebRTC, LL-HLS, WS+WASM) with plugin/middleware architecture.",
   "type": "module",
   "packageManager": "pnpm@11.1.2",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",

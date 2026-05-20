@@ -81,7 +81,7 @@ conditional until `PLITE-009` is closed.
 Package path:
 
 ```ts
-import { createPanoramaLitePlugin } from 'fyraplayer/plugins/panoramalite';
+import { createPanoramaLitePlugin } from '@bimccfyra/fyraplayer/plugins/panoramalite';
 ```
 
 Example:
@@ -491,7 +491,7 @@ Performance interpretation:
 
 ### 2026-05-19 Baseline Implementation
 
-- Added the optional `fyraplayer/plugins/panoramalite` public entrypoint,
+- Added the optional `@bimccfyra/fyraplayer/plugins/panoramalite` public entrypoint,
   aggregate plugin export, and IIFE export.
 - Added `PlayerAPI.getVideoElement()` so renderer plugins can consume the
   player-owned media element without reaching into private player state.

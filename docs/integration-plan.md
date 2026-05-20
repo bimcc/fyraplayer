@@ -23,9 +23,9 @@ FyraPlayer 是一个纯播放器，专注于低延迟直播（WebRTC/WS-Raw/HLS/
 
 | 层          | 包                            | 职责                                          |
 | ----------- | ----------------------------- | --------------------------------------------- |
-| 播放器核心  | `fyraplayer`                  | 拉流/解码/协议降级/重连，发出 `metadata` 事件 |
-| 元数据桥接  | `fyraplayer/plugins/metadata` | 转发元数据事件，不解析语义                    |
-| 引擎适配    | `fyraplayer/plugins/engines`  | URL 转换（ZLM/SRS/MediaMTX 等）               |
+| 播放器核心  | `@bimccfyra/fyraplayer`                  | 拉流/解码/协议降级/重连，发出 `metadata` 事件 |
+| 元数据桥接  | `@bimccfyra/fyraplayer/plugins/metadata` | 转发元数据事件，不解析语义                    |
+| 引擎适配    | `@bimccfyra/fyraplayer/plugins/engines`  | URL 转换（ZLM/SRS/MediaMTX 等）               |
 | PSV 集成    | `@beeviz/fyrapano`            | 全景直播，包含 `FyraPlayerPsvAdapter`         |
 | Cesium 集成 | `@beeviz/cesium`              | 视频投影，包含 `FyraPlayerCesiumAdapter`      |
 | KLV 解析    | `@aspect/openklv`             | MISB/KLV 语义解析、时间同步                   |

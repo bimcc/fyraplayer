@@ -88,7 +88,7 @@ npm install @beeviz/klv
 ### 实时流解析示例
 
 ```typescript
-import { FyraPlayer } from 'fyraplayer';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
 import { KlvParser, Misb0601 } from '@beeviz/klv';
 
 const player = new FyraPlayer({
@@ -157,7 +157,7 @@ function handleMisb0601Data(data: Misb0601Data, pts: number) {
 对于已录制的 TS 文件，可以使用 Demuxer 直接解析：
 
 ```typescript
-import { Demuxer, DemuxerCallbacks } from 'fyraplayer/techs/wsRaw/demuxer';
+import { Demuxer, DemuxerCallbacks } from '@bimccfyra/fyraplayer/techs/wsRaw/demuxer';
 import { KlvParser, Misb0601 } from '@beeviz/klv';
 
 async function parseOfflineFile(fileBuffer: ArrayBuffer) {

@@ -8,9 +8,9 @@ Goal: use FyraPlayer as the low-latency playback engine, and feed its video outp
 - Optional: panoramaRenderer (for lower-latency WebGL texture path) or plain `<video>` + captureStream.
 
 ## Adapter
-- PSV integration is owned by the external `@beeviz/fyrapano` package, not the `fyraplayer` package entrypoints.
+- PSV integration is owned by the external `@beeviz/fyrapano` package, not the `@bimccfyra/fyraplayer` package entrypoints.
 - FyraPlayer provides playback, events, and the `<video>` output; the PSV package owns viewer-specific plugin registration and rendering.
-- Do not import PSV helpers from `fyraplayer`; use the external integration package or build an app-local adapter.
+- Do not import PSV helpers from `@bimccfyra/fyraplayer`; use the external integration package or build an app-local adapter.
 
 ## Quick start (PSV side)
 ```js

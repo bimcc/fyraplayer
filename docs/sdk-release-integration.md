@@ -40,24 +40,24 @@ internals.
 
 | Entry | Use |
 |---|---|
-| `fyraplayer` | Core player, types, built-in Techs, core utilities |
-| `fyraplayer/plugins` | Aggregate optional plugin entry for convenience |
-| `fyraplayer/plugins/ui-components` | Optional player controls shell |
-| `fyraplayer/plugins/recording-api` | Backend recording start/stop/status adapter |
-| `fyraplayer/plugins/auth` | Request/signaling auth, signing middleware, and optional auth recovery helper |
-| `fyraplayer/plugins/diagnostics` | Snapshot/export/debug panel plugin |
-| `fyraplayer/plugins/storage` | Playback preference persistence |
-| `fyraplayer/plugins/reconnect` | Reconnect event logging/callback helper |
-| `fyraplayer/plugins/metrics` | Metrics reporter plugin |
-| `fyraplayer/plugins/performance` | Performance budget monitor |
-| `fyraplayer/plugins/panoramalite` | Lightweight WebGL2 panorama renderer plugin |
-| `fyraplayer/plugins/engines` | Streaming-server URL/source adapters |
-| `fyraplayer/plugins/metadata` | KLV/SEI/private-data metadata bridge |
+| `@bimccfyra/fyraplayer` | Core player, types, built-in Techs, core utilities |
+| `@bimccfyra/fyraplayer/plugins` | Aggregate optional plugin entry for convenience |
+| `@bimccfyra/fyraplayer/plugins/ui-components` | Optional player controls shell |
+| `@bimccfyra/fyraplayer/plugins/recording-api` | Backend recording start/stop/status adapter |
+| `@bimccfyra/fyraplayer/plugins/auth` | Request/signaling auth, signing middleware, and optional auth recovery helper |
+| `@bimccfyra/fyraplayer/plugins/diagnostics` | Snapshot/export/debug panel plugin |
+| `@bimccfyra/fyraplayer/plugins/storage` | Playback preference persistence |
+| `@bimccfyra/fyraplayer/plugins/reconnect` | Reconnect event logging/callback helper |
+| `@bimccfyra/fyraplayer/plugins/metrics` | Metrics reporter plugin |
+| `@bimccfyra/fyraplayer/plugins/performance` | Performance budget monitor |
+| `@bimccfyra/fyraplayer/plugins/panoramalite` | Lightweight WebGL2 panorama renderer plugin |
+| `@bimccfyra/fyraplayer/plugins/engines` | Streaming-server URL/source adapters |
+| `@bimccfyra/fyraplayer/plugins/metadata` | KLV/SEI/private-data metadata bridge |
 
-Backend recording is exposed only through `fyraplayer/plugins/recording-api`.
+Backend recording is exposed only through `@bimccfyra/fyraplayer/plugins/recording-api`.
 
 Renderer bridge note: PSV, Cesium, map, and panorama adapters are not package
-entrypoints in `fyraplayer`. The main package exports generic helpers such as
+entrypoints in `@bimccfyra/fyraplayer`. The main package exports generic helpers such as
 `CanvasFrameBuffer` and `BaseTarget`; concrete renderer bridges should live in
 packages such as `@beeviz/fyrapano`, `@beeviz/cesium`, or app-local adapters.
 Use `docs/render-bridges.md` as the integration boundary.
@@ -67,9 +67,9 @@ Use `docs/render-bridges.md` as the integration boundary.
 ### 1. ESM Import
 
 ```typescript
-import { FyraPlayer } from 'fyraplayer';
-import { createUiComponentsPlugin } from 'fyraplayer/plugins/ui-components';
-import { createRecordingApiPlugin } from 'fyraplayer/plugins/recording-api';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
+import { createUiComponentsPlugin } from '@bimccfyra/fyraplayer/plugins/ui-components';
+import { createRecordingApiPlugin } from '@bimccfyra/fyraplayer/plugins/recording-api';
 ```
 
 Use this path for modern bundlers, SSR-aware applications, and product code that
@@ -101,17 +101,17 @@ See `examples/minimal-iife.html` for a minimal working page.
 
 Keep optional features outside the core import:
 
-- `fyraplayer/plugins/ui-components`
-- `fyraplayer/plugins/recording-api`
-- `fyraplayer/plugins/auth`
-- `fyraplayer/plugins/diagnostics`
-- `fyraplayer/plugins/storage`
-- `fyraplayer/plugins/reconnect`
-- `fyraplayer/plugins/metrics`
-- `fyraplayer/plugins/performance`
-- `fyraplayer/plugins/panoramalite`
-- `fyraplayer/plugins/engines`
-- `fyraplayer/plugins/metadata`
+- `@bimccfyra/fyraplayer/plugins/ui-components`
+- `@bimccfyra/fyraplayer/plugins/recording-api`
+- `@bimccfyra/fyraplayer/plugins/auth`
+- `@bimccfyra/fyraplayer/plugins/diagnostics`
+- `@bimccfyra/fyraplayer/plugins/storage`
+- `@bimccfyra/fyraplayer/plugins/reconnect`
+- `@bimccfyra/fyraplayer/plugins/metrics`
+- `@bimccfyra/fyraplayer/plugins/performance`
+- `@bimccfyra/fyraplayer/plugins/panoramalite`
+- `@bimccfyra/fyraplayer/plugins/engines`
+- `@bimccfyra/fyraplayer/plugins/metadata`
 
 ## Release Checklist
 

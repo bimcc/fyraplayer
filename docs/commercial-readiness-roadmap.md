@@ -289,7 +289,7 @@ Next action:
 
 Summary:
 
-- Restored the package-local build and test baseline for `fyraplayer`.
+- Restored the package-local build and test baseline for `@bimccfyra/fyraplayer`.
 - Root cause was environmental and version-related:
   - `node_modules` junctions pointed to the old path `D:\Desktop\YT\beevizproject\...` while the current checkout is under `G:\YT\beevizproject\...`;
   - global pnpm is `11.1.2`, while the previous package lockfile was `lockfileVersion: '6.0'`;
@@ -309,7 +309,7 @@ Validation:
 Follow-up:
 
 - Avoid running `pnpm build` and `pnpm test` concurrently in the same working tree; concurrent pnpm auto-install checks can race on `node_modules/.pnpm/lock.yaml` on Windows.
-- The wider parent workspace still has unrelated dependency/lockfile inconsistencies. This baseline only proves the `fyraplayer` package-local workflow.
+- The wider parent workspace still has unrelated dependency/lockfile inconsistencies. This baseline only proves the `@bimccfyra/fyraplayer` package-local workflow.
 
 ### 2026-05-16 API Consistency Pass
 
@@ -340,9 +340,9 @@ Summary:
 - Added a deterministic `clean` script and changed `pnpm build` to clean `dist/` before TypeScript emit.
 - Added `pnpm check:exports`, which rebuilds and verifies every `package.json` `main` / `module` / `types` / `exports` file exists.
 - Added `checks/export-contract.mjs` so stale or missing package entrypoints fail locally before release.
-- Added the advanced `fyraplayer/techs/wsRaw/demuxer` subpath export because docs expose it for offline KLV/TS parsing.
+- Added the advanced `@bimccfyra/fyraplayer/techs/wsRaw/demuxer` subpath export because docs expose it for offline KLV/TS parsing.
 - Extended `checks/public-api-smoke.ts` to compile package-style imports for the UI plugin and demuxer subpath.
-- Updated PSV integration docs to point to external `@beeviz/fyrapano` ownership instead of a nonexistent `fyraplayer` main export.
+- Updated PSV integration docs to point to external `@beeviz/fyrapano` ownership instead of a nonexistent `@bimccfyra/fyraplayer` main export.
 - Removed `tests/` from `.gitignore` so test assets are visible to source control and long-term review.
 
 Validation:
@@ -590,7 +590,7 @@ Summary:
 - Detect-only discovery events are not sent to raw parsers by default; plugins can handle them through `onDetected`.
 - Plugin teardown calls `player.off('metadata', handler)` so metadata parsing does not leak after player destroy/plugin unregister.
 - Marked `PL-004` done in `docs/pluginization-map.md`.
-- Updated `docs/api.md` and `checks/public-api-smoke.ts` for `fyraplayer/plugins/metadata`.
+- Updated `docs/api.md` and `checks/public-api-smoke.ts` for `@bimccfyra/fyraplayer/plugins/metadata`.
 
 Validation:
 
@@ -723,7 +723,7 @@ Summary:
 - Continued `CR-017` plugin boundary work and closed `PL-003`.
 - Added `createMetricsPlugin()` with configurable `onStats`, `onQos`, and `onEvent` reporter callbacks.
 - Added lifecycle cleanup: metrics plugin now unregisters `stats` and `qos` handlers on destroy.
-- Exported the metrics plugin factory from `fyraplayer/plugins` and `fyraplayer/plugins/metrics`.
+- Exported the metrics plugin factory from `@bimccfyra/fyraplayer/plugins` and `@bimccfyra/fyraplayer/plugins/metrics`.
 - Extended `checks/public-api-smoke.ts` for `createMetricsPlugin` and `MetricsPluginOptions`.
 - Updated `docs/pluginization-map.md` to mark `PL-003` done.
 
@@ -741,11 +741,11 @@ Validation:
 Summary:
 
 - Continued `CR-017` plugin boundary work and closed `PL-002`.
-- Added `createSourceResolverMiddleware()` under `fyraplayer/plugins/engines`.
+- Added `createSourceResolverMiddleware()` under `@bimccfyra/fyraplayer/plugins/engines`.
 - Added `engineUrlsToResolvedSources()` so engine URL conversion can be tested and reused without constructing a Player.
 - `auto` sources can now resolve through `EngineFactory` into a primary source plus ordered fallbacks without app-specific glue code.
 - Resolver behavior respects engine `fallbackChain`, optional `protocols` override, `AutoSource.preferTech`, explicit `AutoSource.fallbacks`, and stable `ws-raw` MSE defaults for FLV outputs.
-- Added public API smoke coverage for `fyraplayer/plugins/engines`.
+- Added public API smoke coverage for `@bimccfyra/fyraplayer/plugins/engines`.
 - Updated adapter/API/pluginization docs to describe the middleware pattern.
 
 Validation:
@@ -856,7 +856,7 @@ Result:
 Summary:
 
 - Started `CR-013` with a code-level performance budget contract rather than claiming final optimization.
-- Added `createPerformanceMonitorPlugin()` under `fyraplayer/plugins/performance`.
+- Added `createPerformanceMonitorPlugin()` under `@bimccfyra/fyraplayer/plugins/performance`.
 - The plugin consumes public `stats` events, normalizes samples, evaluates default or per-Tech budgets, reports `PerformanceViolation`, and can emit `qos` events with `code: 'PERFORMANCE_BUDGET'`.
 - Added default warning budgets for FPS, dropped frames, decode/live latency, RTT, jitter, pending fMP4 queue size, and buffer level.
 - Corrected built-in HTML video FPS sampling so `getVideoPlaybackQuality().totalVideoFrames` is converted into a frame-rate sample instead of being exposed as cumulative FPS.
@@ -881,7 +881,7 @@ Summary:
 - Continued core reliability work that does not depend on external stream backends.
 - Added `createStoragePlugin()` with explicit key/restore options, valid-index restore checks, and lifecycle cleanup for the `play` listener.
 - Added `createReconnectPlugin()` with optional callbacks/logging controls and lifecycle cleanup for `network` / `error` listeners.
-- Exported both factories from their subpaths and from `fyraplayer/plugins`.
+- Exported both factories from their subpaths and from `@bimccfyra/fyraplayer/plugins`.
 - Updated API, support, and pluginization docs.
 
 Validation:
@@ -1071,7 +1071,7 @@ Summary:
   - tracks reconnect attempts/exhaustion, ICE state, WebRTC audio-muted clue, buffer level, fMP4 pending queue clues;
   - keeps a bounded recent event history;
   - exposes `snapshot()`, `exportJson()`, and `clear()`.
-- Exported diagnostics through both `fyraplayer/plugins/diagnostics` and aggregated `fyraplayer/plugins`.
+- Exported diagnostics through both `@bimccfyra/fyraplayer/plugins/diagnostics` and aggregated `@bimccfyra/fyraplayer/plugins`.
 
 Validation:
 
@@ -1108,7 +1108,7 @@ Summary:
   - direct HTTP fMP4 fetch uses headers and credentials;
   - WebRTC WHEP/WHIP signaling fetch uses headers and credentials;
   - DASH custom headers are passed to dash.js, while credentials need deployment validation before being promised.
-- Exported both features through direct plugin subpaths and the aggregated `fyraplayer/plugins` entry.
+- Exported both features through direct plugin subpaths and the aggregated `@bimccfyra/fyraplayer/plugins` entry.
 - Updated API, support, pluginization, roadmap, and verification docs.
 
 Validation:
@@ -1171,7 +1171,7 @@ Summary:
   - screenshot button now downloads a PNG, shows success/failure status, and calls `onScreenshot` with `Blob`, dimensions, filename, player, and video;
   - optional recording button calls `onRecordToggle`, updates active UI only after the hook succeeds, and shows failure feedback when the product hook fails;
   - optional diagnostics/recording controls stay hidden when disabled, including after responsive layout changes.
-- Exported `UiActionContext`, `UiScreenshotEvent`, and `UiRecordToggleEvent` through `fyraplayer/plugins/ui-components`.
+- Exported `UiActionContext`, `UiScreenshotEvent`, and `UiRecordToggleEvent` through `@bimccfyra/fyraplayer/plugins/ui-components`.
 - Updated API, support, pluginization, roadmap, and verification docs.
 
 Validation:
@@ -1649,11 +1649,11 @@ Summary:
 Clean API decision:
 
 - Removed pre-release compatibility surfaces before the first formal release:
-  `fyraplayer/plugins/recording`, `HLSDASHTech`, `LegacyTechName`,
+  `@bimccfyra/fyraplayer/plugins/recording`, `HLSDASHTech`, `LegacyTechName`,
   `WSRawSource.experimental`, `PlayerOptions.ui`, `UiShellElements`,
   `metricsPlugin`, `storagePlugin`, and `reconnectPlugin`.
 - The supported 1.0 surface now keeps a single public path for each feature:
-  `fyraplayer/plugins/recording-api`, `HLSTech`, `pipeline: 'experimental'`,
+  `@bimccfyra/fyraplayer/plugins/recording-api`, `HLSTech`, `pipeline: 'experimental'`,
   `createMetricsPlugin()`, `createStoragePlugin()`, and
   `createReconnectPlugin()`.
 - Validation after the clean API pass:
@@ -1675,7 +1675,7 @@ Summary:
 - Added `PlayerAPI.getVideoElement()` for renderer plugins and host
   integrations that need the player-owned media element without accessing
   private state.
-- Exposed `fyraplayer/plugins/panoramalite`, the aggregate `fyraplayer/plugins`
+- Exposed `@bimccfyra/fyraplayer/plugins/panoramalite`, the aggregate `@bimccfyra/fyraplayer/plugins`
   export, and the IIFE export surface.
 - Implemented math/camera/sphere mesh, video/image texture binding, pointer /
   touch / wheel controls, WebGL2 unsupported diagnostics, context
@@ -2023,12 +2023,12 @@ Summary:
 
 Follow-up packaging hardening:
 
-- Moved DASH playback behind `fyraplayer/plugins/dash` so default consumers do
+- Moved DASH playback behind `@bimccfyra/fyraplayer/plugins/dash` so default consumers do
   not parse dash.js in Vite/Rolldown builds unless DASH is explicitly enabled.
 - Default DASH plugin loading now uses a packaged runtime script
   (`dist/vendor/dash.all.min.js`) and accepts an optional `dashjsLoader` for
   host-controlled CDN or app-bundled loading.
-- Exported the packaged script as `fyraplayer/vendor/dash.all.min.js` so
+- Exported the packaged script as `@bimccfyra/fyraplayer/vendor/dash.all.min.js` so
   Vite/Rolldown host apps can import it with `?url` and pass the emitted asset
   URL to `createDashTechPlugin({ scriptUrl })`; this avoids both default
   bundle parsing of dash.js and production 404s for the runtime script.

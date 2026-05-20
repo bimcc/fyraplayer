@@ -4,7 +4,7 @@ export type BuiltinTechName = 'webrtc' | 'hls' | 'dash' | 'fmp4' | 'ws-raw' | 'f
  * Module-augmentation hook for third-party Tech names.
  *
  * Example:
- * declare module 'fyraplayer' {
+ * declare module '@bimccfyra/fyraplayer' {
  *   interface CustomTechNameMap {
  *     'acme-live': true;
  *   }
@@ -264,7 +264,7 @@ export type BuiltinSource =
  * Module-augmentation hook for third-party Source shapes.
  *
  * Example:
- * declare module 'fyraplayer' {
+ * declare module '@bimccfyra/fyraplayer' {
  *   interface CustomSourceMap {
  *     AcmeLiveSource: { type: 'acme-live'; url: string; preferTech?: 'acme-live' };
  *   }

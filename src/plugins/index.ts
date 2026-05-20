@@ -4,8 +4,8 @@
  * All plugins are optional and can be imported separately for tree-shaking.
  * 
  * Usage:
- *   import { EngineFactory, registerDefaultEngines } from 'fyraplayer/plugins/engines';
- *   import { KlvBridge } from 'fyraplayer/plugins/metadata';
+ *   import { EngineFactory, registerDefaultEngines } from '@bimccfyra/fyraplayer/plugins/engines';
+ *   import { KlvBridge } from '@bimccfyra/fyraplayer/plugins/metadata';
  * 
  * Note: PSV and Cesium adapters have been moved to their respective projects:
  *   - PSV adapter: @beeviz/fyrapano

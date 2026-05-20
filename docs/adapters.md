@@ -19,11 +19,11 @@ Convert engine-specific publish URLs/config into Fyra `Source` lists (with fallb
 
 ## Usage sketch
 ```ts
-import { FyraPlayer } from 'fyraplayer';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
 import {
   createSourceResolverMiddleware,
   registerDefaultEngines
-} from 'fyraplayer/plugins/engines';
+} from '@bimccfyra/fyraplayer/plugins/engines';
 
 registerDefaultEngines();
 

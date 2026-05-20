@@ -133,7 +133,7 @@ Example cleanup after the 1.0 push:
 - Kept the supported 1.0 examples focused on `examples/basic.html`,
   `examples/sources.js`, and `examples/minimal-iife.html`.
 - Removed pre-release compatibility exports and aliases so the 1.0 API stays
-  narrow: use `fyraplayer/plugins/recording-api`, `HLSTech`,
+  narrow: use `@bimccfyra/fyraplayer/plugins/recording-api`, `HLSTech`,
   `createStoragePlugin()`, `createReconnectPlugin()`, and
   `createMetricsPlugin()` directly.
 

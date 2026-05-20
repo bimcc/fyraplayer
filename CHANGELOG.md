@@ -10,12 +10,12 @@ All notable changes to FyraPlayer will be recorded here.
   `^30.0.0`, `typescript` to `^5.9.3`, and `fast-check` to `^4.8.0`.
 - Added pnpm build approval for `unrs-resolver`, which is pulled in by the
   Jest 30 resolver stack.
-- Moved DASH playback behind the optional `fyraplayer/plugins/dash` entry so
+- Moved DASH playback behind the optional `@bimccfyra/fyraplayer/plugins/dash` entry so
   default consumers do not pull dash.js into Vite/Rolldown builds unless DASH is
   explicitly enabled.
 - Switched DASH to a runtime-loaded `dist/vendor/dash.all.min.js` path by
   default, with an optional `dashjsLoader` escape hatch for host bundles.
-- Exported `fyraplayer/vendor/dash.all.min.js` so Vite/Rolldown hosts can
+- Exported `@bimccfyra/fyraplayer/vendor/dash.all.min.js` so Vite/Rolldown hosts can
   import it with `?url` and pass the emitted asset URL to
   `createDashTechPlugin({ scriptUrl })`.
 - Made `dashjs` and `mp4box` optional peers while keeping them available as dev

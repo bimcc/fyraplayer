@@ -52,21 +52,21 @@ Rule of thumb: if a feature can be removed without making basic playback impossi
 ### 2.1 Public Plugin Entry Points
 
 Use these subpaths for product integrations. Prefer the narrow subpath over the
-aggregate `fyraplayer/plugins` import when bundle size matters.
+aggregate `@bimccfyra/fyraplayer/plugins` import when bundle size matters.
 
 | Entry | Main Factory / Type | Runtime Ownership | Notes |
 |---|---|---|---|
-| `fyraplayer/plugins/ui-components` | `createUiComponentsPlugin()` | Product-owned UI shell | Optional controls, status overlay, retry, screenshot callback, diagnostics entry, and recording toggle hook |
-| `fyraplayer/plugins/diagnostics` | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | Support/QA tooling | Collects state/source/Tech/recent events and can export diagnostic JSON |
-| `fyraplayer/plugins/storage` | `createStoragePlugin()` | Browser preference persistence | Stores only local playback preferences; not account/cloud sync |
-| `fyraplayer/plugins/auth` | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | App/backend auth policy | Injects headers/credentials/tokens/signatures and optionally reloads current source on explicit auth expiry |
-| `fyraplayer/plugins/recording-api` | `createRecordingApiPlugin()` | Backend recording service | API control only; browser-side local recording stays out of scope |
-| `fyraplayer/plugins/performance` | `createPerformanceMonitorPlugin()` | QA/performance budget | Emits warnings; does not change playback behavior |
-| `fyraplayer/plugins/metrics` | `createMetricsPlugin()` | Product reporter/exporter | Products decide endpoint, batching, privacy, and sampling policy |
-| `fyraplayer/plugins/reconnect` | `createReconnectPlugin()` | Product observability | Logs/callbacks only; core player owns reconnect/fallback policy |
-| `fyraplayer/plugins/metadata` | `createMetadataPlugin()`, `KlvBridge` | Domain parser | KLV/SEI/private data semantics remain product-specific |
-| `fyraplayer/plugins/engines` | `createSourceResolverMiddleware()` | Stream-server adapter | Converts vendor/project URLs into concrete `Source` fallback chains |
-| `fyraplayer/plugins/panoramalite` | `createPanoramaLitePlugin()` | First-party renderer plugin | WebGL2 equirectangular image/video/live panorama renderer without Three.js/PSV dependency |
+| `@bimccfyra/fyraplayer/plugins/ui-components` | `createUiComponentsPlugin()` | Product-owned UI shell | Optional controls, status overlay, retry, screenshot callback, diagnostics entry, and recording toggle hook |
+| `@bimccfyra/fyraplayer/plugins/diagnostics` | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | Support/QA tooling | Collects state/source/Tech/recent events and can export diagnostic JSON |
+| `@bimccfyra/fyraplayer/plugins/storage` | `createStoragePlugin()` | Browser preference persistence | Stores only local playback preferences; not account/cloud sync |
+| `@bimccfyra/fyraplayer/plugins/auth` | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | App/backend auth policy | Injects headers/credentials/tokens/signatures and optionally reloads current source on explicit auth expiry |
+| `@bimccfyra/fyraplayer/plugins/recording-api` | `createRecordingApiPlugin()` | Backend recording service | API control only; browser-side local recording stays out of scope |
+| `@bimccfyra/fyraplayer/plugins/performance` | `createPerformanceMonitorPlugin()` | QA/performance budget | Emits warnings; does not change playback behavior |
+| `@bimccfyra/fyraplayer/plugins/metrics` | `createMetricsPlugin()` | Product reporter/exporter | Products decide endpoint, batching, privacy, and sampling policy |
+| `@bimccfyra/fyraplayer/plugins/reconnect` | `createReconnectPlugin()` | Product observability | Logs/callbacks only; core player owns reconnect/fallback policy |
+| `@bimccfyra/fyraplayer/plugins/metadata` | `createMetadataPlugin()`, `KlvBridge` | Domain parser | KLV/SEI/private data semantics remain product-specific |
+| `@bimccfyra/fyraplayer/plugins/engines` | `createSourceResolverMiddleware()` | Stream-server adapter | Converts vendor/project URLs into concrete `Source` fallback chains |
+| `@bimccfyra/fyraplayer/plugins/panoramalite` | `createPanoramaLitePlugin()` | First-party renderer plugin | WebGL2 equirectangular image/video/live panorama renderer without Three.js/PSV dependency |
 
 Installation policy:
 

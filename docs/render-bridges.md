@@ -8,7 +8,7 @@ reconnect/fallback behavior, playback events, stats, quality controls, and raw
 metadata events. Product renderers own panorama projection, 3D scene
 management, GIS overlays, camera models, and domain visualization.
 
-Do not add PSV, Cesium, map, or panorama SDK dependencies to `fyraplayer`.
+Do not add PSV, Cesium, map, or panorama SDK dependencies to `@bimccfyra/fyraplayer`.
 Those adapters should live in renderer packages such as `@beeviz/fyrapano`,
 `@beeviz/cesium`, or app-local bridge packages.
 
@@ -22,8 +22,8 @@ External bridges can rely on these stable player-facing outputs:
 | Player events | `player.on(...)` | Forward `ready`, `play`, `pause`, `error`, `network`, `stats`, `qos`, `metadata`, and `levelSwitch` into renderer UI |
 | Playback API | `play()`, `pause()`, `seek()`, `switchSource()`, `getQualityState()`, `setQualityLevel()` | Let renderer controls drive playback without touching Tech internals |
 | Metadata events | `metadata` + `createMetadataPlugin()` / `KlvBridge` | Connect KLV/SEI/private data to domain parsers and scene synchronization |
-| `CanvasFrameBuffer` | `fyraplayer` main export | Optional canvas-backed texture/captureStream source for renderers that cannot consume the original video directly |
-| `BaseTarget` | `fyraplayer` main export | Optional base class for app-owned render targets |
+| `CanvasFrameBuffer` | `@bimccfyra/fyraplayer` main export | Optional canvas-backed texture/captureStream source for renderers that cannot consume the original video directly |
+| `BaseTarget` | `@bimccfyra/fyraplayer` main export | Optional base class for app-owned render targets |
 | Diagnostics | `createDiagnosticsPlugin()` | Export player state and recent evidence from renderer support consoles |
 
 ## Ownership Boundary
@@ -40,8 +40,8 @@ Create the renderer and the player side by side. The bridge should subscribe to
 public events and clean up both the player and renderer listeners.
 
 ```ts
-import { FyraPlayer, type PlayerAPI, type Source } from 'fyraplayer';
-import { createDiagnosticsPlugin } from 'fyraplayer/plugins/diagnostics';
+import { FyraPlayer, type PlayerAPI, type Source } from '@bimccfyra/fyraplayer';
+import { createDiagnosticsPlugin } from '@bimccfyra/fyraplayer/plugins/diagnostics';
 
 export interface RenderBridge {
   readonly player: PlayerAPI;
@@ -93,7 +93,7 @@ Use `CanvasFrameBuffer` only when the renderer needs a canvas texture or
 sphere mapping, 3D projection, or metadata synchronization.
 
 ```ts
-import { CanvasFrameBuffer } from 'fyraplayer';
+import { CanvasFrameBuffer } from '@bimccfyra/fyraplayer';
 
 const buffer = new CanvasFrameBuffer();
 

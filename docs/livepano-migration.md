@@ -10,7 +10,7 @@ Goal: replace livepano’s self-managed playback engines with FyraPlayer while k
 ## Steps
 1) Register engines (optional):
    ```ts
-   import { EngineFactory, registerDefaultEngines } from 'fyraplayer/plugins/engines';
+   import { EngineFactory, registerDefaultEngines } from '@bimccfyra/fyraplayer/plugins/engines';
    registerDefaultEngines();
    EngineFactory.setConfig({ mediamtx: { host: '...', useHttps: false } });
    const urls = EngineFactory.convertUrl('mediamtx', 'rtsp://host/app/stream');

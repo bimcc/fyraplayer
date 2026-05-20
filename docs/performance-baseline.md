@@ -31,8 +31,8 @@ Out of scope for this pass:
 ## 2. Plugin Usage
 
 ```ts
-import { FyraPlayer } from 'fyraplayer';
-import { createPerformanceMonitorPlugin } from 'fyraplayer/plugins/performance';
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
+import { createPerformanceMonitorPlugin } from '@bimccfyra/fyraplayer/plugins/performance';
 
 const player = new FyraPlayer({
   video: '#video',
@@ -176,7 +176,7 @@ If `emitQos` is not disabled, every reported violation also emits:
 Implemented and verified:
 
 - Plugin sampling and violation tests.
-- Public package import for `fyraplayer/plugins/performance`.
+- Public package import for `@bimccfyra/fyraplayer/plugins/performance`.
 - `PERFORMANCE_BUDGET` QoS code in the public type contract.
 - Built-in HTML video FPS sampling regression test.
 - Local Chrome MediaMTX WHEP smoke stats were recorded with bitrate, FPS, RTT, packet loss, candidate type, transport, dropped frames, and resolution.
