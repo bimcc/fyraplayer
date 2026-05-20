@@ -1,22 +1,48 @@
-import mpegts from 'mpegts.js';
+import type { MpegtsLoader } from '../../types.js';
+
+type MpegtsPlayerLike = {
+  attachMediaElement(video: HTMLVideoElement): void;
+  load(): void;
+  play(): void;
+  pause(): void;
+  unload(): void;
+  detachMediaElement(): void;
+  destroy(): void;
+  on(event: string, handler: (err?: unknown) => void): void;
+};
+
+type MpegtsModuleLike = {
+  isSupported(): boolean;
+  createPlayer(
+    mediaDataSource: { type: 'flv' | 'mpegts'; isLive: boolean; url: string },
+    config?: Record<string, unknown>
+  ): MpegtsPlayerLike;
+  Events: {
+    ERROR: string;
+    LOADING_COMPLETE: string;
+  };
+  default?: MpegtsModuleLike;
+};
 
 /**
- * MSE fallback using mpegts.js to ensure WS播放可用，直到自研管线完成。
- * mpegts.js 同时支持 FLV 和 TS 格式。
+ * MSE fallback using mpegts.js for FLV/TS playback.
+ * mpegts.js is loaded only when this path is explicitly used.
  */
 export class MseFallback {
-  private player: mpegts.Player | null = null;
+  private player: MpegtsPlayerLike | null = null;
   private onReady?: () => void;
   private onError?: (err: unknown) => void;
 
-  start(
+  async start(
     url: string,
     video: HTMLVideoElement,
     handlers?: { onReady?: () => void; onError?: (err: unknown) => void },
-    format: 'flv' | 'mpegts' = 'flv'
-  ): void {
+    format: 'flv' | 'mpegts' = 'flv',
+    loader?: MpegtsLoader
+  ): Promise<void> {
     this.onReady = handlers?.onReady;
     this.onError = handlers?.onError;
+    const mpegts = await loadMpegts(loader);
     if (!mpegts.isSupported()) {
       this.onError?.(new Error('FLV/TS MSE not supported in this browser'));
       return;
@@ -29,7 +55,7 @@ export class MseFallback {
         url
       },
       {
-        // 禁用内部 worker 以避免跨域/路径问题
+        // Disable the internal worker to avoid cross-origin worker path issues.
         enableWorker: false,
         stashInitialSize: 128,
         deferLoadAfterSourceOpen: false,
@@ -56,4 +82,24 @@ export class MseFallback {
       this.player = null;
     }
   }
+}
+
+function normalizeMpegtsModule(moduleLike: unknown): MpegtsModuleLike {
+  const candidate = moduleLike as MpegtsModuleLike;
+  const normalized = candidate?.default?.createPlayer ? candidate.default : candidate;
+  if (!normalized?.isSupported || !normalized?.createPlayer || !normalized?.Events) {
+    throw new Error('mpegts.js is not available. Provide PlayerOptions.mpegtsLoader, install mpegts.js, or load window.mpegts before TS/FLV playback.');
+  }
+  return normalized;
+}
+
+async function loadMpegts(loader?: MpegtsLoader): Promise<MpegtsModuleLike> {
+  if (loader) {
+    return normalizeMpegtsModule(await loader());
+  }
+  const globalMpegts = (globalThis as typeof globalThis & { mpegts?: unknown }).mpegts;
+  if (globalMpegts) {
+    return normalizeMpegtsModule(globalMpegts);
+  }
+  throw new Error('mpegts.js is not available. Provide PlayerOptions.mpegtsLoader, install mpegts.js, or load window.mpegts before TS/FLV playback.');
 }

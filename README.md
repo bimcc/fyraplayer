@@ -67,7 +67,7 @@ FyraPlayer `1.0.0` 定位为可控场景下的商业基线 SDK：核心播放、
 |----|------|------|
 | `hls.js` | ^1.6.16 | HLS/LL-HLS 流播放 |
 | `dashjs` | ^5.1.1 | DASH 流播放（optional peer，使用 DASH 插件时安装） |
-| `mpegts.js` | ^1.8.0 | TS/FLV 容器解析 + MSE 播放 |
+| `mpegts.js` | ^1.8.0 | TS/FLV 容器解析 + MSE 播放（optional peer，仅 TS/FLV/GB fallback 路径需要） |
 | `mp4box` | ^0.5.4 | MP4 容器解析（optional peer，仅 `webCodecs.mp4boxLoader` / 全局 MP4Box 路径需要） |
 
 ## 安装
@@ -104,6 +104,20 @@ const playerWithCustomDash = new FyraPlayer({
       dashjsLoader: () => import('dashjs')
     })
   ]
+});
+```
+
+TS/FLV playback is also optional for supply-chain stability. The default package
+does not install `mpegts.js` because `mpegts.js@1.8.0` depends on a
+GitHub-hosted `webworkify-webpack` tarball. Applications that use `ws-raw`,
+GB28181 FLV/TS gateway output, or TS file fallback should install and pass an
+explicit loader:
+
+```typescript
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'ws-raw', url: 'https://example.com/live.flv', codec: 'h264', transport: 'flv' }],
+  mpegtsLoader: () => import('mpegts.js')
 });
 ```
 

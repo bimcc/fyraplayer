@@ -1,5 +1,5 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, Gb28181Source, MetricsOptions, ReconnectPolicy, Source } from '../types.js';
+import { BufferPolicy, Gb28181Source, MetricsOptions, MpegtsLoader, ReconnectPolicy, Source } from '../types.js';
 import { MseFallback } from './wsRaw/mseFallback.js';
 
 interface GbStreamInfo {
@@ -114,6 +114,7 @@ export class Gb28181Tech extends AbstractTech {
       reconnect?: ReconnectPolicy;
       metrics?: MetricsOptions;
       video: HTMLVideoElement;
+      mpegtsLoader?: MpegtsLoader;
     }
   ): Promise<void> {
     if (source.type !== 'gb28181') {
@@ -140,7 +141,7 @@ export class Gb28181Tech extends AbstractTech {
     };
 
     this.mse = new MseFallback();
-    this.mse.start(
+    await this.mse.start(
       mediaUrl,
       opts.video,
       {
@@ -150,7 +151,8 @@ export class Gb28181Tech extends AbstractTech {
           this.bus.emit('network', { type: 'gb-fallback-error', fatal: true });
         }
       },
-      this.resolveMseFormat(gbSource, mediaUrl)
+      this.resolveMseFormat(gbSource, mediaUrl),
+      opts.mpegtsLoader
     );
     this.bus.emit('network', {
       type: 'gb-control',

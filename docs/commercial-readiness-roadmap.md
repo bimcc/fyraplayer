@@ -2016,9 +2016,10 @@ Summary:
   runtime/build dependency.
 - `mp4box` remains on `^0.5.4` in this pass. Its 2.x upgrade should be handled
   as a separate compatibility pass for the WebCodecs/fMP4 path.
-- `mpegts.js` remains on `^1.8.0`; dependency installation can still need
-  access to the upstream `xqq/webworkify-webpack` GitHub tarball, so replacing
-  or vendoring that path is a separate supply-chain hardening task.
+- `mpegts.js` is now an optional peer for the TS/FLV fallback paths. Default
+  installs no longer need it unless they actually use ws-raw MSE, GB28181 FLV/TS
+  playback, or TS file fallback. The demo keeps using a runtime loader hook for
+  those paths so repository installs stay reproducible.
 
 Follow-up packaging hardening:
 

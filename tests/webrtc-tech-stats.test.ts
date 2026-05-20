@@ -19,6 +19,8 @@ type PeerConnectionStateStub = Pick<RTCPeerConnection, 'getReceivers'> & {
   restartIce?: jest.Mock<void, []>;
 };
 
+type PeerConnectionConfigStub = Pick<RTCPeerConnection, 'getConfiguration' | 'setConfiguration'>;
+
 function reportFrom(stats: Array<Record<string, unknown>>): RTCStatsReport {
   const map = new Map<string, Record<string, unknown>>();
   stats.forEach((stat, index) => {
@@ -69,6 +71,100 @@ describe('WebRTCTech stats and lifecycle helpers', () => {
         framesDropped: 1,
         framesDecoded: 30,
         packetLoss: 0,
+      })
+    );
+  });
+
+  test('reports audio RTP and selected ICE candidate details in stats', async () => {
+    const tech = new WebRTCTech();
+    const video = {
+      videoWidth: 1920,
+      videoHeight: 1080,
+      getVideoPlaybackQuality: () => ({ totalVideoFrames: 600, droppedVideoFrames: 3 }),
+    } as VideoLike as HTMLVideoElement;
+
+    (tech as unknown as { video: HTMLVideoElement }).video = video;
+    (tech as unknown as { pc: Pick<RTCPeerConnection, 'getStats'> }).pc = {
+      getStats: async () =>
+        reportFrom([
+          {
+            id: 'pair',
+            type: 'candidate-pair',
+            state: 'succeeded',
+            currentRoundTripTime: 0.012,
+            localCandidateId: 'local',
+            remoteCandidateId: 'remote',
+          },
+          { id: 'local', type: 'local-candidate', candidateType: 'relay', protocol: 'tcp' },
+          { id: 'remote', type: 'remote-candidate', candidateType: 'relay', protocol: 'udp' },
+          {
+            id: 'inbound-video',
+            type: 'inbound-rtp',
+            kind: 'video',
+            bytesReceived: 300_000,
+            framesDecoded: 60,
+            packetsReceived: 240,
+            packetsLost: 1,
+          },
+          {
+            id: 'inbound-audio',
+            type: 'inbound-rtp',
+            kind: 'audio',
+            bytesReceived: 12_000,
+            packetsReceived: 180,
+            packetsLost: 0,
+            jitter: 0.004,
+          },
+        ]),
+    };
+
+    const stats = await (
+      tech as unknown as { computeRtcStats: () => Promise<Record<string, unknown>> }
+    ).computeRtcStats();
+
+    expect(stats).toEqual(
+      expect.objectContaining({
+        candidateType: 'relay',
+        localCandidateType: 'relay',
+        remoteCandidateType: 'relay',
+        transport: 'tcp',
+        rttMs: 12,
+        jitterMs: 4,
+        audioBytesReceived: 12_000,
+        audioPacketsReceived: 180,
+        audioPacketsLost: 0,
+      })
+    );
+  });
+
+  test('applies source ICE servers to existing WHEP peer connection config', () => {
+    const tech = new WebRTCTech();
+    const network = jest.fn();
+    const getConfiguration = jest.fn(() => ({ iceTransportPolicy: 'all' as RTCIceTransportPolicy }));
+    const setConfiguration = jest.fn();
+    const pc: PeerConnectionConfigStub = { getConfiguration, setConfiguration };
+    const iceServers: RTCIceServer[] = [{ urls: 'turn:turn.example.com:3478', username: 'u', credential: 'p' }];
+
+    tech.on('network', network);
+    (tech as unknown as { pc: PeerConnectionConfigStub }).pc = pc;
+    (tech as unknown as { applySourceIceConfig: (source: unknown) => void }).applySourceIceConfig({
+      type: 'webrtc',
+      url: 'https://example.com/live/whep',
+      iceServers,
+      forceRelay: true,
+    });
+
+    expect(setConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        iceServers,
+        iceTransportPolicy: 'relay',
+      })
+    );
+    expect(network).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'ice-config',
+        serverCount: 1,
+        forceRelay: true,
       })
     );
   });

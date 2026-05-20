@@ -1,6 +1,5 @@
 ﻿import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, FileSource, MetadataEvent, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig } from '../types.js';
-import mpegts from 'mpegts.js';
+import { BufferPolicy, FileSource, MetadataEvent, MetricsOptions, MpegtsLoader, ReconnectPolicy, Source, WebCodecsConfig } from '../types.js';
 import { WebCodecsDecoder } from './wsRaw/webcodecsDecoder.js';
 import { Renderer } from './wsRaw/renderer.js';
 import { Demuxer, type DemuxerCallbacks } from './wsRaw/demuxer.js';
@@ -47,6 +46,25 @@ interface Mp4BoxModuleLike {
   };
 }
 
+type MpegtsPlayerLike = {
+  attachMediaElement(video: HTMLVideoElement): void;
+  load(): void;
+  play(): void;
+  pause(): void;
+  unload(): void;
+  detachMediaElement(): void;
+  destroy(): void;
+};
+
+type MpegtsModuleLike = {
+  isSupported(): boolean;
+  createPlayer(
+    mediaDataSource: { type: 'mpegts'; url: string; isLive: boolean },
+    config?: Record<string, unknown>
+  ): MpegtsPlayerLike;
+  default?: MpegtsModuleLike;
+};
+
 // MP4Box type declaration - should be installed via npm: npm install mp4box
 declare const MP4Box: { createFile?: () => Mp4BoxFileLike } | undefined;
 let mp4boxModule: unknown = null;
@@ -56,7 +74,7 @@ let mp4boxModule: unknown = null;
  * Default: native video/MSE; TS/MP4 + WebCodecs when enabled, fallback on failure.
  */
 export class FileTech extends AbstractTech {
-  private tsPlayer: mpegts.Player | null = null;
+  private tsPlayer: MpegtsPlayerLike | null = null;
   private wcAbort: AbortController | null = null;
   private wcRenderer: Renderer | null = null;
   private wcDecoder: WebCodecsDecoder | null = null;
@@ -95,6 +113,7 @@ export class FileTech extends AbstractTech {
       metrics?: MetricsOptions;
       video: HTMLVideoElement;
       webCodecs?: WebCodecsConfig;
+      mpegtsLoader?: MpegtsLoader;
     }
   ): Promise<void> {
     this.source = source;
@@ -149,7 +168,11 @@ export class FileTech extends AbstractTech {
     }
 
     // TS fallback via mpegts.js
-    if (isTs && mpegts.isSupported()) {
+    if (isTs) {
+      const mpegts = await this.loadMpegts(opts.mpegtsLoader);
+      if (!mpegts.isSupported()) {
+        throw new Error('FLV/TS MSE not supported in this browser');
+      }
       console.log('[file] Using mpegts.js for TS playback, url:', source.url);
       this.tsPlayer = mpegts.createPlayer({
         type: 'mpegts',
@@ -487,6 +510,21 @@ export class FileTech extends AbstractTech {
       return;
     }
     throw new Error('MP4Box not available. Provide webCodecs.mp4boxLoader or load MP4Box globally.');
+  }
+
+  private async loadMpegts(loader?: MpegtsLoader): Promise<MpegtsModuleLike> {
+    const normalize = (moduleLike: unknown): MpegtsModuleLike => {
+      const candidate = moduleLike as MpegtsModuleLike;
+      const normalized = candidate?.default?.createPlayer ? candidate.default : candidate;
+      if (!normalized?.isSupported || !normalized?.createPlayer) {
+        throw new Error('mpegts.js is not available. Provide PlayerOptions.mpegtsLoader, install mpegts.js, or load window.mpegts before TS/FLV playback.');
+      }
+      return normalized;
+    };
+    if (loader) return normalize(await loader());
+    const globalMpegts = (globalThis as typeof globalThis & { mpegts?: unknown }).mpegts;
+    if (globalMpegts) return normalize(globalMpegts);
+    throw new Error('mpegts.js is not available. Provide PlayerOptions.mpegtsLoader, install mpegts.js, or load window.mpegts before TS/FLV playback.');
   }
 
   override async seek(time: number): Promise<void> {

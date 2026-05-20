@@ -1,5 +1,5 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, MetadataEvent, MetadataDetectedEvent, MetricsOptions, ReconnectPolicy, Source, WSRawSource } from '../types.js';
+import { BufferPolicy, MetadataEvent, MetadataDetectedEvent, MetricsOptions, MpegtsLoader, ReconnectPolicy, Source, WSRawSource } from '../types.js';
 import { WsRawPipeline } from './wsRaw/pipeline.js';
 import { MseFallback } from './wsRaw/mseFallback.js';
 import { DEFAULT_H264_DECODER_URL, DEFAULT_H264_DECODER_CANDIDATES } from './wsRaw/defaultDecoders.js';
@@ -29,6 +29,7 @@ export class WSRawTech extends AbstractTech {
       metrics?: MetricsOptions;
       video: HTMLVideoElement;
       webCodecs?: import('../types.js').WebCodecsConfig;
+      mpegtsLoader?: MpegtsLoader;
     }
   ): Promise<void> {
     const wsSource = { ...(source as WSRawSource) };
@@ -49,18 +50,18 @@ export class WSRawTech extends AbstractTech {
     this.fallbackStarted = false;
     this.pipelineActive = false;
 
-    const startFallback = (reason?: string) => {
+    const startFallback = async (reason?: string) => {
       if (this.fallbackStarted) return;
       this.fallbackStarted = true;
       this.pipeline?.stop();
       this.fallback = new MseFallback();
-      this.fallback.start(wsSource.url, opts.video, {
+      await this.fallback.start(wsSource.url, opts.video, {
         onReady: () => this.bus.emit('ready'),
         onError: (e) => {
           this.bus.emit('error', e);
           this.bus.emit('network', { type: 'ws-fallback-error', fatal: true });
         }
-      });
+      }, wsSource.transport === 'ts' ? 'mpegts' : 'flv', opts.mpegtsLoader);
       if (reason) this.bus.emit('network', { type: 'fallback', reason });
     };
 
@@ -73,23 +74,23 @@ export class WSRawTech extends AbstractTech {
           onReady: () => this.bus.emit('ready'),
           onError: (e) => {
             this.bus.emit('error', e);
-            startFallback();
+            void startFallback();
           },
           onNetwork: (evt) => {
             // 自动回退：视频解码连续错误
             const decodeErrors = typeof evt?.errors === 'number' ? evt.errors : 0;
             if (evt?.type === 'video-decode-error' && decodeErrors >= 3) {
-              startFallback('video-decode-error');
+              void startFallback('video-decode-error');
               return;
             }
             // 音频解码失败且音频为必需时切换到 MSE
             if (evt?.type === 'audio-fallback' && wsSource.audioOptional === false) {
-              startFallback('audio-fallback');
+              void startFallback('audio-fallback');
               return;
             }
             this.bus.emit('network', evt);
           },
-          onFallback: (reason) => startFallback(reason),
+          onFallback: (reason) => void startFallback(reason),
           // Metadata event handler - emit to EventBus
           onMetadata: metadataConfig.enabled
             ? (event: MetadataEvent) => this.bus.emit('metadata', event)
@@ -109,7 +110,7 @@ export class WSRawTech extends AbstractTech {
       }
     }
     // fallback path
-    startFallback();
+    await startFallback();
   }
 
   /**

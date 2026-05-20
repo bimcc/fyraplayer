@@ -449,6 +449,7 @@ export class FyraPlayer implements PlayerAPI {
           video: this.videoEl,
           webCodecs: this.options.webCodecs,
           dataChannel: this.dataChannelOpts,
+          mpegtsLoader: this.options.mpegtsLoader,
           onTechWillLoad: (techName) => {
             this.attachTechEvents(techName);
           }

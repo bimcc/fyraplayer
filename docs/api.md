@@ -577,7 +577,12 @@ WebSocket + WebCodecs 低延迟播放：
 
 Stable contract:
 
-- The default `ws-raw` path is `pipeline: 'mse'`, implemented through `mpegts.js` + browser MSE. This is the current commercial/default path.
+- The default `ws-raw` path is `pipeline: 'mse'`, implemented through
+  `mpegts.js` + browser MSE. This is the current commercial/default path, but
+  `mpegts.js` is an optional peer to keep default HLS/WebRTC/MP4 installs free
+  of its GitHub-hosted transitive dependency. Apps that use TS/FLV fallback
+  paths must provide `PlayerOptions.mpegtsLoader` or load `window.mpegts`
+  before playback.
 - `pipeline: 'experimental'` opts into the in-house WebCodecs/WASM path. It can emit additional diagnostics and may fall back to MSE on startup or decode failure.
 - `pipeline: 'experimental'` is the only supported opt-in for the in-house WebCodecs/WASM path.
 - Metadata extraction from TS is tied to the experimental demux pipeline. Do not treat metadata extraction as part of the stable MSE-only contract until it has its own verified path.
@@ -585,6 +590,12 @@ Stable contract:
 ```typescript
 // Stable default path
 { type: 'ws-raw', url: 'https://example.com/live.flv', codec: 'h264', transport: 'flv', pipeline: 'mse' }
+
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'ws-raw', url: 'https://example.com/live.flv', codec: 'h264', transport: 'flv' }],
+  mpegtsLoader: () => import('mpegts.js')
+});
 
 // Explicit experimental path
 { type: 'ws-raw', url: 'wss://example.com/live.ts', codec: 'h264', transport: 'ts', pipeline: 'experimental' }

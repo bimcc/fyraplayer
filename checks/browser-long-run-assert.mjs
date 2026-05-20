@@ -12,6 +12,7 @@ function parseArgs(argv) {
     maxDomUiShellGrowth: 0,
     maxErrorEvents: 0,
     maxStallSamples: 3,
+    minAudioPacketsReceived: 1,
     expectLive: false
   };
 
@@ -82,6 +83,15 @@ function parseArgs(argv) {
       case 'max-stall-samples':
         options.maxStallSamples = readNumber();
         break;
+      case 'require-candidate-type':
+        options.requireCandidateType = readValue();
+        break;
+      case 'require-audio-packets':
+        options.requireAudioPackets = true;
+        break;
+      case 'min-audio-packets-received':
+        options.minAudioPacketsReceived = readNumber();
+        break;
       case 'expect-live':
         options.expectLive = true;
         break;
@@ -116,6 +126,9 @@ Options:
   --max-error-events 0             Maximum public error event count
   --max-fatal-network-events 0     Optional cap for fatal network events
   --max-stall-samples 3            Consecutive non-advancing live samples allowed
+  --require-candidate-type relay   Require observed WebRTC local/remote candidate type
+  --require-audio-packets          Require WebRTC audio RTP packets in stats
+  --min-audio-packets-received 1   Minimum audio RTP packets when required
 `);
 }
 
@@ -266,6 +279,40 @@ function collectTechs(report, samples) {
   return Array.from(techs).sort();
 }
 
+function collectStats(report, samples) {
+  const stats = [];
+  for (const sample of samples) {
+    if (sample?.lastStats) stats.push(sample.lastStats);
+  }
+  for (const event of asArray(report.events)) {
+    if (event?.name === 'stats' && event.payload?.stats) {
+      stats.push(event.payload.stats);
+    }
+  }
+  if (report.summary?.stats) stats.push(report.summary.stats);
+  return stats.filter((item) => item && typeof item === 'object');
+}
+
+function collectCandidateTypes(stats) {
+  const types = new Set();
+  for (const stat of stats) {
+    for (const key of ['candidateType', 'localCandidateType', 'remoteCandidateType']) {
+      const value = stat?.[key];
+      if (typeof value === 'string' && value.trim()) {
+        types.add(value.trim().toLowerCase());
+      }
+    }
+  }
+  return Array.from(types).sort();
+}
+
+function getMaxAudioPacketsReceived(stats) {
+  const values = stats
+    .map((stat) => stat?.audioPacketsReceived)
+    .filter((value) => Number.isFinite(value));
+  return values.length ? Math.max(...values) : null;
+}
+
 function buildCheck(name, ok, detail) {
   return { name, ok: !!ok, detail };
 }
@@ -293,6 +340,9 @@ function assertReport(report, options) {
   const elapsedSec = getElapsedSec(samples, report);
   const longestStallRun = getLongestStallRun(samples);
   const techs = collectTechs(report, samples);
+  const statsSamples = collectStats(report, samples);
+  const candidateTypes = collectCandidateTypes(statsSamples);
+  const maxAudioPacketsReceived = getMaxAudioPacketsReceived(statsSamples);
   const playable = (finalReadyState ?? 0) >= 2
     && (currentTimeAdvanceSec >= options.minCurrentTimeAdvanceSec || ended || (frameStats.totalFrameDelta ?? 0) > 0);
   const unresolvedFatal = fatalNetworkEvents.length > 0 && (state === 'error' || !playable);
@@ -311,6 +361,23 @@ function assertReport(report, options) {
 
   if (options.requireTech) {
     checks.push(buildCheck('required-tech', techs.includes(options.requireTech), `observed=${techs.join(',') || 'none'}, required=${options.requireTech}`));
+  }
+
+  if (options.requireCandidateType) {
+    const required = String(options.requireCandidateType).trim().toLowerCase();
+    checks.push(buildCheck(
+      'required-candidate-type',
+      candidateTypes.includes(required),
+      `observed=${candidateTypes.join(',') || 'none'}, required=${required}`
+    ));
+  }
+
+  if (options.requireAudioPackets) {
+    checks.push(buildCheck(
+      'audio-rtp-packets',
+      maxAudioPacketsReceived !== null && maxAudioPacketsReceived >= options.minAudioPacketsReceived,
+      `${maxAudioPacketsReceived ?? 'none'} >= ${options.minAudioPacketsReceived}`
+    ));
   }
 
   if (Number.isFinite(options.minDurationSec)) {
@@ -356,6 +423,8 @@ function assertReport(report, options) {
     sampleCount: samples.length,
     state,
     techs,
+    candidateTypes,
+    maxAudioPacketsReceived,
     finalReadyState,
     currentTimeStart: firstTime,
     currentTimeEnd: lastTime,

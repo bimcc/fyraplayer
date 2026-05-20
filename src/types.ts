@@ -473,6 +473,14 @@ export interface WebCodecsConfig {
   mp4boxLoader?: () => Promise<unknown> | unknown;
 }
 
+/**
+ * Optional mpegts.js loader for TS/FLV MSE fallback paths.
+ * Keeping this app-provided avoids forcing default package consumers to install
+ * mpegts.js and its GitHub-hosted transitive dependency unless TS/FLV playback
+ * is explicitly used.
+ */
+export type MpegtsLoader = () => Promise<unknown> | unknown;
+
 export interface WasmDecoderConfig {
   /** Prefer SharedArrayBuffer/COOP+COEP path when available */
   enableSharedArrayBuffer?: boolean;
@@ -504,6 +512,7 @@ export interface PlayerOptions {
   reconnect?: ReconnectPolicy;
   webCodecs?: WebCodecsConfig;
   dataChannel?: DataChannelOptions;
+  mpegtsLoader?: MpegtsLoader;
 }
 
 export type MiddlewareKind = 'request' | 'signal' | 'control' | 'resolve';
@@ -635,6 +644,9 @@ export interface EngineStats {
   height?: number;
   codec?: string;
   audioCodec?: string;
+  audioBytesReceived?: number;
+  audioPacketsReceived?: number;
+  audioPacketsLost?: number;
   rttMs?: number;
   packetLoss?: number;
   jitterMs?: number;
@@ -642,6 +654,10 @@ export interface EngineStats {
   decodeLatencyMs?: number;
   pendingSegments?: number;
   pendingBytes?: number;
+  candidateType?: string;
+  localCandidateType?: string;
+  remoteCandidateType?: string;
+  transport?: string;
 }
 
 export interface PlayerStatsEvent {
@@ -923,6 +939,7 @@ export interface Tech {
       video: HTMLVideoElement;
       webCodecs?: WebCodecsConfig;
       dataChannel?: DataChannelOptions;
+      mpegtsLoader?: MpegtsLoader;
     }
   ): Promise<void>;
   play(): Promise<void>;

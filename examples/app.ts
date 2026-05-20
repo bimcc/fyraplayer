@@ -106,6 +106,14 @@ let longRunSamples: any[] = [];
 
 const CUSTOM_VALUE = "custom";
 
+const loadMpegts = () => {
+  const globalMpegts = (window as any).mpegts;
+  if (!globalMpegts) {
+    throw new Error("mpegts.js is required for TS/FLV playback. Load mpegts.js globally or pass PlayerOptions.mpegtsLoader.");
+  }
+  return globalMpegts;
+};
+
 // 动态补充 Oven WebRTC 模式选项
 if (!Array.from(typeSelect.options).some((o) => o.value === "webrtc-oven")) {
   const opt = document.createElement("option");
@@ -745,6 +753,7 @@ async function createPlayer(source: SimpleSource) {
     sources: [toPlayerSource(effectiveSource)],
     techOrder: ["gb28181", "webrtc", "ws-raw", "hls", "dash", "fmp4", "file"],
     webCodecs: wcEnable ? { ...(effectiveSource.webCodecs || {}), enable: true } : undefined,
+    mpegtsLoader: loadMpegts,
     plugins
   });
   (window as any).fyraPlayer = player;

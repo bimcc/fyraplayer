@@ -369,6 +369,7 @@ export class WebRTCTech extends AbstractTech {
     }
     
     if (!effectiveSignal) throw new Error("WebRTC signal config required");
+    this.applySourceIceConfig(src);
     if (effectiveSignal.type === 'whip' || effectiveSignal.type === 'whep') {
       effectiveSignal = {
         ...effectiveSignal,
@@ -385,6 +386,29 @@ export class WebRTCTech extends AbstractTech {
       }
       this.handleSignalSideEvents(evt);
     });
+  }
+
+  private applySourceIceConfig(src: Extract<Source, { type: "webrtc" }>): void {
+    if (!this.pc || !src.iceServers?.length) return;
+    try {
+      const config = this.pc.getConfiguration();
+      this.pc.setConfiguration({
+        ...config,
+        iceServers: src.iceServers,
+        iceTransportPolicy: src.forceRelay ? 'relay' : config.iceTransportPolicy
+      });
+      this.bus.emit("network", {
+        type: "ice-config",
+        serverCount: src.iceServers.length,
+        forceRelay: !!src.forceRelay
+      });
+    } catch (error) {
+      this.bus.emit("network", {
+        type: "ice-config-error",
+        severity: "warning",
+        error
+      });
+    }
   }
 
   private emitReadyOnce(): void {
@@ -753,7 +777,12 @@ export class WebRTCTech extends AbstractTech {
     let packetsLost: number | undefined;
     let packetsRecv: number | undefined;
     let candidateType: string | undefined;
+    let localCandidateType: string | undefined;
+    let remoteCandidateType: string | undefined;
     let transport: string | undefined;
+    let audioBytesReceived: number | undefined;
+    let audioPacketsReceived: number | undefined;
+    let audioPacketsLost: number | undefined;
     report.forEach((s) => {
       const inbound = s as InboundRtpStats;
       const pair = s as CandidatePairStats;
@@ -784,6 +813,9 @@ export class WebRTCTech extends AbstractTech {
         candidatePairId = pair.id;
       }
       if (inbound.type === "inbound-rtp" && inbound.kind === "audio") {
+        audioBytesReceived = inbound.bytesReceived;
+        audioPacketsReceived = inbound.packetsReceived;
+        audioPacketsLost = inbound.packetsLost;
         if (inbound.jitter !== undefined) {
           jitterMs = Math.round((inbound.jitter || 0) * 1000);
         }
@@ -804,7 +836,9 @@ export class WebRTCTech extends AbstractTech {
       const pair = Array.from(report.values()).find((s) => s.id === candidatePairId) as CandidatePairStats | undefined;
       const local = pair?.localCandidateId ? localCandidates.get(pair.localCandidateId) : null;
       const remote = pair?.remoteCandidateId ? remoteCandidates.get(pair.remoteCandidateId) : null;
-      candidateType = remote?.candidateType || local?.candidateType;
+      localCandidateType = local?.candidateType;
+      remoteCandidateType = remote?.candidateType;
+      candidateType = remoteCandidateType || localCandidateType;
       transport = local?.protocol || remote?.protocol;
     }
     const now = Date.now();
@@ -832,12 +866,17 @@ export class WebRTCTech extends AbstractTech {
       framesDropped,
       droppedFrames: framesDropped ?? base.droppedFrames,
       framesReceived,
+      audioBytesReceived,
+      audioPacketsReceived,
+      audioPacketsLost,
       pliCount,
       nackCount,
       firCount,
       width: width ?? base.width,
       height: height ?? base.height,
       candidateType,
+      localCandidateType,
+      remoteCandidateType,
       transport
     };
   }

@@ -139,6 +139,7 @@ export class TechManager {
       video: HTMLVideoElement;
       webCodecs?: import('../types.js').WebCodecsConfig;
       dataChannel?: DataChannelOptions;
+      mpegtsLoader?: import('../types.js').MpegtsLoader;
       onTechWillLoad?: TechWillLoadHook;
     }
   ): Promise<{ source: Source; tech: TechName } | null> {
@@ -196,6 +197,7 @@ export class TechManager {
       video: HTMLVideoElement;
       webCodecs?: import('../types.js').WebCodecsConfig;
       dataChannel?: DataChannelOptions;
+      mpegtsLoader?: import('../types.js').MpegtsLoader;
       onTechWillLoad?: TechWillLoadHook;
     },
     errors: TechLoadError[]
