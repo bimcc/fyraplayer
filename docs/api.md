@@ -506,20 +506,36 @@ DASH 自适应码率播放：
 
 - 基于 dash.js
 - DASH Tech is optional and is not registered by the core `FyraPlayer`
-  constructor. Install `dashjs` and enable `createDashTechPlugin()` when DASH
-  playback is required. This keeps default Vite/Rolldown application builds
-  from parsing dash.js when they only use HLS/WebRTC/file sources.
+  constructor. Enable `createDashTechPlugin()` when DASH playback is
+  required. The default plugin path loads the packaged
+  `dist/vendor/dash.all.min.js` script at runtime, so ordinary Vite/Rolldown
+  builds do not parse dash.js when they only use HLS/WebRTC/file sources.
+  Hosts can also provide `dashjsLoader` to use a custom CDN or app bundle.
+  Vite/Rolldown host applications should import
+  `fyraplayer/vendor/dash.all.min.js?url` and pass it as `scriptUrl` so the
+  vendor script is emitted with the app build.
 - 支持 ABR 自适应码率
 
 ```typescript
 import { createDashTechPlugin } from 'fyraplayer/plugins/dash';
+import dashJsScriptUrl from 'fyraplayer/vendor/dash.all.min.js?url';
 
 const player = new FyraPlayer({
   video: '#video',
   sources: [
     { type: 'dash', url: '...mpd', preferTech: 'dash' }
   ],
-  plugins: [createDashTechPlugin()]
+  plugins: [createDashTechPlugin({ scriptUrl: dashJsScriptUrl })]
+});
+
+const playerWithLoader = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'dash', url: '...mpd', preferTech: 'dash' }],
+  plugins: [
+    createDashTechPlugin({
+      dashjsLoader: () => import('dashjs')
+    })
+  ]
 });
 ```
 

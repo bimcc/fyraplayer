@@ -2024,7 +2024,15 @@ Follow-up packaging hardening:
 
 - Moved DASH playback behind `fyraplayer/plugins/dash` so default consumers do
   not parse dash.js in Vite/Rolldown builds unless DASH is explicitly enabled.
-- Kept `dashjs` as an optional peer dependency for the DASH plugin path.
+- Default DASH plugin loading now uses a packaged runtime script
+  (`dist/vendor/dash.all.min.js`) and accepts an optional `dashjsLoader` for
+  host-controlled CDN or app-bundled loading.
+- Exported the packaged script as `fyraplayer/vendor/dash.all.min.js` so
+  Vite/Rolldown host apps can import it with `?url` and pass the emitted asset
+  URL to `createDashTechPlugin({ scriptUrl })`; this avoids both default
+  bundle parsing of dash.js and production 404s for the runtime script.
+- Kept `dashjs` as an optional peer dependency for the DASH plugin path while
+  retaining it as a dev dependency for local build/test workflows.
 - Made MP4Box optional for the experimental MP4 WebCodecs file path through
   `webCodecs.mp4boxLoader` or a global `MP4Box`; ordinary file playback no
   longer causes the package source to import `mp4box`.
@@ -2034,6 +2042,8 @@ Validation:
 - `pnpm exec tsc -p tsconfig.json --noEmit --pretty false`: passed.
 - `pnpm exec jest --runInBand`: passed, 27 suites / 145 tests.
 - `pnpm bundle:examples`: passed.
+- `pnpm check:release`: passed, 27 suites / 145 tests plus public API,
+  exports, source contract, and IIFE bundle after the DASH vendor asset export.
 
 ---
 

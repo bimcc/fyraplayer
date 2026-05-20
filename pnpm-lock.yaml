@@ -8,15 +8,9 @@ importers:
 
   .:
     dependencies:
-      dashjs:
-        specifier: ^5.1.1
-        version: 5.1.1(@svta/cml-cta@1.0.1(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1))(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1)
       hls.js:
         specifier: ^1.6.16
         version: 1.6.16
-      mp4box:
-        specifier: ^0.5.4
-        version: 0.5.4
       mpegts.js:
         specifier: ^1.8.0
         version: 1.8.0
@@ -27,6 +21,9 @@ importers:
       '@types/node':
         specifier: ^20.19.41
         version: 20.19.41
+      dashjs:
+        specifier: ^5.1.1
+        version: 5.1.1(@svta/cml-cta@1.0.1(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1))(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1)
       esbuild:
         specifier: ^0.28.0
         version: 0.28.0
@@ -36,6 +33,9 @@ importers:
       jest:
         specifier: ^30.4.2
         version: 30.4.2(@types/node@20.19.41)
+      mp4box:
+        specifier: ^0.5.4
+        version: 0.5.4
       ts-jest:
         specifier: ^29.4.10
         version: 29.4.10(@babel/core@7.29.0)(@jest/transform@30.4.1)(@jest/types@30.4.1)(babel-jest@30.4.1(@babel/core@7.29.0))(esbuild@0.28.0)(jest-util@30.4.1)(jest@30.4.2(@types/node@20.19.41))(typescript@5.9.3)

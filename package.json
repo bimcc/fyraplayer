@@ -64,6 +64,7 @@
       "import": "./dist/plugins/dash.js",
       "types": "./dist/plugins/dash.d.ts"
     },
+    "./vendor/dash.all.min.js": "./dist/vendor/dash.all.min.js",
     "./plugins/storage": {
       "import": "./dist/plugins/storage.js",
       "types": "./dist/plugins/storage.d.ts"
@@ -74,11 +75,13 @@
     }
   },
   "files": [
-    "dist/**/*"
+    "dist/**/*",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "pnpm clean && tsc -p tsconfig.json",
+    "build": "pnpm clean && tsc -p tsconfig.json && node checks/copy-vendor.mjs",
     "build:release": "pnpm build && pnpm bundle:iife",
     "check:public-api": "tsc -p tsconfig.public-api.json",
     "check:exports": "pnpm build && node checks/export-contract.mjs",
@@ -100,17 +103,29 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
-    "dashjs": "^5.1.1",
     "hls.js": "^1.6.16",
-    "mp4box": "^0.5.4",
     "mpegts.js": "^1.8.0"
+  },
+  "peerDependencies": {
+    "dashjs": "^5.1.1",
+    "mp4box": "^0.5.4"
+  },
+  "peerDependenciesMeta": {
+    "dashjs": {
+      "optional": true
+    },
+    "mp4box": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^20.19.41",
+    "dashjs": "^5.1.1",
     "esbuild": "^0.28.0",
     "fast-check": "^4.8.0",
     "jest": "^30.4.2",
+    "mp4box": "^0.5.4",
     "ts-jest": "^29.4.10",
     "typescript": "^5.9.3",
     "vite": "^8.0.13"

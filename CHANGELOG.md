@@ -13,6 +13,13 @@ All notable changes to FyraPlayer will be recorded here.
 - Moved DASH playback behind the optional `fyraplayer/plugins/dash` entry so
   default consumers do not pull dash.js into Vite/Rolldown builds unless DASH is
   explicitly enabled.
+- Switched DASH to a runtime-loaded `dist/vendor/dash.all.min.js` path by
+  default, with an optional `dashjsLoader` escape hatch for host bundles.
+- Exported `fyraplayer/vendor/dash.all.min.js` so Vite/Rolldown hosts can
+  import it with `?url` and pass the emitted asset URL to
+  `createDashTechPlugin({ scriptUrl })`.
+- Made `dashjs` and `mp4box` optional peers while keeping them available as dev
+  dependencies for the local build/test toolchain.
 - Made MP4Box an optional peer path for the experimental MP4 WebCodecs file
   pipeline via `webCodecs.mp4boxLoader` or a global `MP4Box`.
 

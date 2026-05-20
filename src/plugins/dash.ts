@@ -1,7 +1,7 @@
-import { DASHTech } from '../techs/tech-dash.js';
+import { DASHTech, type DashTechOptions } from '../techs/tech-dash.js';
 import type { PluginCtor } from '../types.js';
 
-export interface DashTechPluginOptions {
+export interface DashTechPluginOptions extends DashTechOptions {
   /** Replace an app-registered DASH Tech if one already exists. Defaults to true. */
   replace?: boolean;
   /**
@@ -13,7 +13,7 @@ export interface DashTechPluginOptions {
 
 export function createDashTechPlugin(options: DashTechPluginOptions = {}): PluginCtor {
   return ({ techs }) => {
-    const handle = techs.register('dash', new DASHTech(), {
+    const handle = techs.register('dash', new DASHTech(options), {
       replace: options.replace ?? true,
       techOrder: options.techOrder ?? 'append'
     });

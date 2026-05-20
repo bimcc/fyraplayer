@@ -382,7 +382,7 @@ describe('HLS and DASH event semantics', () => {
     const tech = new DASHTech();
     const fakeDash = new FakeDash();
     (tech as unknown as { dash: FakeDash }).dash = fakeDash;
-    (tech as unknown as { setupDashEventHandlers(video: HTMLVideoElement): void }).setupDashEventHandlers(createVideoStub());
+    (tech as unknown as { setupDashEventHandlers(video: HTMLVideoElement, events: typeof DASH_EVENTS): void }).setupDashEventHandlers(createVideoStub(), DASH_EVENTS);
 
     const errors: unknown[] = [];
     const network: unknown[] = [];
@@ -403,7 +403,7 @@ describe('HLS and DASH event semantics', () => {
     const fakeDash = new FakeDash();
     const video = createVideoStub();
     (tech as unknown as { dash: FakeDash }).dash = fakeDash;
-    (tech as unknown as { setupDashEventHandlers(video: HTMLVideoElement): void }).setupDashEventHandlers(video);
+    (tech as unknown as { setupDashEventHandlers(video: HTMLVideoElement, events: typeof DASH_EVENTS): void }).setupDashEventHandlers(video, DASH_EVENTS);
 
     const ready = jest.fn();
     const levelSwitches: unknown[] = [];

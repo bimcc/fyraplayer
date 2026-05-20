@@ -77,15 +77,33 @@ pnpm install
 pnpm build
 ```
 
-DASH is optional to keep default application bundles quiet under Vite/Rolldown:
+DASH is optional to keep default application bundles quiet under Vite/Rolldown.
+`createDashTechPlugin()` does not make the default `fyraplayer` entry import
+dash.js. By default it loads the packaged `dist/vendor/dash.all.min.js` UMD
+script only when a DASH source is played. Host apps can also provide their own
+loader when they want tighter CDN/cache control.
+
+For Vite/Rolldown applications, pass the packaged vendor file as an emitted
+asset URL so production builds publish the runtime script with the app:
 
 ```typescript
 import { createDashTechPlugin } from 'fyraplayer/plugins/dash';
+import dashJsScriptUrl from 'fyraplayer/vendor/dash.all.min.js?url';
 
 const player = new FyraPlayer({
   video: '#video',
   sources: [{ type: 'dash', url: 'https://example.com/manifest.mpd', preferTech: 'dash' }],
-  plugins: [createDashTechPlugin()]
+  plugins: [createDashTechPlugin({ scriptUrl: dashJsScriptUrl })]
+});
+
+const playerWithCustomDash = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'dash', url: 'https://example.com/manifest.mpd', preferTech: 'dash' }],
+  plugins: [
+    createDashTechPlugin({
+      dashjsLoader: () => import('dashjs')
+    })
+  ]
 });
 ```
 
