@@ -197,8 +197,14 @@ function createVideoStub(): HTMLVideoElement {
 }
 
 describe('HLS and DASH event semantics', () => {
+  const originalMediaSource = (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource;
+
   beforeEach(() => {
     (globalThis as unknown as { window: { innerHeight: number } }).window = { innerHeight: 720 };
+  });
+
+  afterEach(() => {
+    (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource = originalMediaSource;
   });
 
   test('HLS maps non-fatal errors to network warnings without player error', () => {
@@ -311,6 +317,37 @@ describe('HLS and DASH event semantics', () => {
         height: 720,
         codec: 'avc1.4d401f'
       }
+    ]);
+  });
+
+  test('HLS emits HEVC manifest diagnostics from level codecs', () => {
+    class UnsupportedMediaSource {
+      static isTypeSupported(): boolean {
+        return false;
+      }
+    }
+    (globalThis as unknown as { MediaSource: typeof MediaSource }).MediaSource = UnsupportedMediaSource as unknown as typeof MediaSource;
+
+    const tech = new HLSTech();
+    const fakeHls = new FakeHls();
+    fakeHls.levels = [
+      { bitrate: 2500000, width: 1280, height: 720, videoCodec: 'hvc1.1.6.L93.B0' }
+    ];
+    (tech as unknown as { hls: FakeHls }).hls = fakeHls;
+    (tech as unknown as { setupHlsEventHandlers(video: HTMLVideoElement): void }).setupHlsEventHandlers(createVideoStub());
+
+    const network: unknown[] = [];
+    tech.on('network', (event) => network.push(event));
+
+    fakeHls.handlers.get(HLS_EVENTS.MANIFEST_PARSED)?.('manifestParsed', {});
+    fakeHls.handlers.get(HLS_EVENTS.MANIFEST_PARSED)?.('manifestParsed', {});
+
+    expect(network).toEqual([
+      expect.objectContaining({
+        type: 'hls-hevc-unsupported',
+        severity: 'warning',
+        codecs: ['hvc1.1.6.L93.B0']
+      })
     ]);
   });
 

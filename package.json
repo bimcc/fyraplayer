@@ -1,6 +1,6 @@
 {
   "name": "@bimccfyra/fyraplayer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Modern, extensible low-latency web player (WebRTC, LL-HLS, WS+WASM) with plugin/middleware architecture.",
   "type": "module",
   "packageManager": "pnpm@11.1.2",

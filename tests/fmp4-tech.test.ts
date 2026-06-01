@@ -68,10 +68,12 @@ class FakeSourceBuffer {
 class FakeMediaSource {
   public readyState: 'closed' | 'open' | 'ended' = 'closed';
   public sourceBuffer = new FakeSourceBuffer();
+  public addedMimeTypes: string[] = [];
+  static supportedMimeTypes: Set<string> | null = null;
   private listeners = new Map<string, Array<() => void>>();
 
-  static isTypeSupported(): boolean {
-    return true;
+  static isTypeSupported(mimeType: string): boolean {
+    return FakeMediaSource.supportedMimeTypes ? FakeMediaSource.supportedMimeTypes.has(mimeType) : true;
   }
 
   addEventListener(type: string, handler: () => void): void {
@@ -86,7 +88,8 @@ class FakeMediaSource {
     }
   }
 
-  addSourceBuffer(): SourceBuffer {
+  addSourceBuffer(mimeType: string): SourceBuffer {
+    this.addedMimeTypes.push(mimeType);
     return this.sourceBuffer as unknown as SourceBuffer;
   }
 
@@ -104,6 +107,7 @@ class FakeMediaSource {
 }
 
 function installBrowserFmp4Mocks(): void {
+  FakeMediaSource.supportedMimeTypes = null;
   (globalThis as unknown as { MediaSource: typeof MediaSource }).MediaSource = FakeMediaSource as unknown as typeof MediaSource;
   (globalThis as unknown as { URL: typeof URL }).URL = {
     ...URL,
@@ -170,6 +174,7 @@ function quotaError(): Error {
 
 describe('FMP4Tech backpressure and quota policy', () => {
   afterEach(() => {
+    FakeMediaSource.supportedMimeTypes = null;
     jest.restoreAllMocks();
   });
 
@@ -208,6 +213,90 @@ describe('FMP4Tech backpressure and quota policy', () => {
       expect(mediaSource.sourceBuffer.appended).toHaveLength(1);
     } finally {
       (globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch;
+      (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource = originalMediaSource;
+      (globalThis as unknown as { URL: typeof URL }).URL = originalUrl;
+      await tech.destroy();
+    }
+  });
+
+  test('selects a supported H.265 MIME candidate before creating SourceBuffer', async () => {
+    const originalMediaSource = (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource;
+    const originalUrl = globalThis.URL;
+    const originalFetch = globalThis.fetch;
+    installBrowserFmp4Mocks();
+    const supported = 'video/mp4; codecs="hev1.1.6.L93.B0,mp4a.40.2"';
+    FakeMediaSource.supportedMimeTypes = new Set([supported]);
+    const fetchMock = createReadableFetch([new Uint8Array([1])], { neverDone: true });
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+    const tech = new FMP4Tech();
+    const network: unknown[] = [];
+    tech.on('network', (event) => network.push(event));
+    const video = {
+      src: '',
+      srcObject: null,
+      load: jest.fn(),
+      videoWidth: 0,
+      videoHeight: 0,
+      currentTime: 0
+    } as unknown as HTMLVideoElement;
+
+    try {
+      await tech.load({
+        type: 'fmp4',
+        url: 'https://example.com/live/hevc.fmp4',
+        transport: 'http',
+        codec: 'h265',
+        preferTech: 'fmp4'
+      }, { video });
+
+      const mediaSource = (tech as unknown as { mediaSource: FakeMediaSource }).mediaSource;
+      expect(mediaSource.addedMimeTypes).toEqual([supported]);
+      expect(network).toContainEqual({ type: 'fmp4-codec-selected', mimeType: supported });
+    } finally {
+      (globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch;
+      (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource = originalMediaSource;
+      (globalThis as unknown as { URL: typeof URL }).URL = originalUrl;
+      await tech.destroy();
+    }
+  });
+
+  test('fails fast with explicit diagnostics when fMP4 MIME candidates are unsupported', async () => {
+    const originalMediaSource = (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource;
+    const originalUrl = globalThis.URL;
+    installBrowserFmp4Mocks();
+    FakeMediaSource.supportedMimeTypes = new Set();
+    const tech = new FMP4Tech();
+    const network: unknown[] = [];
+    const errors: unknown[] = [];
+    tech.on('network', (event) => network.push(event));
+    tech.on('error', (event) => errors.push(event));
+    const video = {
+      src: '',
+      srcObject: null,
+      load: jest.fn(),
+      videoWidth: 0,
+      videoHeight: 0,
+      currentTime: 0
+    } as unknown as HTMLVideoElement;
+
+    try {
+      await expect(tech.load({
+        type: 'fmp4',
+        url: 'https://example.com/live/hevc.fmp4',
+        transport: 'http',
+        codec: 'h265',
+        preferTech: 'fmp4'
+      }, { video })).rejects.toThrow('MIME type not supported for fMP4 source');
+
+      expect(network).toEqual([
+        expect.objectContaining({
+          type: 'fmp4-codec-unsupported',
+          codec: 'h265',
+          fatal: true
+        })
+      ]);
+      expect(errors).toEqual(network);
+    } finally {
       (globalThis as unknown as { MediaSource?: typeof MediaSource }).MediaSource = originalMediaSource;
       (globalThis as unknown as { URL: typeof URL }).URL = originalUrl;
       await tech.destroy();

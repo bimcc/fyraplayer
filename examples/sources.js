@@ -24,6 +24,8 @@ export default [
   
   // === MP4 文件 ===
   { type: 'file', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4' },
+  // HEVC/H.265 MP4. Requires browser/OS HEVC support; plays through the File/native video path.
+  { label: 'HEVC/H.265 MP4 demo', type: 'file', url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h265/720/Big_Buck_Bunny_720_10s_1MB.mp4' },
   { type: 'file', url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_30MB.mp4' },
   
   // === 本地测试视频（Vite root 在 examples 下，直接访问 /testvideo/*）===

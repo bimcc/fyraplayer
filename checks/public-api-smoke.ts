@@ -23,6 +23,7 @@ import {
   type Tech,
   type WebRTCSource,
   type WSRawSource,
+  type BrowserManagedCodecSupport,
   getSourcePresentation,
   isPanoramaSource,
   BaseTarget,
@@ -266,6 +267,9 @@ player.currentTime.toFixed();
 player.getVideoElement().paused.valueOf();
 player.getSources().map((source) => source.type);
 player.getCurrentSource()?.type;
+const browserManagedSupport: BrowserManagedCodecSupport = FyraPlayer.probeBrowserManagedCodecs();
+browserManagedSupport.mediaSource.h265.valueOf();
+browserManagedSupport.nativeVideo.h265MimeTypes.map((mimeType) => mimeType.toString());
 const presentationSource: Source = {
   type: 'hls',
   url: 'https://example.com/live360.m3u8',

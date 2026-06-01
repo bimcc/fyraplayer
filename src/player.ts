@@ -33,6 +33,7 @@ import {
 import { DEFAULT_BUFFER_POLICY, DEFAULT_METRICS_OPTIONS, DEFAULT_RECONNECT_POLICY, DEFAULT_TECH_ORDER } from './core/defaults.js';
 import { resolveVideoElement } from './utils/video.js';
 import { probeWebCodecs, WebCodecsSupport } from './utils/webcodecs.js';
+import { BrowserManagedCodecSupport, probeBrowserManagedCodecs } from './utils/browserCodecs.js';
 
 type EventHandler = (...args: unknown[]) => void;
 const MEDIA_HAVE_CURRENT_DATA = 2;
@@ -110,6 +111,10 @@ export class FyraPlayer implements PlayerAPI {
 
   static async probeWebCodecs(): Promise<WebCodecsSupport> {
     return probeWebCodecs();
+  }
+
+  static probeBrowserManagedCodecs(): BrowserManagedCodecSupport {
+    return probeBrowserManagedCodecs();
   }
 
   getState(): PlayerState {

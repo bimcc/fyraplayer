@@ -5,6 +5,7 @@ import { WebCodecsDecoder } from './wsRaw/webcodecsDecoder.js';
 import { Renderer } from './wsRaw/renderer.js';
 import { Demuxer } from './wsRaw/demuxer.js';
 import { probeWebCodecs } from '../utils/webcodecs.js';
+import { buildBrowserManagedMp4MimeCandidates, isH265CodecString, selectSupportedMediaSourceMime } from '../utils/browserCodecs.js';
 import { buildHlsPlaybackConfig, buildLowLatencyConfig } from './hlsConfig.js';
 import { decideWebCodecsCodec } from '../utils/decodeDecision.js';
 
@@ -43,6 +44,7 @@ export class HLSTech extends AbstractTech {
   private hlsManifestHandler?: HlsEventHandler;
   private hlsFragBufferedHandler?: HlsEventHandler;
   private readyEmitted = false;
+  private h265DiagnosticEmitted = false;
 
   canPlay(source: Source): boolean {
     return source.type === 'hls';
@@ -196,6 +198,7 @@ export class HLSTech extends AbstractTech {
         );
         this.hls.autoLevelCapping = capped;
       }
+      this.emitH265ManifestDiagnostic();
     };
     this.hlsFragBufferedHandler = () => this.emitReadyOnce();
     
@@ -264,6 +267,40 @@ export class HLSTech extends AbstractTech {
       } catch { /* ignore */ }
     }
     this.readyEmitted = false;
+    this.h265DiagnosticEmitted = false;
+  }
+
+  private emitH265ManifestDiagnostic(): void {
+    if (this.h265DiagnosticEmitted || !this.hls?.levels?.length) return;
+    const codecs = Array.from(new Set(
+      this.hls.levels
+        .map((level) => level.videoCodec)
+        .filter((codec): codec is string => typeof codec === 'string' && isH265CodecString(codec))
+    ));
+    if (!codecs.length) return;
+
+    this.h265DiagnosticEmitted = true;
+    const candidates = codecs.flatMap((codec) => buildBrowserManagedMp4MimeCandidates({
+      videoCodecString: codec,
+      audioCodec: 'aac'
+    }));
+    const selection = selectSupportedMediaSourceMime(candidates);
+    if (selection.mimeType) {
+      this.bus.emit('network', {
+        type: 'hls-hevc-detected',
+        severity: 'info',
+        codecs,
+        mimeType: selection.mimeType
+      });
+      return;
+    }
+
+    this.bus.emit('network', {
+      type: 'hls-hevc-unsupported',
+      severity: 'warning',
+      codecs,
+      mimeTypes: candidates
+    });
   }
 
   getQualityState(): QualityState {

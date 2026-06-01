@@ -46,6 +46,7 @@ class FyraPlayer implements PlayerAPI {
   
   // 静态方法
   static probeWebCodecs(): Promise<WebCodecsSupport>
+  static probeBrowserManagedCodecs(): BrowserManagedCodecSupport
 }
 ```
 
@@ -209,6 +210,38 @@ interface WebCodecsSupport {
   /** Ordered codec strings that passed isConfigSupported() */
   h264Codecs?: string[]
   h265Codecs?: string[]
+}
+```
+
+### BrowserManagedCodecSupport
+
+`probeBrowserManagedCodecs()` 用于检测浏览器托管播放路径（native video / MSE），不代表 fyraplayer 内置软解能力。
+
+```typescript
+interface BrowserManagedCodecSupport {
+  mediaSource: {
+    available: boolean
+    h264: boolean
+    h265: boolean
+    h264MimeTypes: string[]
+    h265MimeTypes: string[]
+  }
+  nativeVideo: {
+    available: boolean
+    hls: boolean
+    mp4H264: boolean
+    mp4H265: boolean
+    h265MimeTypes: string[]
+  }
+}
+```
+
+H.265/HEVC 推荐先检查浏览器托管能力：
+
+```typescript
+const support = FyraPlayer.probeBrowserManagedCodecs();
+if (support.mediaSource.h265 || support.nativeVideo.mp4H265 || support.nativeVideo.hls) {
+  // 可以尝试 H.265 HLS/fMP4/MP4；最终仍以实际容器、codec string 和系统解码能力为准。
 }
 ```
 
@@ -552,11 +585,14 @@ fMP4 直播流播放（无清单文件）：
 - 支持 HTTP fetch + MSE
 - 支持 WebSocket + MSE
 - 适用于无 .m3u8/.mpd 清单的 fMP4 流
+- H.265 由浏览器 MSE/系统解码接管；播放器只做 MIME/codec 选择和 SourceBuffer 追加，不内置 H.265 软解。
+- 当只传 `codec: 'h265'` 时，会尝试一组 hvc1/hev1 候选；生产环境更推荐传入精确 `videoCodecString` 或完整 `mimeType`。
 
 ```typescript
 { type: 'fmp4', url: '...', transport: 'http', codec: 'h264', preferTech: 'fmp4' }
 { type: 'fmp4', url: 'wss://...', transport: 'ws', codec: 'h264', preferTech: 'fmp4' }
 { type: 'fmp4', url: '/ffmpeg-fmp4/stream.fmp4', transport: 'http', videoCodecString: 'avc1.4d401f', audioCodecString: 'mp4a.40.2', preferTech: 'fmp4' }
+{ type: 'fmp4', url: 'https://example.com/live.hevc.fmp4', transport: 'http', videoCodecString: 'hvc1.1.6.L93.B0', audioCodecString: 'mp4a.40.2', preferTech: 'fmp4' }
 ```
 
 ### tech-ws-raw
@@ -569,6 +605,7 @@ WebSocket + WebCodecs 低延迟播放：
 - HTTP-FLV 通过 mpegts.js 回退
 
 - WebCodecs 会从 SPS/VPS 自动构造 codec string；如果配置失败且存在 `decoderUrl`，会回退到 WASM decode
+- H.265 在 experimental 管线中优先走 WebCodecs；WASM H.265 软解仅保留为未来可能的可选增强，不属于当前稳定能力。
 
 
 ```typescript

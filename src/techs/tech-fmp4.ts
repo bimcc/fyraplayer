@@ -1,5 +1,6 @@
 import { AbstractTech } from './abstractTech.js';
 import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, FMP4Source, FMP4BufferPolicy } from '../types.js';
+import { buildBrowserManagedMp4MimeCandidates, selectSupportedMediaSourceMime } from '../utils/browserCodecs.js';
 
 interface ErrorWithName {
   name?: string;
@@ -71,12 +72,22 @@ export class FMP4Tech extends AbstractTech {
 
     const fmp4Source = source;
     
-    // Determine MIME type based on codec hints
-    this.mimeType = this.buildMimeType(fmp4Source);
-    
-    if (!MediaSource.isTypeSupported(this.mimeType)) {
-      throw new Error(`MIME type not supported: ${this.mimeType}`);
+    // Determine MIME type based on codec hints and choose the first browser-supported candidate.
+    const mimeCandidates = this.buildMimeCandidates(fmp4Source);
+    const selection = selectSupportedMediaSourceMime(mimeCandidates);
+    if (!selection.mimeType) {
+      const error = {
+        type: 'fmp4-codec-unsupported',
+        codec: fmp4Source.codec,
+        mimeTypes: mimeCandidates,
+        fatal: true
+      };
+      this.bus.emit('network', error);
+      this.bus.emit('error', error);
+      throw new Error(`MIME type not supported for fMP4 source: ${mimeCandidates.join(', ')}`);
     }
+    this.mimeType = selection.mimeType;
+    this.bus.emit('network', { type: 'fmp4-codec-selected', mimeType: this.mimeType });
 
     await this.setupMediaSource(opts.video);
     
@@ -87,26 +98,12 @@ export class FMP4Tech extends AbstractTech {
     }
   }
 
-  private buildMimeType(source: FMP4Source): string {
+  private buildMimeCandidates(source: FMP4Source): string[] {
     if (source.mimeType) {
-      return source.mimeType;
+      return [source.mimeType];
     }
 
-    const videoCodec = source.videoCodecString
-      || (source.codec === 'h265'
-        ? 'hvc1.1.6.L93.B0'
-        : source.codec === 'av1'
-          ? 'av01.0.04M.08'
-          : 'avc1.64001f');
-
-    const audioCodec = source.audioCodecString
-      || (source.audioCodec === 'opus'
-        ? 'opus'
-        : source.audioCodec === 'mp3'
-          ? 'mp3'
-          : 'mp4a.40.2');
-    
-    return `video/mp4; codecs="${videoCodec},${audioCodec}"`;
+    return buildBrowserManagedMp4MimeCandidates(source);
   }
 
   private async setupMediaSource(video: HTMLVideoElement): Promise<void> {

@@ -27,6 +27,7 @@ export * from './techs/tech-file.js';
 
 // Utils
 export * from './utils/webcodecs.js';
+export * from './utils/browserCodecs.js';
 export * from './utils/formatDetector.js';
 
 // Render

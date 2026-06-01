@@ -27,6 +27,10 @@ const NETWORK_CODE_BY_TYPE: Record<string, PlayerNetworkCode> = {
   'fmp4-ws-closed': 'FMP4_WS_CLOSED',
   'fmp4-backpressure': 'FMP4_BACKPRESSURE',
   'fmp4-quota-exceeded': 'FMP4_QUOTA_EXCEEDED',
+  'fmp4-codec-selected': 'FMP4_CODEC_SELECTED',
+  'fmp4-codec-unsupported': 'FMP4_CODEC_UNSUPPORTED',
+  'hls-hevc-detected': 'HLS_HEVC_DETECTED',
+  'hls-hevc-unsupported': 'HLS_HEVC_UNSUPPORTED',
   'ws-open': 'WS_OPEN',
   'ws-close': 'WS_CLOSE',
   'wt-open': 'WEBTRANSPORT_OPEN',
@@ -107,6 +111,7 @@ const WARNING_EVENT_TYPES = new Set([
   'dash-error',
   'fmp4-backpressure',
   'fmp4-quota-exceeded',
+  'hls-hevc-unsupported',
   'abr-rendition',
   'abr-fallback-error',
   'ice-restart-failed',
@@ -201,6 +206,14 @@ function normalizeNetworkMessage(evt: NetworkEventPayload): string {
       return `fMP4 pending buffer queue is full (${evt.pendingSegments ?? 'unknown'} segments, ${evt.pendingBytes ?? 'unknown'} bytes)`;
     case 'fmp4-quota-exceeded':
       return 'fMP4 SourceBuffer quota exceeded; old buffered media cleanup requested';
+    case 'fmp4-codec-selected':
+      return `fMP4 MIME selected: ${evt.mimeType || 'unknown'}`;
+    case 'fmp4-codec-unsupported':
+      return 'fMP4 MIME type is not supported by MediaSource';
+    case 'hls-hevc-detected':
+      return `HLS HEVC levels detected: ${Array.isArray(evt.codecs) ? evt.codecs.join(', ') : 'unknown'}`;
+    case 'hls-hevc-unsupported':
+      return `HLS HEVC levels are not supported by MediaSource: ${Array.isArray(evt.codecs) ? evt.codecs.join(', ') : 'unknown'}`;
     case 'reconnect-exhausted':
       return `Reconnect attempts exhausted (${evt.attempt || 0}/${evt.maxRetries || 0})`;
     case 'fallback':

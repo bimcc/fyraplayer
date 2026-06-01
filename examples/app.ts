@@ -137,6 +137,7 @@ const presetSources: SimpleSource[] = [
   { label: "DASH bbb", type: "dash", url: "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd" },
   { label: "DASH sintel", type: "dash", url: "https://bitmovin-a.akamaihd.net/content/sintel/sintel.mpd" },
   { label: "MP4 demo", type: "file", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/mp4/xgplayer-demo-360p.mp4" },
+  { label: "HEVC/H.265 MP4 demo", type: "file", url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h265/720/Big_Buck_Bunny_720_10s_1MB.mp4" },
   { label: "TS 本地 (/testvideo/DJI_20250611085647_0001_V.TS)", type: "file", url: "/testvideo/DJI_20250611085647_0001_V.TS", webCodecs: { enable: true, preferMp4: false } },
   { label: "MP4 本地 (/testvideo/Rec 0017.mp4)", type: "file", url: "/testvideo/Rec%200017.mp4", webCodecs: { enable: true, preferMp4: true } },
   { label: "FLV demo (ws-raw)", type: "ws-raw", url: "https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/flv/xgplayer-demo-360p.flv" }
@@ -730,7 +731,7 @@ async function createPlayer(source: SimpleSource) {
       media: "video",
       enabled: sourcePanoramaMode,
       viewerControls: true,
-      crossOrigin: "anonymous",
+      crossOrigin: sourcePanoramaMode ? "anonymous" : undefined,
       powerPreference: "high-performance",
       textureFlipX: activePanoramaTextureFlipX,
       textureFlipY: activePanoramaTextureFlipY,
