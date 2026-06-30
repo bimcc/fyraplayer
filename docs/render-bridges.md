@@ -138,7 +138,7 @@ Recommended adapter behavior:
 - use `HTMLVideoElement` or `CanvasFrameBuffer.getCanvas()` as the texture
   source;
 - use `createMetadataPlugin()` or `KlvBridge` to forward KLV/SEI/private data
-  into domain parsers such as `@aspect/openklv`;
+  into domain parsers such as `fyraklv`;
 - map parsed position/attitude/time data into Cesium entities, materials,
   imagery layers, or custom primitives;
 - keep camera models, georeferencing, terrain, GIS layers, and UAV

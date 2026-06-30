@@ -77,19 +77,19 @@ player.on('metadata', (event: MetadataEvent) => {
 });
 ```
 
-## 集成 @beeviz/klv 解析器
+## 集成 fyraklv 解析器
 
 ### 安装
 
 ```bash
-npm install @beeviz/klv
+npm install fyraklv
 ```
 
 ### 实时流解析示例
 
 ```typescript
 import { FyraPlayer } from '@bimccfyra/fyraplayer';
-import { KlvParser, Misb0601 } from '@beeviz/klv';
+import { KLVParser, MISB0601Frame, type MISB0601 } from 'fyraklv';
 
 const player = new FyraPlayer({
   sources: [{
@@ -106,7 +106,7 @@ const player = new FyraPlayer({
 });
 
 // 创建 KLV 解析器
-const klvParser = new KlvParser();
+const klvParser = new KLVParser();
 
 // 监听元数据事件
 player.on('metadata', (event) => {
@@ -114,38 +114,33 @@ player.on('metadata', (event) => {
   
   try {
     // 解析 KLV 数据
-    const klvPackets = klvParser.parse(event.raw);
-    
-    for (const packet of klvPackets) {
-      // 检查是否为 MISB 0601 数据
-      if (Misb0601.isValidKey(packet.key)) {
-        const decoded = Misb0601.decode(packet.value);
-        
-        // 处理解码后的元数据
-        handleMisb0601Data(decoded, event.pts);
-      }
-    }
+    const frame = klvParser.parse(event.raw, BigInt(Math.floor(event.pts * 90)));
+    if (!frame) return;
+
+    // 处理解码后的 MISB 0601 元数据
+    const decoded = new MISB0601Frame(frame).asTyped();
+    handleMisb0601Data(decoded, event.pts);
   } catch (err) {
     console.warn('KLV parse error:', err);
   }
 });
 
-function handleMisb0601Data(data: Misb0601Data, pts: number) {
+function handleMisb0601Data(data: MISB0601, pts: number) {
   // 示例：提取传感器位置
-  if (data.sensorLatitude && data.sensorLongitude) {
+  if (data.SensorLatitude && data.SensorLongitude) {
     updateSensorPosition({
-      lat: data.sensorLatitude,
-      lng: data.sensorLongitude,
-      alt: data.sensorAltitude,
+      lat: data.SensorLatitude,
+      lng: data.SensorLongitude,
+      alt: data.SensorTrueAltitude,
       timestamp: pts
     });
   }
   
   // 示例：提取目标位置
-  if (data.targetLatitude && data.targetLongitude) {
+  if (data.TargetLocationLatitude && data.TargetLocationLongitude) {
     updateTargetPosition({
-      lat: data.targetLatitude,
-      lng: data.targetLongitude,
+      lat: data.TargetLocationLatitude,
+      lng: data.TargetLocationLongitude,
       timestamp: pts
     });
   }
@@ -158,21 +153,19 @@ function handleMisb0601Data(data: Misb0601Data, pts: number) {
 
 ```typescript
 import { Demuxer, DemuxerCallbacks } from '@bimccfyra/fyraplayer/techs/wsRaw/demuxer';
-import { KlvParser, Misb0601 } from '@beeviz/klv';
+import { KLVParser, MISB0601Frame, type MISB0601 } from 'fyraklv';
 
 async function parseOfflineFile(fileBuffer: ArrayBuffer) {
-  const klvParser = new KlvParser();
-  const results: { pts: number; data: Misb0601Data }[] = [];
+  const klvParser = new KLVParser();
+  const results: { pts: number; data: MISB0601 }[] = [];
   
   const callbacks: DemuxerCallbacks = {
     onPrivateData: (pid, data, pts) => {
       try {
-        const packets = klvParser.parse(data);
-        for (const packet of packets) {
-          if (Misb0601.isValidKey(packet.key)) {
-            const decoded = Misb0601.decode(packet.value);
-            results.push({ pts, data: decoded });
-          }
+        const frame = klvParser.parse(data, BigInt(Math.floor(pts * 90)));
+        if (frame) {
+          const decoded = new MISB0601Frame(frame).asTyped();
+          results.push({ pts, data: decoded });
         }
       } catch (err) {
         console.warn(`KLV parse error at PTS ${pts}:`, err);
@@ -274,5 +267,5 @@ metadata: {
 ## 相关资源
 
 - [MISB ST 0601 标准](https://nsgreg.nga.mil/misb.jsp)
-- [@beeviz/klv 文档](https://github.com/beeviz/klv)
+- [fyraklv 文档](https://github.com/bimcc/fyraklv)
 - [H.264 SEI 规范 (ITU-T H.264)](https://www.itu.int/rec/T-REC-H.264)

@@ -2,7 +2,7 @@ import type { MetadataDetectedEvent, MetadataEvent, PluginCtor } from '../../typ
 
 /**
  * Generic bridge: takes Fyra metadata events (raw private-data/SEI payloads)
- * and hands them to an external parser (e.g., @beeviz/klv) before invoking a consumer callback.
+ * and hands them to an external parser (e.g., fyraklv) before invoking a consumer callback.
  */
 export interface KlvBridgeOptions<T = unknown> {
   /** Parser that converts a MetadataEvent into a typed result (sync or async). */

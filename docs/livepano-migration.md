@@ -31,7 +31,7 @@ Goal: replace livepano’s self-managed playback engines with FyraPlayer while k
 5) Optional: VideoFrame hook for low-latency panorama
    - For ws-raw, set frame hook: `((tech as WSRawTech).setFrameHook((frame) => ...))` to feed custom sphere mapper if you bypass <video>.
 6) Metadata/KLV (if used):
-   - Enable `metadata` on ws-raw sources (ts transport) and bridge to `@beeviz/klv` via `KlvBridge`.
+   - Enable `metadata` on ws-raw sources (ts transport) and bridge to `fyraklv` via `KlvBridge`.
 
 ## What stays in livepano
 - PSV UI/plugin lifecycle, viewportTracker, quality/bitrate heuristics.

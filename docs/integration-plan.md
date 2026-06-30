@@ -28,7 +28,7 @@ FyraPlayer 是一个纯播放器，专注于低延迟直播（WebRTC/WS-Raw/HLS/
 | 引擎适配    | `@bimccfyra/fyraplayer/plugins/engines`  | URL 转换（ZLM/SRS/MediaMTX 等）               |
 | PSV 集成    | `@beeviz/fyrapano`            | 全景直播，包含 `FyraPlayerPsvAdapter`         |
 | Cesium 集成 | `@beeviz/cesium`              | 视频投影，包含 `FyraPlayerCesiumAdapter`      |
-| KLV 解析    | `@aspect/openklv`             | MISB/KLV 语义解析、时间同步                   |
+| KLV 解析    | `fyraklv`                    | MISB/KLV 语义解析、时间同步                   |
 
 ## 渲染器适配器
 
@@ -80,7 +80,7 @@ await adapter.init();
               │          KlvBridge            │
               │               │               │
               │               ▼               │
-              │        @aspect/openklv        │
+              │           fyraklv             │
               │               │               │
               ▼               ▼               ▼
 ┌─────────────────────────────────────────────────────┐
@@ -92,5 +92,5 @@ await adapter.init();
 
 1. **fyraplayer 保持纯播放器定位**：不包含渲染器特定代码
 2. **适配器在渲染器项目中**：PSV 适配器在 fyrapano，Cesium 适配器在 beeviz/cesium
-3. **元数据只透传不解析**：KLV 语义解析在 @aspect/openklv
+3. **元数据只透传不解析**：KLV 语义解析在 fyraklv
 4. **引擎适配可选**：plugins/engines 按需引入，不膨胀核心

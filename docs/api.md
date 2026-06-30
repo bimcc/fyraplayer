@@ -1561,11 +1561,11 @@ player.on('metadata', (evt) => {
 });
 ```
 
-## 与 @aspect/openklv 集成
+## 与 fyraklv 集成
 
 ```typescript
 import { FyraPlayer } from '@bimccfyra/fyraplayer';
-import { KLVParser, SyncEngine } from '@aspect/openklv';
+import { KLVParser, SyncEngine } from 'fyraklv';
 
 const parser = new KLVParser();
 const syncEngine = new SyncEngine();

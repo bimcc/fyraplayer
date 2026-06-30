@@ -157,7 +157,7 @@ root/ (beeviz)
     ```
 
 #### C. 数据联动 (Data Flow)
-*   **KLV 数据上报**: `CommonFyraPlayer` 内部集成 `@beeviz/klv`，解析出的 GPS/姿态数据通过 `emits("triggerComponentEvent", ...)` 或 `pageEditor.runtime.setData()` 上报给零代码平台，供地图组件消费。
+*   **KLV 数据上报**: `CommonFyraPlayer` 内部集成 `fyraklv`，解析出的 GPS/姿态数据通过 `emits("triggerComponentEvent", ...)` 或 `pageEditor.runtime.setData()` 上报给零代码平台，供地图组件消费。
 
 ---
 

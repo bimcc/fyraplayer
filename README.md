@@ -301,7 +301,7 @@ const player = new FyraPlayer({
 });
 
 player.on('metadata', (evt) => {
-  // 传递给 @aspect/openklv 解析
+  // 传递给 fyraklv 解析
   console.log('Metadata:', evt.type, evt.raw);
 });
 ```
@@ -347,9 +347,9 @@ player.on('metadata', (evt) => {
 
 PSV、Cesium、地图、全景和 KLV 业务解析示例不再放在 `examples/` 里作为可运行占位页面；对应集成边界请看 `docs/render-bridges.md`、`docs/integration-psv.md`、`docs/integration-cesium.md` 和 `docs/klv-integration.md`。
 
-## 与 @aspect/openklv 集成
+## 与 fyraklv 集成
 
-FyraPlayer 可以与 @aspect/openklv 配合使用，实现无人机视频的 KLV 元数据提取和解析。
+FyraPlayer 可以与 fyraklv 配合使用，实现无人机视频的 KLV 元数据提取和解析。
 
 ### 架构关系
 
@@ -369,7 +369,7 @@ FyraPlayer 可以与 @aspect/openklv 配合使用，实现无人机视频的 KLV
 │            │ 私有数据（可能是 KLV）                              │
 │            ▼                                                    │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │                   @aspect/openklv                        │   │
+│  │                      fyraklv                            │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │   │
 │  │  │ KLVParser   │→ │ SyncEngine  │→ │ DroneState  │     │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘     │   │
@@ -382,7 +382,7 @@ FyraPlayer 可以与 @aspect/openklv 配合使用，实现无人机视频的 KLV
 
 ```typescript
 import { FyraPlayer } from '@bimccfyra/fyraplayer';
-import { KLVParser, SyncEngine } from '@aspect/openklv';
+import { KLVParser, SyncEngine } from 'fyraklv';
 
 const parser = new KLVParser();
 const syncEngine = new SyncEngine();
@@ -398,7 +398,7 @@ const player = new FyraPlayer({
   }]
 });
 
-// FyraPlayer 提取私有数据，openklv 解析 KLV 语义
+// FyraPlayer 提取私有数据，fyraklv 解析 KLV 语义
 player.on('metadata', (evt) => {
   if (evt.type === 'private-data') {
     // 检测 KLV Universal Label (06 0E 2B 34)
@@ -422,7 +422,7 @@ function render() {
 
 ## 相关项目
 
-- [@aspect/openklv](https://github.com/aspect/openklv) - KLV/MISB 元数据解析
+- [fyraklv](https://github.com/bimcc/fyraklv) - KLV/MISB 元数据解析
 - [@beeviz/fyrapano](https://github.com/beeviz/fyrapano) - 全景直播组件
 - [beeviz](https://github.com/beeviz/beeviz) - 视频投影业务层
 
