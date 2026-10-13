@@ -1,6 +1,7 @@
-﻿import { AbstractTech } from "./abstractTech.js";
-import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebRTCSignalConfig, DataChannelOptions, EngineStats } from "../types.js";
+import { AbstractTech } from "./abstractTech.js";
+import { Source, TechLoadOptions, WebRTCSignalConfig, DataChannelOptions, EngineStats } from "../types.js";
 import { createSignalAdapter, WebRTCSignalAdapter } from "./webrtc/signalAdapter.js";
+import { abortReason, throwIfAborted } from '../core/abort.js';
 
 type VideoElementWithPlaybackHints = HTMLVideoElement & {
   disableRemotePlayback?: boolean;
@@ -77,6 +78,9 @@ export class WebRTCTech extends AbstractTech {
   private dataChannelOpts: DataChannelOptions | undefined;
   private dataHeartbeat: ReturnType<typeof setInterval> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private metadataTimer: ReturnType<typeof setTimeout> | null = null;
+  private loadController: AbortController | null = null;
+  private generation = 0;
   private lastStatsTs = 0;
   private lastBytes = 0;
   private lastFrames = 0;
@@ -84,16 +88,7 @@ export class WebRTCTech extends AbstractTech {
   private lastStatsSnapshot: EngineStats | null = null;
   private iceReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private playoutDelayHintSeconds: number | null = null;
-  private lastLoadOpts:
-    | {
-        buffer?: BufferPolicy;
-        reconnect?: ReconnectPolicy;
-        metrics?: MetricsOptions;
-        video: HTMLVideoElement;
-        webCodecs?: import("../types.js").WebCodecsConfig;
-        dataChannel?: DataChannelOptions;
-      }
-    | null = null;
+  private lastLoadOpts: TechLoadOptions | null = null;
   private abrSwitching = false;
   private currentRendition: string | null = null;
   private omePlaylist: RenditionInfo[] | null = null;
@@ -110,22 +105,23 @@ export class WebRTCTech extends AbstractTech {
 
   async load(
     source: Source,
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: import("../types.js").WebCodecsConfig;
-      dataChannel?: DataChannelOptions;
-    }
+    opts: TechLoadOptions
   ): Promise<void> {
+    throwIfAborted(opts.signal);
+    if (source.type !== 'webrtc' || !source.url) throw new Error('WebRTC signaling URL required');
+    const reset = this.resetPeerConnection();
+    const generation = this.generation;
+    await reset;
+    throwIfAborted(opts.signal);
+    if (generation !== this.generation) throw new DOMException('Stale WebRTC load', 'AbortError');
     this.source = source;
     this.buffer = opts.buffer;
     this.reconnect = opts.reconnect;
     this.metrics = opts.metrics;
     this.video = opts.video;
     this.dataChannelOpts = opts.dataChannel;
-    this.lastLoadOpts = opts;
+    // A completed load signal must not be reused by later internal rendition switches.
+    this.lastLoadOpts = { ...opts, signal: undefined };
     this.readyFired = false;
     this.currentRendition = null;
     this.omePlaylist = null;
@@ -136,7 +132,7 @@ export class WebRTCTech extends AbstractTech {
     this.playoutDelayHintSeconds = this.computePlayoutDelayHintSeconds();
     
     // Configure video element for low-latency WebRTC playback
-    this.video.playsInline = true;
+    // Inline playback is configured by the owning Player/application.
     this.video.autoplay = true;
     // Disable default buffering for real-time playback
     if ('disableRemotePlayback' in this.video) {
@@ -145,83 +141,74 @@ export class WebRTCTech extends AbstractTech {
     
     // Requirements 2.5: Metadata load timeout warning
     const metadataTimeout = this.reconnect?.timeoutMs ?? 10000;
-    let metadataTimer: ReturnType<typeof setTimeout> | null = null;
+    const controller = new AbortController();
+    this.loadController = controller;
+    const active = () => generation === this.generation && !controller.signal.aborted;
+    const cancel = () => {
+      controller.abort(opts.signal && abortReason(opts.signal));
+      if (generation === this.generation) void this.resetPeerConnection();
+    };
+    opts.signal?.addEventListener('abort', cancel, { once: true });
+    if (opts.signal?.aborted) cancel();
     
     this.video.onloadedmetadata = () => {
-      if (metadataTimer) {
-        clearTimeout(metadataTimer);
-        metadataTimer = null;
-      }
+      if (active()) this.clearMetadataTimer();
     };
     
     this.video.onloadeddata = () => {
-      if (metadataTimer) {
-        clearTimeout(metadataTimer);
-        metadataTimer = null;
-      }
+      if (!active()) return;
+      this.clearMetadataTimer();
       this.emitReadyOnce();
     };
     
     this.video.onerror = (e) => {
+      if (!active()) return;
       this.bus.emit("error", e);
       this.bus.emit("network", { type: "video-error" });
     };
     
-    if (!source.url) {
-      this.bus.emit("error", new Error("WebRTC signaling URL required"));
-      return;
-    }
-    const webrtcSource = source as Extract<Source, { type: "webrtc" }>;
-    const pcCfg: RTCConfiguration = { iceServers: webrtcSource.iceServers };
-    if (webrtcSource.forceRelay || /[\?&]transport=tcp/i.test(webrtcSource.url)) {
-      pcCfg.iceTransportPolicy = 'relay';
-    }
-    this.pc = new RTCPeerConnection(pcCfg);
-    // Pre-create recvonly transceivers to match OME/Oven defaults and avoid implicit renegotiation
-    const videoTransceiver = this.pc.addTransceiver('video', { direction: 'recvonly' });
-    const audioTransceiver = this.pc.addTransceiver('audio', { direction: 'recvonly' });
-    this.applyPlayoutDelayHint(videoTransceiver.receiver);
-    this.applyPlayoutDelayHint(audioTransceiver.receiver);
-    this.applyPlayoutDelayHintToReceivers();
-    this.bindTracks();
-    this.setupDataChannel(this.dataChannelOpts);
     try {
-      await this.negotiate(webrtcSource.signal, webrtcSource);
-    } catch (err) {
-      this.bus.emit("network", { type: "signal-error", fatal: true, error: err });
-      throw err;
-    }
-    this.startConnectTimeout();
-    this.startPacketLossMonitor();
-    
-    // Requirements 2.5: Start metadata timeout after negotiation
-    metadataTimer = setTimeout(() => {
-      if (!this.video?.videoWidth) {
-        console.warn('[webrtc] Video metadata not loaded within timeout, continuing...');
-        this.bus.emit("network", { type: "metadata-timeout", warning: true });
+      throwIfAborted(controller.signal);
+      const webrtcSource = source as Extract<Source, { type: "webrtc" }>;
+      const pcCfg: RTCConfiguration = { iceServers: webrtcSource.iceServers };
+      if (webrtcSource.forceRelay || /[\?&]transport=tcp/i.test(webrtcSource.url)) {
+        pcCfg.iceTransportPolicy = 'relay';
       }
-    }, metadataTimeout);
+      this.pc = new RTCPeerConnection(pcCfg);
+      // Pre-create recvonly transceivers to match OME/Oven defaults and avoid implicit renegotiation
+      const videoTransceiver = this.pc.addTransceiver('video', { direction: 'recvonly' });
+      const audioTransceiver = this.pc.addTransceiver('audio', { direction: 'recvonly' });
+      this.applyPlayoutDelayHint(videoTransceiver.receiver);
+      this.applyPlayoutDelayHint(audioTransceiver.receiver);
+      this.applyPlayoutDelayHintToReceivers();
+      this.bindTracks();
+      this.setupDataChannel(this.dataChannelOpts);
+      await this.negotiate(webrtcSource.signal, webrtcSource, controller.signal, generation);
+      throwIfAborted(controller.signal);
+      if (!active()) throw new DOMException('Stale WebRTC load', 'AbortError');
+      this.startConnectTimeout();
+      this.startPacketLossMonitor();
+
+      // Requirements 2.5: Start metadata timeout after negotiation
+      this.metadataTimer = setTimeout(() => {
+        this.metadataTimer = null;
+        if (!active()) return;
+        if (!this.video?.videoWidth) {
+          console.warn('[webrtc] Video metadata not loaded within timeout, continuing...');
+          this.bus.emit("network", { type: "metadata-timeout", warning: true });
+        }
+      }, metadataTimeout);
+    } catch (err) {
+      if (active()) this.bus.emit('network', { type: 'signal-error', fatal: true, error: err });
+      if (generation === this.generation) await this.resetPeerConnection();
+      throw err;
+    } finally {
+      opts.signal?.removeEventListener('abort', cancel);
+    }
   }
 
   override async destroy(): Promise<void> {
-    this.clearAudioMuteTimers();
-    this.stopPacketLossMonitor();
-    if (this.connectTimer) {
-      clearTimeout(this.connectTimer);
-      this.connectTimer = null;
-    }
-    if (this.iceReconnectTimer) {
-      clearTimeout(this.iceReconnectTimer);
-      this.iceReconnectTimer = null;
-    }
-    if (this.pc) {
-      this.pc.close();
-      this.pc = null;
-    }
-    this.teardownDataChannel();
-    await this.adapter?.destroy();
-    this.adapter = null;
-    this.cleanupVideoElement();
+    await this.resetPeerConnection();
     this.lastLoadOpts = null;
     this.abrSwitching = false;
     this.currentRendition = null;
@@ -237,9 +224,10 @@ export class WebRTCTech extends AbstractTech {
   override getStats() {
     const base = super.getStats();
     if (!this.pc) return base;
+    const generation = this.generation;
     // 异步刷新缓存，避免返回 Promise
     this.computeRtcStats()
-      .then((s) => (this.lastStatsSnapshot = s))
+      .then(s => { if (generation === this.generation) this.lastStatsSnapshot = s; })
       .catch(() => {});
     return this.lastStatsSnapshot || base;
   }
@@ -283,6 +271,9 @@ export class WebRTCTech extends AbstractTech {
 
   private bindTracks(): void {
     if (!this.pc) return;
+    const pc = this.pc;
+    const generation = this.generation;
+    const active = () => this.pc === pc && this.generation === generation;
     this.applyPlayoutDelayHintToReceivers();
     
     // Simplified track handling for WebRTC
@@ -290,6 +281,7 @@ export class WebRTCTech extends AbstractTech {
     let playAttempted = false;
     
     this.pc.ontrack = (evt) => {
+      if (!active()) return;
       console.log('[webrtc] ontrack:', evt.track.kind);
       this.applyPlayoutDelayHint(evt.receiver);
       this.applyPlayoutDelayHint(evt.transceiver?.receiver);
@@ -316,6 +308,7 @@ export class WebRTCTech extends AbstractTech {
         if (!playAttempted) {
           playAttempted = true;
           this.video.play().catch((err) => {
+            if (!active()) return;
             if (err.name === 'AbortError') {
               console.log('[webrtc] Play interrupted, will retry on user interaction');
             } else {
@@ -328,7 +321,7 @@ export class WebRTCTech extends AbstractTech {
     };
     
     this.pc.onconnectionstatechange = () => {
-      if (!this.pc) return;
+      if (!active() || !this.pc) return;
       if (this.pc.connectionState === "connected") {
         this.clearConnectTimeout();
         this.clearIceReconnectTimer();
@@ -340,7 +333,7 @@ export class WebRTCTech extends AbstractTech {
     };
     
     this.pc.oniceconnectionstatechange = () => {
-      if (!this.pc) return;
+      if (!active() || !this.pc) return;
       const state = this.pc.iceConnectionState;
       // Requirements 7.1: Emit ICE state events
       this.bus.emit("network", { type: "ice-state", state });
@@ -359,7 +352,7 @@ export class WebRTCTech extends AbstractTech {
     };
   }
 
-  private async negotiate(signal: WebRTCSignalConfig | undefined, src: Extract<Source, { type: "webrtc" }>): Promise<void> {
+  private async negotiate(signal: WebRTCSignalConfig | undefined, src: Extract<Source, { type: "webrtc" }>, loadSignal: AbortSignal, generation: number): Promise<void> {
     if (!this.pc) throw new Error("pc not ready");
     
     // Auto-detect signal config from URL if not provided
@@ -379,13 +372,14 @@ export class WebRTCTech extends AbstractTech {
     }
     this.adapter = createSignalAdapter(effectiveSignal);
     await this.adapter.setup(this.pc, src, (evt) => {
+      if (loadSignal.aborted || generation !== this.generation) return;
       this.bus.emit("network", { ...evt, stage: "webrtc-signal" });
       if (evt?.type === "offer") {
         // signaling 已经收到 offer，视为 ready 进入缓冲状态
         this.bus.emit("buffer");
       }
       this.handleSignalSideEvents(evt);
-    });
+    }, loadSignal);
   }
 
   private applySourceIceConfig(src: Extract<Source, { type: "webrtc" }>): void {
@@ -466,9 +460,12 @@ export class WebRTCTech extends AbstractTech {
     if (!opts?.enable) return;
     if (!this.pc) return;
     this.dataChannel = this.pc.createDataChannel(opts.label ?? "data");
-    this.dataChannel.onmessage = (evt) => this.bus.emit("data", evt.data);
-    this.dataChannel.onopen = () => this.startDataHeartbeat(opts);
-    this.dataChannel.onclose = () => this.stopDataHeartbeat();
+    const channel = this.dataChannel;
+    const generation = this.generation;
+    const active = () => this.dataChannel === channel && this.generation === generation;
+    channel.onmessage = (evt) => { if (active()) this.bus.emit('data', evt.data); };
+    channel.onopen = () => { if (active()) this.startDataHeartbeat(opts); };
+    channel.onclose = () => { if (active()) this.stopDataHeartbeat(); };
   }
 
   private startDataHeartbeat(opts: DataChannelOptions): void {
@@ -489,6 +486,7 @@ export class WebRTCTech extends AbstractTech {
   private teardownDataChannel(): void {
     this.stopDataHeartbeat();
     if (this.dataChannel) {
+      this.dataChannel.onmessage = this.dataChannel.onopen = this.dataChannel.onclose = null;
       try {
         this.dataChannel.close();
       } catch {
@@ -549,7 +547,9 @@ export class WebRTCTech extends AbstractTech {
       this.bus.emit("network", { type: "abr-rendition", rendition: this.currentRendition, auto: this.omeAutoQuality });
     }
     if (evt.type === "abr-rendition") {
+      const generation = this.generation;
       this.handleAbrRenditionChange(evt).catch((err) => {
+        if (generation !== this.generation) return;
         console.warn('[webrtc] abr switch failed', err);
         this.bus.emit("network", { type: "abr-fallback-error", error: err });
       });
@@ -566,6 +566,13 @@ export class WebRTCTech extends AbstractTech {
   }
   
   private async resetPeerConnection(): Promise<void> {
+    this.generation += 1;
+    this.loadController?.abort();
+    this.loadController = null;
+    this.clearMetadataTimer();
+    this.lastStatsSnapshot = null;
+    this.lastStatsTs = this.lastBytes = this.lastFrames = 0;
+    this.resetPlaybackFpsSampler();
     this.clearAudioMuteTimers();
     this.stopPacketLossMonitor();
     if (this.connectTimer) {
@@ -577,14 +584,25 @@ export class WebRTCTech extends AbstractTech {
       this.iceReconnectTimer = null;
     }
     if (this.pc) {
+      this.pc.ontrack = null;
+      this.pc.onicecandidate = null;
+      this.pc.onconnectionstatechange = null;
+      this.pc.oniceconnectionstatechange = null;
+      this.pc.ondatachannel = null;
       this.pc.close();
       this.pc = null;
     }
     this.teardownDataChannel();
-    await this.adapter?.destroy();
+    const adapter = this.adapter;
     this.adapter = null;
     this.cleanupVideoElement();
     this.readyFired = false;
+    await adapter?.destroy();
+  }
+
+  private clearMetadataTimer(): void {
+    if (this.metadataTimer) clearTimeout(this.metadataTimer);
+    this.metadataTimer = null;
   }
 
   private monitorAudioTrack(track: MediaStreamTrack): void {
@@ -630,10 +648,12 @@ export class WebRTCTech extends AbstractTech {
   
   private async handleAbrRenditionChange(evt: SignalSideEvent): Promise<void> {
     if (this.abrSwitching) return;
+    const generation = this.generation;
     const rendition = evt?.rendition ?? evt?.payload?.rendition ?? null;
     const reason = evt?.reason;
     this.bus.emit("network", { type: "abr-rendition", rendition, reason, severity: "warning" });
     this.bus.emit("levelSwitch", { from: this.currentRendition, to: rendition, auto: true });
+    if (generation !== this.generation) return;
     
     // Prefer in-place rendition switch via signaling when playlist is known
     const switched = this.requestLowerRendition(rendition);
@@ -643,9 +663,12 @@ export class WebRTCTech extends AbstractTech {
     if (!next || !this.lastLoadOpts) return;
     
     this.abrSwitching = true;
+    const opts = this.lastLoadOpts;
     try {
-      await this.resetPeerConnection();
-      await this.load(next, this.lastLoadOpts);
+      this.bus.emit('streamchange', { reason: 'fallback', source: next });
+      if (generation !== this.generation) return;
+      await this.load(next, opts);
+      if (this.source !== next || !this.pc) return;
       this.currentRendition = rendition ?? 'abr-fallback';
     } finally {
       this.abrSwitching = false;
@@ -695,7 +718,10 @@ export class WebRTCTech extends AbstractTech {
   
   private async checkPacketLossAndAbr(): Promise<void> {
     if (!this.pc) return;
-    const report = await this.pc.getStats().catch(() => null);
+    const pc = this.pc;
+    const generation = this.generation;
+    const report = await pc.getStats().catch(() => null);
+    if (pc !== this.pc || generation !== this.generation) return;
     if (!report) return;
     let packetsLost: number | null = null;
     report.forEach((s) => {
@@ -754,7 +780,10 @@ export class WebRTCTech extends AbstractTech {
   private async computeRtcStats() {
     const base = super.getStats();
     if (!this.pc) return base;
-    const report = await this.pc.getStats();
+    const pc = this.pc;
+    const generation = this.generation;
+    const report = await pc.getStats();
+    if (pc !== this.pc || generation !== this.generation) return base;
     let bytes = 0;
     let frames = 0;
     let framesDecoded: number | undefined;

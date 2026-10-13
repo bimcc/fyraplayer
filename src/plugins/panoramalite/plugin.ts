@@ -332,6 +332,9 @@ class PanoramaLiteInstance {
       this.renderer.render(this.view, { uploadTexture: shouldUpload });
       if (shouldUpload) this.videoFrameDirty = false;
     } catch (error) {
+      // A failed texture upload cannot recover by uploading the same frame forever.
+      // Restore the source video and release the render loop before notifying callers.
+      this.setEnabled(false);
       this.handleError(error, 'PANORAMALITE_RENDER_ERROR');
     }
   }

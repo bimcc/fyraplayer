@@ -1,5 +1,6 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, FMP4Source, FMP4BufferPolicy } from '../types.js';
+import { Source, TechLoadOptions, FMP4Source, FMP4BufferPolicy } from '../types.js';
+import { abortReason, throwIfAborted, waitWithSignal } from '../core/abort.js';
 import { buildBrowserManagedMp4MimeCandidates, selectSupportedMediaSourceMime } from '../utils/browserCodecs.js';
 
 interface ErrorWithName {
@@ -40,6 +41,9 @@ export class FMP4Tech extends AbstractTech {
   private abortController: AbortController | null = null;
   private httpPumpPromise: Promise<void> | null = null;
   private destroyed = false;
+  private generation = 0;
+  private objectUrl: string | null = null;
+  private httpReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private pendingBuffers: PendingFmp4Segment[] = [];
   private pendingBytes = 0;
   private isBufferUpdating = false;
@@ -51,14 +55,11 @@ export class FMP4Tech extends AbstractTech {
 
   async load(
     source: Source,
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: WebCodecsConfig;
-    }
+    opts: TechLoadOptions
   ): Promise<void> {
+    throwIfAborted(opts.signal);
+    this.cleanup();
+    const generation = this.generation;
     this.source = source;
     this.buffer = opts.buffer;
     this.reconnect = opts.reconnect;
@@ -89,12 +90,26 @@ export class FMP4Tech extends AbstractTech {
     this.mimeType = selection.mimeType;
     this.bus.emit('network', { type: 'fmp4-codec-selected', mimeType: this.mimeType });
 
-    await this.setupMediaSource(opts.video);
-    
-    if (fmp4Source.transport === 'ws') {
-      await this.startWebSocket(fmp4Source.url);
-    } else {
-      await this.startHttpFetch(fmp4Source.url);
+    const controller = new AbortController();
+    this.abortController = controller;
+    const cancel = () => controller.abort(opts.signal && abortReason(opts.signal));
+    opts.signal?.addEventListener('abort', cancel, { once: true });
+    if (opts.signal?.aborted) cancel();
+    try {
+      throwIfAborted(controller.signal);
+      await this.setupMediaSource(opts.video, controller.signal, generation);
+      throwIfAborted(controller.signal);
+      if (fmp4Source.transport === 'ws') {
+        await this.startWebSocket(fmp4Source.url, controller.signal, generation);
+      } else {
+        await this.startHttpFetch(fmp4Source.url, controller.signal, generation);
+      }
+      throwIfAborted(controller.signal);
+    } catch (error) {
+      if (generation === this.generation) this.cleanup();
+      throw error;
+    } finally {
+      opts.signal?.removeEventListener('abort', cancel);
     }
   }
 
@@ -106,52 +121,62 @@ export class FMP4Tech extends AbstractTech {
     return buildBrowserManagedMp4MimeCandidates(source);
   }
 
-  private async setupMediaSource(video: HTMLVideoElement): Promise<void> {
+  private async setupMediaSource(video: HTMLVideoElement, signal: AbortSignal, generation: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.mediaSource = new MediaSource();
-      video.src = URL.createObjectURL(this.mediaSource);
-      
-      this.mediaSource.addEventListener('sourceopen', () => {
+      const mediaSource = new MediaSource();
+      this.mediaSource = mediaSource;
+      this.objectUrl = URL.createObjectURL(mediaSource);
+      video.src = this.objectUrl;
+      const detach = () => {
+        signal.removeEventListener('abort', cancel);
+        mediaSource.removeEventListener('sourceopen', open);
+        mediaSource.removeEventListener('sourceclose', close);
+      };
+      const cancel = () => { detach(); reject(abortReason(signal)); };
+      const close = () => { detach(); reject(new Error('MediaSource closed before opening')); };
+      const open = () => {
+        detach();
         try {
-          this.sourceBuffer = this.mediaSource!.addSourceBuffer(this.mimeType);
-          this.sourceBuffer.mode = 'segments';
-          
-          this.sourceBuffer.addEventListener('updateend', () => {
+          throwIfAborted(signal);
+          if (generation !== this.generation) throw new DOMException('Stale MediaSource', 'AbortError');
+          const sourceBuffer = mediaSource.addSourceBuffer(this.mimeType);
+          this.sourceBuffer = sourceBuffer;
+          sourceBuffer.mode = 'segments';
+          sourceBuffer.addEventListener('updateend', () => {
+            if (generation !== this.generation || signal.aborted) return;
             this.isBufferUpdating = false;
             this.flushPendingBuffers();
           });
-          
-          this.sourceBuffer.addEventListener('error', (e) => {
+          sourceBuffer.addEventListener('error', (e) => {
+            if (generation !== this.generation || signal.aborted) return;
             this.bus.emit('error', { type: 'sourcebuffer-error', error: e });
           });
-          
           this.bus.emit('ready');
           resolve();
         } catch (err) {
           reject(err);
         }
-      });
-      
-      this.mediaSource.addEventListener('sourceended', () => {
-        console.log('[fmp4] MediaSource ended');
-      });
-      
-      this.mediaSource.addEventListener('sourceclose', () => {
-        console.log('[fmp4] MediaSource closed');
-      });
+      };
+      mediaSource.addEventListener('sourceopen', open);
+      mediaSource.addEventListener('sourceclose', close);
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) cancel();
     });
   }
 
-  private async startHttpFetch(url: string): Promise<void> {
-    this.abortController = new AbortController();
-    
+  private async startHttpFetch(url: string, signal: AbortSignal, generation: number): Promise<void> {
     try {
       const request = this.source?.type === 'fmp4' ? this.source.request : undefined;
-      const response = await fetch(url, {
-        signal: this.abortController.signal,
+      const response = await waitWithSignal(fetch(url, {
+        signal,
         headers: request?.headers,
         credentials: request?.credentials
-      });
+      }).then(response => {
+        if (signal.aborted) void response.body?.cancel().catch(() => {});
+        throwIfAborted(signal);
+        return response;
+      }), signal);
+      throwIfAborted(signal);
       
       if (!response.ok) {
         throw new Error(`HTTP error: ${response.status}`);
@@ -162,7 +187,8 @@ export class FMP4Tech extends AbstractTech {
       }
       
       const reader = response.body.getReader();
-      const pumpPromise = this.pumpHttpReadableStream(reader);
+      this.httpReader = reader;
+      const pumpPromise = this.pumpHttpReadableStream(reader, signal, generation);
       this.httpPumpPromise = pumpPromise;
       void pumpPromise.finally(() => {
         if (this.httpPumpPromise === pumpPromise) {
@@ -171,17 +197,20 @@ export class FMP4Tech extends AbstractTech {
       });
     } catch (err) {
       const error = err as ErrorWithName;
-      if (error.name !== 'AbortError') {
+      if (!signal.aborted && generation === this.generation && error.name !== 'AbortError') {
         this.bus.emit('error', { type: 'fetch-error', error: err });
         this.bus.emit('network', { type: 'fmp4-http-error', fatal: true });
       }
+      throw err;
     }
   }
 
-  private async pumpHttpReadableStream(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+  private async pumpHttpReadableStream(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal, generation: number): Promise<void> {
     try {
-      while (!this.destroyed) {
-        const { value, done } = await reader.read();
+      while (!this.destroyed && generation === this.generation) {
+        const { value, done } = await waitWithSignal(reader.read(), signal);
+        throwIfAborted(signal);
+        if (generation !== this.generation) break;
         
         if (done) {
           this.endOfStream();
@@ -195,11 +224,12 @@ export class FMP4Tech extends AbstractTech {
       }
     } catch (err) {
       const error = err as ErrorWithName;
-      if (!this.destroyed && error.name !== 'AbortError') {
+      if (!this.destroyed && !signal.aborted && generation === this.generation && error.name !== 'AbortError') {
         this.bus.emit('error', { type: 'fetch-error', error: err });
         this.bus.emit('network', { type: 'fmp4-http-error', fatal: true });
       }
     } finally {
+      if (this.httpReader === reader) this.httpReader = null;
       try {
         reader.releaseLock();
       } catch {
@@ -208,35 +238,46 @@ export class FMP4Tech extends AbstractTech {
     }
   }
 
-  private async startWebSocket(url: string): Promise<void> {
+  private async startWebSocket(url: string, signal: AbortSignal, generation: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(url);
-      this.ws.binaryType = 'arraybuffer';
-      
-      this.ws.onopen = () => {
-        console.log('[fmp4] WebSocket connected');
+      const ws = new WebSocket(url);
+      this.ws = ws;
+      ws.binaryType = 'arraybuffer';
+      let opened = false;
+      const active = () => generation === this.generation && !signal.aborted;
+      const cancel = () => { signal.removeEventListener('abort', cancel); reject(abortReason(signal)); };
+      signal.addEventListener('abort', cancel, { once: true });
+      ws.onopen = () => {
+        if (!active()) return;
+        opened = true;
+        signal.removeEventListener('abort', cancel);
         resolve();
       };
-      
-      this.ws.onmessage = (event) => {
+      ws.onmessage = (event) => {
+        if (!active()) return;
         if (event.data instanceof ArrayBuffer) {
           this.appendBuffer(event.data);
         }
       };
       
-      this.ws.onerror = (err) => {
+      ws.onerror = (err) => {
+        if (!active()) return;
+        signal.removeEventListener('abort', cancel);
         this.bus.emit('error', { type: 'websocket-error', error: err });
         reject(err);
       };
       
-      this.ws.onclose = (event) => {
-        console.log('[fmp4] WebSocket closed', event.code, event.reason);
+      ws.onclose = (event) => {
+        if (!active()) return;
+        signal.removeEventListener('abort', cancel);
+        if (!opened) reject(new Error('fMP4 WebSocket closed before opening'));
         if (!event.wasClean) {
           this.bus.emit('network', { type: 'fmp4-ws-closed', fatal: true });
         } else {
           this.endOfStream();
         }
       };
+      if (signal.aborted) cancel();
     });
   }
 
@@ -500,6 +541,7 @@ export class FMP4Tech extends AbstractTech {
   }
 
   private cleanup(): void {
+    this.generation += 1;
     this.destroyed = true;
     this.resetPlaybackFpsSampler();
     // Abort HTTP fetch
@@ -508,9 +550,13 @@ export class FMP4Tech extends AbstractTech {
       this.abortController = null;
     }
     this.httpPumpPromise = null;
+    const reader = this.httpReader;
+    this.httpReader = null;
+    if (reader?.cancel) void reader.cancel().catch(() => {});
     
     // Close WebSocket
     if (this.ws) {
+      this.ws.onopen = this.ws.onmessage = this.ws.onerror = this.ws.onclose = null;
       this.ws.close();
       this.ws = null;
     }
@@ -535,8 +581,9 @@ export class FMP4Tech extends AbstractTech {
     }
     
     // Clean up video element
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+    this.objectUrl = null;
     if (this.video) {
-      URL.revokeObjectURL(this.video.src);
       this.video.src = '';
       this.video.srcObject = null;
       try { this.video.load(); } catch { /* ignore */ }

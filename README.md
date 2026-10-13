@@ -1,119 +1,93 @@
 # FyraPlayer
 
-通用低延迟 Web 播放器，支持 WebRTC、LL-HLS/DASH、WebSocket+WebCodecs 等多种播放技术，采用插件/中间件架构设计。
+通用低延迟 Web 播放 SDK，支持 WebRTC、HLS/LL-HLS、DASH、HTTP/WS fMP4、FLV/TS 和本地文件。当前拟发布版本 **1.1.0-rc.1**，发布范围和升级步骤见 [候选说明](RELEASE_NOTES.md)，变化见 [CHANGELOG](CHANGELOG.md)。
 
-## 1.0 商业基线
+从 [文档导航](docs/README.md) 开始；架构以 [当前架构](docs/architecture.md) 为准，支持承诺以 [支持范围](docs/supported-scenarios.md) 和带日期的 [验证矩阵](docs/playback-verification-matrix.md) 为准。1.0.0 商业基线记录已经归档，不等于全浏览器、全协议支持。
 
-FyraPlayer `1.0.0` 定位为可控场景下的商业基线 SDK：核心播放、插件生命周期、公共导出、示例、发布检查和主要浏览器证据已经收口。支持范围以 [支持场景与已知限制](./docs/supported-scenarios.md)、[播放验证矩阵](./docs/playback-verification-matrix.md) 和 [1.0 发布就绪复盘](./docs/release-1.0-readiness.md) 为准。
+## 安装与基础播放
 
-当前 1.0 不承诺所有浏览器、所有协议、所有后端组合的无条件支持。WebRTC TURN/受控中断恢复、项目专用 direct fMP4、Safari/Firefox 完整矩阵、DRM、字幕、广告/埋点、前端录制、GB28181 服务端栈和 PTZ 设备执行均按文档继续跟进或保持插件/后端边界。
+本候选先从生成的本地 tarball 安装；npm latest 仍以 registry 为准，普通无版本安装不包含尚未发布的候选能力。
 
-## 特性
-
-- **多播放技术**: WebRTC (OME/WHIP/WHEP)、WS-raw (WebCodecs, FLV/TS)、HLS/DASH、fMP4、GB28181 网关适配、本地文件
-- **本地文件播放**: 支持 MP4（原生）、TS/MTS（mpegts.js）、FLV 等格式的本地文件播放
-- **高可靠性**: 自动重连、ICE 重启、playoutDelayHint、基于丢包的 ABR 回退、DataChannel 心跳
-- **可扩展**: 中间件管线、插件管理器、信令适配器、流媒体服务器 URL 工厂、元数据桥接 (KLV/SEI)
-- **可选 UI 插件**: 通过 `createUiComponentsPlugin()` 显式启用，嵌入场景可只使用核心播放器
-- **渲染器分离**: PSV 全景、Cesium 3D 地图适配器放在各自独立项目
-
-## 架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        用户应用                              │
-├─────────────────────────────────────────────────────────────┤
-│  @beeviz/fyrapano    @beeviz/cesium    其他渲染器集成        │  ← 外部项目
-├─────────────────────────────────────────────────────────────┤
-│  plugins/metadata    plugins/engines                         │  ← 播放相关插件
-├─────────────────────────────────────────────────────────────┤
-│                          ui/                                 │  ← 可选 UI 插件
-├─────────────────────────────────────────────────────────────┤
-│                       FyraPlayer                             │  ← 主入口
-├─────────────────────────────────────────────────────────────┤
-│     core/          techs/           render/                  │  ← 核心层
-└─────────────────────────────────────────────────────────────┘
+```sh
+npm install /absolute/path/bimccfyra-fyraplayer-1.1.0-rc.1.tgz
 ```
 
-## 播放技术 (Tech)
+```ts
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
 
-| Tech | 文件 | 用途 | 底层库 |
-|------|------|------|--------|
-| `webrtc` | tech-webrtc.ts | WebRTC 低延迟播放 (WHIP/WHEP/Oven-WS) | 原生 WebRTC |
-| `hls` | tech-hls.ts | HLS/LL-HLS 自适应码率播放 (.m3u8) | hls.js |
-| `dash` | tech-dash.ts | DASH 自适应码率播放 (.mpd) | dash.js（通过 `@bimccfyra/fyraplayer/plugins/dash` 显式启用） |
-| `fmp4` | tech-fmp4.ts | fMP4 直播流 (无清单，HTTP/WS + MSE) | 原生 MSE |
-| `ws-raw` | tech-ws-raw.ts | WebSocket + WebCodecs (FLV/TS) | 自研 + mpegts.js |
-| `gb28181` | tech-gb28181.ts | 服务端 GB28181 网关 invite/control + FLV/TS 播放适配 | mpegts.js |
-| `file` | tech-file.ts | 本地/远程文件播放 (MP4/TS/FLV) | 原生 + mpegts.js |
-
-## 格式与 Tech 对应关系
-
-| 格式 | 后缀/协议 | 推荐 Tech | 说明 |
-|------|-----------|-----------|------|
-| HLS | .m3u8 | `hls` | 支持 LL-HLS |
-| DASH | .mpd | `dash` | 支持 ABR |
-| fMP4 直播 | .m4s, HTTP/WS | `fmp4` | 无清单的 fMP4 流 |
-| FLV 直播 | ws://...flv | `ws-raw` | WebSocket FLV |
-| HTTP-FLV | http://...flv | `ws-raw` | mpegts.js 播放 |
-| TS 直播 | ws://...ts | `ws-raw` | WebSocket TS |
-| MP4 文件 | .mp4 | `file` | 浏览器原生 |
-| TS 文件 | .ts, .mts | `file` | mpegts.js 播放 |
-| WebRTC | wss://, http:// | `webrtc` | WHEP/WHIP/Oven |
-
-## 外部依赖
-
-| 库 | 版本 | 用途 |
-|----|------|------|
-| `hls.js` | ^1.6.16 | HLS/LL-HLS 流播放 |
-| `dashjs` | ^5.1.1 | DASH 流播放（optional peer，使用 DASH 插件时安装） |
-| `mpegts.js` | ^1.8.0 | TS/FLV 容器解析 + MSE 播放（optional peer，仅 TS/FLV/GB fallback 路径需要） |
-| `mp4box` | ^0.5.4 | MP4 容器解析（optional peer，仅 `webCodecs.mp4boxLoader` / 全局 MP4Box 路径需要） |
-
-## 安装
-
-```bash
-pnpm install
-pnpm build
+const player = new FyraPlayer({
+  video: '#video',
+  sources: [{ type: 'hls', url: 'https://example.com/live.m3u8' }],
+  autoplay: true,
+  muted: true
+});
+player.on('error', error => console.error(error));
+await player.init();
+// 页面退出时：
+await player.destroy();
 ```
 
-DASH is optional to keep default application bundles quiet under Vite/Rolldown.
-`createDashTechPlugin()` does not make the default `@bimccfyra/fyraplayer` entry import
-dash.js. By default it loads the packaged `dist/vendor/dash.all.min.js` UMD
-script only when a DASH source is played. Host apps can also provide their own
-loader when they want tighter CDN/cache control.
+并发 init 合并加载，快速切源以最新请求为准；destroy 可重复调用，但销毁后需创建新实例。Tech 和中间件需要完成自身加载 Promise，详情见 [生命周期](docs/architecture.md)。
 
-For Vite/Rolldown applications, pass the packaged vendor file as an emitted
-asset URL so production builds publish the runtime script with the app:
+本候选新增 getPlaybackSession/sessionchange，区分请求源与实际选中源，并用 epoch 使旧同步状态失效；新增 loadTimeoutMs 和加载 signal。取消覆盖尚未包含全部协议，详见 [播放会话与取消](docs/playback-sessions.md)。
 
-```typescript
+本候选提供 `await player.stop()`，立即取消加载与重连并等待播放资源释放，保留插件和源，可继续 play/init/switchSource。加载或重连中调用 pause 也会停止；正常播放仍为暂停。示例页提供独立停止按钮，错误地址停止后可以直接重新加载。
+
+## 功能与插件
+
+| 能力 | 接入方式 |
+| --- | --- |
+| HLS/LL-HLS | 内建 hls Tech；运行时依赖 hls.js |
+| WebRTC | 内建 WHEP/WHIP/Oven 信令路径；需服务端与浏览器能力匹配 |
+| HTTP/WS direct fMP4 | 内建 fmp4 Tech，非 HLS 清单路径 |
+| FLV/TS 与 GB28181 网关输出 | 默认 MSE；应用提供 mpegts.js |
+| GB28181 开流/控制集成 | 新增可选 [gb-gateway](docs/gb28181.md)，应用回调解析标准 Source；旧 Tech 保留兼容 |
+| WebTransport + WebCodecs | 可选 [Tech 插件](docs/webtransport.md)，HTTP/3 可靠流；单一 fyra-media 格式，视频与可选原始元数据共享时钟；实验、无音频 |
+| 本地 MP4/WebM | 浏览器原生文件播放；TS/MTS/FLV 走可选 mpegts.js |
+| DASH | 显式安装 createDashTechPlugin |
+| UI、诊断、鉴权、存储、录制 API、性能指标 | 可选插件，入口见 [插件职责](docs/pluginization-map.md) |
+| 无 UI 截图、显示帧时钟 | 新增可选 [snapshot / frame-clock](docs/monitoring-plugins.md)，纳入本候选 |
+| 轻量全景 | 可选 [PanoramaLite](docs/panoramalite.md)，图片/视频等距柱状投影 |
+| KLV/MISB | 播放器提取 raw metadata；独立 fyraklv 解析与同步 |
+| PSV/Cesium 等外部渲染器 | 应用或渲染器包持有 [桥接](docs/render-bridges.md) |
+
+核心不会自动创建 UI：
+```ts
+import { createUiComponentsPlugin } from '@bimccfyra/fyraplayer/plugins/ui-components';
+// 在 PlayerOptions.plugins 中加入：
+createUiComponentsPlugin({ target: '.player-shell' });
+```
+
+本候选包含移动端适配：默认行内播放、44px 触摸按钮、窄屏“更多”菜单、全景单指拖动/双指缩放，以及容器全屏不可用时的页面内全屏。接入和手机预览见 [移动端播放](docs/mobile-playback.md)。已验证 Chromium 移动模拟，真机 iOS/Android 仍待复核。
+
+H.265 可走 native、MSE 或 WebCodecs，取决于浏览器、系统、容器和真实码流；配置探测不代表已实际解码或硬解。示例页分开显示三类探测与当前播放路径，详细说明见 [解码能力](docs/decoder-capabilities.md)。高级类型提供 WebTransport 实验入口，GB 网关表单只在选择兼容接入时显示。
+
+`/core` 是兼容的广泛导出入口，不是已经拆分的最小播放内核。消费方只导入公开 exports。
+
+监控/无人机场景优先推进多路、低延迟与 KLV 同步，职责、已实现能力和后续验收见 [推进路线](docs/monitoring-roadmap.md)。插件新增可选 lifecycle 作用域及 onPluginError，支持初始化失败回收、协作取消和逆序清理。
+
+新增 [四路监看示例](examples/multiview.html) 与 [应用层调度说明](docs/multiview.md)：播放/启动名额、焦点优先、离屏/后台释放、返回限流和每路健康观察。快捷键按播放器焦点隔离。该示例不等于多路设备容量或跨路同步承诺。
+
+## 可选播放依赖
+
+DASH 在 Vite 应用中将 vendor 当资源发布：
+```ts
+import { FyraPlayer } from '@bimccfyra/fyraplayer';
 import { createDashTechPlugin } from '@bimccfyra/fyraplayer/plugins/dash';
 import dashJsScriptUrl from '@bimccfyra/fyraplayer/vendor/dash.all.min.js?url';
 
 const player = new FyraPlayer({
   video: '#video',
-  sources: [{ type: 'dash', url: 'https://example.com/manifest.mpd', preferTech: 'dash' }],
+  sources: [{ type: 'dash', url: 'https://example.com/live.mpd' }],
   plugins: [createDashTechPlugin({ scriptUrl: dashJsScriptUrl })]
 });
-
-const playerWithCustomDash = new FyraPlayer({
-  video: '#video',
-  sources: [{ type: 'dash', url: 'https://example.com/manifest.mpd', preferTech: 'dash' }],
-  plugins: [
-    createDashTechPlugin({
-      dashjsLoader: () => import('dashjs')
-    })
-  ]
-});
+await player.init();
 ```
 
-TS/FLV playback is also optional for supply-chain stability. The default package
-does not install `mpegts.js` because `mpegts.js@1.8.0` depends on a
-GitHub-hosted `webworkify-webpack` tarball. Applications that use `ws-raw`,
-GB28181 FLV/TS gateway output, or TS file fallback should install and pass an
-explicit loader:
+也可安装 dashjs 并提供 `dashjsLoader: () => import('dashjs')`。仅把 source 写为 dash 不会注册 Tech。
 
-```typescript
+TS/FLV/GB fallback 需要应用提供 mpegts.js；它是 optional peer，其 1.8.0 安装链包含 GitHub tarball，请按环境管理依赖。
+```ts
 const player = new FyraPlayer({
   video: '#video',
   sources: [{ type: 'ws-raw', url: 'https://example.com/live.flv', codec: 'h264', transport: 'flv' }],
@@ -121,311 +95,53 @@ const player = new FyraPlayer({
 });
 ```
 
-## 快速开始
+本地文件使用 object URL 时要显式指定容器，例如 `{ type: 'file', url: blobUrl, container: 'flv' }`；.mts 对应 ts。销毁播放器后由应用 revokeObjectURL。实验 MP4 WebCodecs 路径另需 mp4boxLoader/全局 MP4Box。
 
-```typescript
-import { FyraPlayer } from '@bimccfyra/fyraplayer';
+## 元数据与 fyraklv
 
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{ type: 'hls', url: 'https://example.com/stream.m3u8' }],
-  techOrder: ['webrtc', 'ws-raw', 'hls', 'dash', 'fmp4', 'file'],
-  autoplay: true,
-  muted: true
-});
-
-player.on('ready', () => console.log('Player ready'));
-player.on('error', (err) => console.error('Error:', err));
-
-await player.init();
-```
-
-### 启用 UI 插件
-
-核心播放器不会默认挂载控件；需要 UI 时显式加入插件：
-
-```typescript
-import { FyraPlayer } from '@bimccfyra/fyraplayer';
-import { createUiComponentsPlugin } from '@bimccfyra/fyraplayer/plugins/ui-components';
-
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{ type: 'hls', url: 'https://example.com/stream.m3u8' }],
-  plugins: [
-    createUiComponentsPlugin({
-      target: '.player-shell',
-      poster: '/poster.jpg'
-    })
-  ]
-});
-
-await player.init();
-```
-
-### 插件能力速查
-
-FyraPlayer 的核心只负责播放生命周期、Tech 选择、事件和中间件执行。产品能力通过插件显式启用，推荐从独立子路径导入，避免把不需要的能力打进业务包。
-
-| 插件入口 | 工厂/能力 | 适用场景 |
-|---|---|---|
-| `@bimccfyra/fyraplayer/plugins/ui-components` | `createUiComponentsPlugin()` | 播放控制条、质量/源选择、重试、截图入口、录制按钮钩子 |
-| `@bimccfyra/fyraplayer/plugins/diagnostics` | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | 当前状态、最近错误/网络/QoS/ICE 线索、诊断导出和调试面板 |
-| `@bimccfyra/fyraplayer/plugins/storage` | `createStoragePlugin()` | 音量、静音、倍速、清晰度、低延迟偏好和上次播放源持久化 |
-| `@bimccfyra/fyraplayer/plugins/auth` | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | 请求头、凭证、Token、URL 签名和显式 401/403 恢复 |
-| `@bimccfyra/fyraplayer/plugins/recording-api` | `createRecordingApiPlugin()` | 对接后端开始/停止/查询录制；不做浏览器本地录制 |
-| `@bimccfyra/fyraplayer/plugins/performance` | `createPerformanceMonitorPlugin()` | FPS、延迟、pending buffer 等性能预算告警 |
-| `@bimccfyra/fyraplayer/plugins/metrics` | `createMetricsPlugin()` | 业务自定义指标回调或上报适配 |
-| `@bimccfyra/fyraplayer/plugins/reconnect` | `createReconnectPlugin()` | 重连事件日志和产品侧回调；不替代核心重连策略 |
-| `@bimccfyra/fyraplayer/plugins/metadata` | `createMetadataPlugin()`, `KlvBridge` | KLV/SEI/private-data 等元数据业务解析 |
-| `@bimccfyra/fyraplayer/plugins/engines` | `createSourceResolverMiddleware()` | MediaMTX/OME 等服务端播放 URL 到 source/fallback 链的转换 |
-| `@bimccfyra/fyraplayer/plugins/panoramalite` | `createPanoramaLitePlugin()` | 轻量 WebGL2 全景图片、全景视频和全景直播渲染 |
-
-插件应在创建 `FyraPlayer` 时通过 `plugins` 数组安装。产品 UI 可以显示已安装插件并开放安全的运行时模式开关，例如 PanoramaLite 的 `handle.setEnabled()`；`examples/basic.html` 已采用统一资源列表和普通/全景模式切换示例。视频源平台可通过 `source.presentation.mode = 'panorama'`、`source.meta.presentation` 或 `tags: ['panorama']` 标记全景源，应用层可用 `isPanoramaSource()` / `getSourcePresentation()` 触发全景模式。当前 SDK 不提供任意热安装插件的公共 API。具体边界见 [插件化边界地图](./docs/pluginization-map.md) 和 [SDK 发布与集成](./docs/sdk-release-integration.md)。
-
-## 使用示例
-
-### HLS 播放
-
-```typescript
+```ts
 const player = new FyraPlayer({
   video: '#video',
   sources: [{
-    type: 'hls',
-    url: 'https://example.com/stream.m3u8',
-    lowLatency: true,  // 启用 LL-HLS
-    preferTech: 'hls'
+    type: 'ws-raw', url: 'wss://example.com/live.ts',
+    codec: 'h264', transport: 'ts', pipeline: 'experimental',
+    metadata: { privateData: { enable: true }, sei: { enable: true } }
   }]
 });
-```
-
-### DASH 播放
-
-```typescript
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{
-    type: 'dash',
-    url: 'https://example.com/stream.mpd',
-    preferTech: 'dash'
-  }]
-});
-```
-
-### fMP4 直播流（无清单）
-
-```typescript
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{
-    type: 'fmp4',
-    url: 'https://example.com/live/stream',
-    transport: 'http',  // 或 'ws'
-    codec: 'h264',
-    isLive: true,
-    preferTech: 'fmp4'
-  }]
-});
-```
-
-### WebSocket FLV/TS 流
-
-```typescript
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{
-    type: 'ws-raw',
-    url: 'wss://server/stream.flv',
-    codec: 'h264',
-    transport: 'flv',  // 或 'ts'
-    preferTech: 'ws-raw'
-  }]
-});
-```
-
-`ws-raw` defaults to the stable MSE path (`pipeline: 'mse'`). The in-house
-WebCodecs/WASM path is opt-in and should be treated as experimental:
-
-```typescript
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{
-    type: 'ws-raw',
-    url: 'wss://server/stream.ts',
-    codec: 'h264',
-    transport: 'ts',
-    pipeline: 'experimental',
-    preferTech: 'ws-raw'
-  }]
-});
-```
-
-### 本地文件播放
-
-```typescript
-// 通过 file input 选择本地文件
-const fileInput = document.getElementById('file-input');
-fileInput.onchange = async () => {
-  const file = fileInput.files[0];
-  const blobUrl = URL.createObjectURL(file);
-  const ext = file.name.split('.').pop().toLowerCase();
-  
-  const player = new FyraPlayer({
-    video: '#video',
-    sources: [{
-      type: 'file',
-      url: blobUrl,
-      // 对于 blob URL，需要指定 container 类型
-      container: ext === 'ts' ? 'ts' : (ext === 'mp4' ? 'mp4' : undefined)
-    }]
-  });
-  
-  await player.init();
-};
-```
-
-### 元数据提取 (KLV/SEI)
-
-```typescript
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{
-    type: 'ws-raw',
-    url: 'wss://server/stream',
-    codec: 'h264',
-    transport: 'ts',
-    metadata: {
-      privateData: { enable: true },
-      sei: { enable: true }
-    }
-  }]
-});
-
-player.on('metadata', (evt) => {
-  // 传递给 fyraklv 解析
-  console.log('Metadata:', evt.type, evt.raw);
-});
-```
-
-## API 文档
-
-详细 API 文档请参阅 [docs/api.md](./docs/api.md)
-
-## 长期跟进文档
-
-- [商业化成熟度路线图](./docs/commercial-readiness-roadmap.md)：当前商业级差距、优先级、验收门槛和延期插件占位。
-- [插件化边界地图](./docs/pluginization-map.md)：已插件化能力、候选插件、核心边界和插件 API 后续方向。
-- [渲染桥边界](./docs/render-bridges.md)：PSV/Cesium/map/panorama 适配器的外部化方案和通用视频/画布输出契约。
-- [PanoramaLite 计划](./docs/panoramalite.md)：轻量 WebGL2 全景图片、全景视频和全景直播插件专项设计与跟踪。
-- [支持场景与已知限制](./docs/supported-scenarios.md)：当前可对外承诺的场景、实验项和明确边界。
-- [播放验证矩阵](./docs/playback-verification-matrix.md)：真实浏览器/协议验证范围、样例流、场景和证据记录。
-- [性能基线](./docs/performance-baseline.md)：可选性能预算插件、默认阈值和后续 profiling 证据状态。
-- [SDK 发布与集成](./docs/sdk-release-integration.md)：ESM、插件子路径、IIFE/CDN 包、发布检查清单和迁移规则。
-- [1.0 发布就绪复盘](./docs/release-1.0-readiness.md)：正式 1.0 前的架构、功能、证据、风险和后续任务复盘。
-- [代码审查对齐文档](./docs/review-alignment.md)：历史审查结论、已完成整改和复审记录。
-- [P0 执行清单](./docs/p0-execution-checklist.md)：第一批正确性修复的执行与验收记录。
-
-## 脚本
-
-- `pnpm build` — 构建到 `dist/`
-- `pnpm build:release` — 构建 ESM 包并生成浏览器 IIFE 包
-- `pnpm bundle:iife` — 生成 `dist/fyraplayer.iife.js`
-- `pnpm check:release` — 运行发布前自检流水线
-- `pnpm check:sources` — 校验 `examples/sources.js` 的示例源结构
-- `pnpm check:public-api` — 校验 README/API 关键公共用法可通过 TypeScript 编译
-- `pnpm check:exports` — 清理并重建 `dist/`，校验 `package.json` exports 指向的文件存在
-- `pnpm smoke:panoramalite` — 启动 PanoramaLite 示例并做浏览器 canvas 像素/交互 smoke
-- `pnpm test` — 运行 Jest 测试
-- `pnpm dev:vite` — Vite 开发服务器
-- `pnpm bundle:examples` — 打包示例
-
-## 示例资产
-
-- `examples/basic.html`：主要 ESM 播放器示例、协议测试入口，以及普通播放/ PanoramaLite 全景播放统一 demo。
-- `examples/sources.js`：示例流配置清单，受 `pnpm check:sources` 校验。
-- `examples/minimal-iife.html`：无构建环境的 IIFE 集成示例。
-- `examples/panoramalite.html`：PanoramaLite WebGL2 全景渲染专项示例和 smoke 目标。
-
-PSV、Cesium、地图、全景和 KLV 业务解析示例不再放在 `examples/` 里作为可运行占位页面；对应集成边界请看 `docs/render-bridges.md`、`docs/integration-psv.md`、`docs/integration-cesium.md` 和 `docs/klv-integration.md`。
-
-## 与 fyraklv 集成
-
-FyraPlayer 可以与 fyraklv 配合使用，实现无人机视频的 KLV 元数据提取和解析。
-
-### 架构关系
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         业务应用                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                    FyraPlayer                            │   │
-│  │  ┌─────────────┐                                        │   │
-│  │  │ ts-demuxer  │ ← TS 解复用（视频/音频/私有数据）        │   │
-│  │  └──────┬──────┘                                        │   │
-│  │         │ onPrivateData(pid, bytes, pts)                │   │
-│  └─────────┼───────────────────────────────────────────────┘   │
-│            │                                                    │
-│            │ 私有数据（可能是 KLV）                              │
-│            ▼                                                    │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                      fyraklv                            │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │   │
-│  │  │ KLVParser   │→ │ SyncEngine  │→ │ DroneState  │     │   │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘     │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 集成示例
-
-```typescript
-import { FyraPlayer } from '@bimccfyra/fyraplayer';
-import { KLVParser, SyncEngine } from 'fyraklv';
-
-const parser = new KLVParser();
-const syncEngine = new SyncEngine();
-
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{
-    type: 'ws-raw',
-    url: 'wss://server/stream',
-    codec: 'h264',
-    transport: 'ts',
-    metadata: { privateData: { enable: true } }
-  }]
-});
-
-// FyraPlayer 提取私有数据，fyraklv 解析 KLV 语义
-player.on('metadata', (evt) => {
-  if (evt.type === 'private-data') {
-    // 检测 KLV Universal Label (06 0E 2B 34)
-    if (evt.raw[0] === 0x06 && evt.raw[1] === 0x0E) {
-      const frame = parser.parse(evt.raw, BigInt(evt.pts * 90));
-      if (frame) syncEngine.push(frame);
-    }
+player.on('metadata', event => {
+  if (event.type === 'private-data') {
+    const pts90k = event.pts90k ?? BigInt(Math.round(event.pts * 90));
+    console.log(event.raw, pts90k);
   }
 });
-
-// 获取同步状态用于投影
-function render() {
-  const videoPts = BigInt(player.currentTime * 90000);
-  const state = syncEngine.getInterpolatedStateAtPts(videoPts);
-  if (state) {
-    updateProjection(state); // 更新 Cesium 投影
-  }
-  requestAnimationFrame(render);
-}
 ```
 
-## 相关项目
+默认 MSE 及回退 MSE 没有同等 metadata 提取事件。上例只是提取，不承诺任意 TS 都能实验播放。`pts` 为毫秒，`pts90k` 是可选原始 TS PTS；均不自动等于视频时间零点。
 
-- [fyraklv](https://github.com/bimcc/fyraklv) - KLV/MISB 元数据解析
-- [@beeviz/fyrapano](https://github.com/beeviz/fyrapano) - 全景直播组件
-- [beeviz](https://github.com/beeviz/beeviz) - 视频投影业务层
+通用解析使用 `createMetadataPlugin` / `MetadataBridge`（保留 KlvBridge 兼容名）。需要 KLV 时间同步时，采用 [应用层插件示例](examples/integrations/fyraklv.ts) 注入 fyraklv.KLVStreamManager；见 [完整接入说明](docs/klv-integration.md)。两包没有相互依赖，离线 TS 直接交给 fyraklv。
+
+WebTransport 统一使用 `fyra-media`，Source 无需版本参数，通过 `timestampUs` 透传可选原始元数据；没有元数据或 KLV 插件也能播放，不创建 KLV 服务。[组合接入示例](examples/integrations/webtransport-klv.ts) 用最近 canvas 绘制帧的原始时钟查询 fyraklv，配置重置和停止会清空状态；不使用 captureStream 的 currentTime，也不承诺屏幕呈现级同步。
+
+## 开发与验证
+
+开发工具需要 Node >=22.12（CI 使用 Node 24）与 pnpm 11.1.2。
+```sh
+pnpm install --frozen-lockfile
+pnpm dev
+pnpm check:release
+```
+
+- `pnpm dev`：Vite，打开 /basic.html 或 /panoramalite.html。
+- `pnpm build:release`：ESM、类型声明、DASH vendor、IIFE 输出到 dist。
+- `pnpm bundle:examples`：需先 build:release，四份 HTML 与资源输出到 site-dist。
+- `pnpm preview:examples`：预览构建结果，包括 /minimal-iife.html。
+- `pnpm check:release`：覆盖率门禁、未使用声明、公共类型、源清单、文档链接、轻量插件依赖检查、构建、tarball 消费及示例构建。
+- 浏览器和流媒体联调见 [本地 fixture](docs/development/fixtures.md)，发布说明见 [SDK 集成](docs/sdk-release-integration.md)。
+
+`pnpm release:candidate` 生成经过完整检查的 tarball、校验和及产物清单，见 [发布流程](docs/sdk-release-integration.md)。
+
+生成物不提交。保留现有有效测试、实验管线、媒体 fixture 和历史验证证据；清理说明见 [本轮复盘](docs/review-2026-10.md)。
 
 ## License
 
-MIT
+[MIT](LICENSE)

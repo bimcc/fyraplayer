@@ -502,10 +502,16 @@ export interface PlayerOptions {
   sources: Source[];
   techOrder?: TechName[];
   autoplay?: boolean;
+  /** Keep playback inline on mobile browsers. Defaults to true. */
+  playsInline?: boolean;
   muted?: boolean;
   preload?: 'none' | 'metadata' | 'auto';
   video: HTMLVideoElement | string; // element or selector
   plugins?: PluginCtor[];
+  /** Setup/teardown failures of optional plugins; playback continues. */
+  onPluginError?: (failure: PluginFailure) => void;
+  /** Optional timeout per loading middleware step and Tech.load attempt; 0 disables. Not a first-frame timeout. */
+  loadTimeoutMs?: number;
   middleware?: MiddlewareEntry[];
   metrics?: MetricsOptions;
   buffer?: BufferPolicy;
@@ -518,6 +524,8 @@ export interface PlayerOptions {
 export type MiddlewareKind = 'request' | 'signal' | 'control' | 'resolve';
 
 export interface MiddlewareContext {
+  /** Loading is cancelled on switch/destroy. Control middleware may omit this field. */
+  signal?: AbortSignal;
   source: Source;
   tech: TechName;
   headers?: Record<string, string>;
@@ -537,7 +545,7 @@ export type MiddlewareFn = (ctx: MiddlewareContext) => Promise<MiddlewareResult 
 export interface MiddlewareEntry {
   kind: MiddlewareKind;
   fn: MiddlewareFn;
-  timeoutMs?: number; // optional timeout for control middleware
+  timeoutMs?: number; // control bypass timeout, or failure timeout for a loading step
 }
 
 export type PlayerState = 'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'ended' | 'error';
@@ -622,7 +630,31 @@ export type EngineEvent =
   | 'sei'
   | 'network'
   | 'data'
+  | 'streamchange'
   | 'metadata';
+
+/** Tech reports a replaced transport/timeline before emitting data from it. */
+export interface TechStreamChange {
+  reason: 'fallback' | 'discontinuity';
+  source?: Source;
+}
+
+export interface PlaybackSession {
+  /** Monotonic player-local timeline epoch; not PTS, UTC, or a source index. */
+  epoch: number;
+  requestedSource: Source;
+  /** Source handed to the selected Tech, including reported internal replacements. */
+  source: Source;
+  tech: TechName;
+  /** loaded means Tech.load resolved; it does not imply a decoded first frame. */
+  status: 'loading' | 'loaded';
+}
+
+export interface PlaybackSessionChange {
+  epoch: number;
+  reason: 'load' | 'switch' | 'reconnect' | 'selected' | 'loaded' | 'fallback' | 'discontinuity' | 'failed' | 'stop' | 'destroy';
+  session: PlaybackSession | null;
+}
 
 /** Metadata event payload for private data and SEI extraction */
 export interface MetadataEvent {
@@ -632,6 +664,10 @@ export interface MetadataEvent {
   raw: Uint8Array;
   /** Presentation timestamp in milliseconds */
   pts: number;
+  /** Exact original microseconds on a transport media timeline, when provided; not UTC. */
+  timestampUs?: number;
+  /** Original MPEG-TS 90 kHz PTS when available (33-bit value, not wall-clock time). */
+  pts90k?: bigint;
   /** Source PID (for private-data events) */
   pid?: number;
   /** SEI payload type number (for sei events) */
@@ -640,6 +676,10 @@ export interface MetadataEvent {
 
 export interface EngineStats {
   ts: number;
+  /** Optional counters/clock from custom decoded-frame paths. */
+  decodedFrames?: number;
+  bytesReceived?: number;
+  mediaTime?: number;
   bitrateKbps?: number;
   fps?: number;
   bufferLevel?: number;
@@ -753,6 +793,12 @@ export interface QualityState {
 }
 
 export interface PlayerEventMap {
+  stop: [];
+  sessionchange: [event: PlaybackSessionChange];
+  /** Requested source changed; old metadata belongs to the previous source. */
+  sourcechange: [event: { index: number; source: Source | undefined }];
+  /** An explicit seek completed, in media timeline seconds. */
+  seek: [event: { time: number }];
   ready: [];
   play: [];
   pause: [];
@@ -779,6 +825,21 @@ export interface PluginContext {
   ui?: UISurface;
   storage?: KeyValueStore | null;
   techs: TechRegistry;
+  /** Per-plugin resource scope. Optional for compatibility with custom plugin hosts. */
+  lifecycle?: PluginScope;
+}
+
+export interface PluginScope {
+  /** Aborted immediately when player destruction begins, or plugin setup fails. */
+  readonly signal: AbortSignal;
+  /** Register cleanup as soon as a resource is acquired; runs in reverse order. */
+  onCleanup(cleanup: () => void | Promise<void>): void;
+}
+
+export interface PluginFailure {
+  plugin: string;
+  phase: 'setup' | 'destroy' | 'cleanup';
+  error: unknown;
 }
 
 export interface PluginLifecycle {
@@ -791,6 +852,8 @@ export interface PlayerAPI {
   readonly currentTime: number;
   play(): Promise<void>;
   pause(): Promise<void>;
+  /** Cancel loading/reconnect and release playback resources; plugins remain reusable. */
+  stop?(): Promise<void>;
   seek(time: number): Promise<void>;
   switchSource(index: number): Promise<void>;
   getQualityState(): QualityState;
@@ -798,6 +861,8 @@ export interface PlayerAPI {
   getState(): PlayerState;
   getSources(): Source[];
   getCurrentSource(): Source | undefined;
+  /** Optional for compatibility with custom PlayerAPI hosts. FyraPlayer always implements it. */
+  getPlaybackSession?(): PlaybackSession | null;
   getVideoElement(): HTMLVideoElement;
   on<E extends keyof PlayerEventMap>(event: E, handler: PlayerEventHandler<E>): void;
   on(event: string, handler: (...args: unknown[]) => void): void;
@@ -932,20 +997,21 @@ export type WebRTCSignalConfig =
     };
 
 // eslint-disable-next-line @typescript-eslint/no-use-before-define
+export interface TechLoadOptions {
+  buffer?: BufferPolicy;
+  reconnect?: ReconnectPolicy;
+  metrics?: MetricsOptions;
+  video: HTMLVideoElement;
+  webCodecs?: WebCodecsConfig;
+  dataChannel?: DataChannelOptions;
+  mpegtsLoader?: MpegtsLoader;
+  /** Cooperative cancellation: stop acquiring resources and settle load when aborted. */
+  signal?: AbortSignal;
+}
+
 export interface Tech {
   canPlay(source: Source): boolean;
-  load(
-    source: Source,
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: WebCodecsConfig;
-      dataChannel?: DataChannelOptions;
-      mpegtsLoader?: MpegtsLoader;
-    }
-  ): Promise<void>;
+  load(source: Source, opts: TechLoadOptions): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
   /** Seek to specified time. Throws if seeking is not supported for this tech/source. */

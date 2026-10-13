@@ -70,6 +70,7 @@ class FakeMediaSource {
   public sourceBuffer = new FakeSourceBuffer();
   public addedMimeTypes: string[] = [];
   static supportedMimeTypes: Set<string> | null = null;
+  static autoOpen = true;
   private listeners = new Map<string, Array<() => void>>();
 
   static isTypeSupported(mimeType: string): boolean {
@@ -80,12 +81,16 @@ class FakeMediaSource {
     const handlers = this.listeners.get(type) ?? [];
     handlers.push(handler);
     this.listeners.set(type, handlers);
-    if (type === 'sourceopen') {
+    if (type === 'sourceopen' && FakeMediaSource.autoOpen) {
       queueMicrotask(() => {
         this.readyState = 'open';
         this.emit('sourceopen');
       });
     }
+  }
+
+  removeEventListener(type: string, handler: () => void): void {
+    this.listeners.set(type, (this.listeners.get(type) ?? []).filter(item => item !== handler));
   }
 
   addSourceBuffer(mimeType: string): SourceBuffer {
@@ -175,6 +180,7 @@ function quotaError(): Error {
 describe('FMP4Tech backpressure and quota policy', () => {
   afterEach(() => {
     FakeMediaSource.supportedMimeTypes = null;
+    FakeMediaSource.autoOpen = true;
     jest.restoreAllMocks();
   });
 
@@ -412,5 +418,104 @@ describe('FMP4Tech backpressure and quota policy', () => {
         droppedBytes: 4
       })
     ]);
+  });
+});
+
+describe('FMP4Tech cooperative loading', () => {
+  const originals = { fetch: globalThis.fetch, URL: globalThis.URL, MediaSource: globalThis.MediaSource, WebSocket: globalThis.WebSocket };
+  const source = { type: 'fmp4' as const, url: 'https://example.com/live', transport: 'http' as const };
+  let tech: FMP4Tech;
+  let video: HTMLVideoElement;
+
+  beforeEach(() => {
+    installBrowserFmp4Mocks();
+    tech = new FMP4Tech();
+    video = { src: '', srcObject: null, load: jest.fn(), currentTime: 0 } as unknown as HTMLVideoElement;
+  });
+  afterEach(async () => {
+    await tech.destroy();
+    Object.assign(globalThis, originals);
+    FakeMediaSource.autoOpen = true;
+  });
+
+  test('cancels unopened MediaSource and ignores a captured late sourceopen', async () => {
+    FakeMediaSource.autoOpen = false;
+    const controller = new AbortController();
+    const ready = jest.fn();
+    const fetchMock = jest.fn();
+    globalThis.fetch = fetchMock;
+    tech.on('ready', ready);
+    const loading = tech.load(source, { video, signal: controller.signal });
+    const mediaSource = (tech as unknown as { mediaSource: FakeMediaSource }).mediaSource;
+    const open = (mediaSource as unknown as { listeners: Map<string, Array<() => void>> }).listeners.get('sourceopen')![0];
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    open();
+    expect(mediaSource.addedMimeTypes).toHaveLength(0);
+    expect(ready).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(video.src).toBe('');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:fmp4-test');
+  });
+
+  test('propagates HTTP startup failure so selection can try another source', async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503 });
+    await expect(tech.load(source, { video })).rejects.toThrow('503');
+    expect(video.src).toBe('');
+  });
+
+  test('cancels HTTP startup and releases a late response body without starting a reader', async () => {
+    const controller = new AbortController();
+    let complete!: (value: Response) => void;
+    let started!: () => void;
+    const fetchStarted = new Promise<void>(resolve => { started = resolve; });
+    globalThis.fetch = jest.fn(() => { started(); return new Promise<Response>(resolve => { complete = resolve; }); });
+    const loading = tech.load(source, { video, signal: controller.signal });
+    await fetchStarted;
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const getReader = jest.fn();
+    complete({ ok: true, body: { cancel, getReader } } as unknown as Response);
+    await Promise.resolve();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  test('ignores a late read from an old stream after the same Tech is loaded again', async () => {
+    let completeRead!: (value: ReadableStreamReadResult<Uint8Array>) => void;
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    globalThis.fetch = jest.fn().mockResolvedValue({ ok: true, body: { getReader: () => ({
+      read: () => new Promise(resolve => { completeRead = resolve; }), cancel, releaseLock: jest.fn()
+    }) } });
+    const controller = new AbortController();
+    await tech.load(source, { video, signal: controller.signal });
+    controller.abort(); // The completed load signal is no longer the streaming lifetime signal.
+    expect(cancel).not.toHaveBeenCalled();
+    globalThis.fetch = createReadableFetch([], { neverDone: true }) as unknown as typeof fetch;
+    await tech.load(source, { video });
+    const current = (tech as unknown as { mediaSource: FakeMediaSource }).mediaSource;
+    completeRead({ value: new Uint8Array([9]), done: false });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(current.sourceBuffer.appended).toHaveLength(0);
+  });
+
+  test('cancels a pending WebSocket and suppresses captured callbacks', async () => {
+    const socket = { binaryType: '', close: jest.fn(), onopen: null, onmessage: null, onerror: null, onclose: null };
+    let started!: () => void;
+    const socketStarted = new Promise<void>(resolve => { started = resolve; });
+    globalThis.WebSocket = jest.fn(() => { started(); return socket; }) as unknown as typeof WebSocket;
+    const controller = new AbortController();
+    const loading = tech.load({ ...source, transport: 'ws' }, { video, signal: controller.signal });
+    await socketStarted;
+    const lateMessage = socket.onmessage as unknown as (event: { data: ArrayBuffer }) => void;
+    const mediaSource = (tech as unknown as { mediaSource: FakeMediaSource }).mediaSource;
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    lateMessage({ data: new ArrayBuffer(1) });
+    expect(socket.close).toHaveBeenCalledTimes(1);
+    expect(mediaSource.sourceBuffer.appended).toHaveLength(0);
   });
 });

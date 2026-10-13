@@ -52,6 +52,8 @@ export interface UiElements {
   statusMessage: HTMLElement | null;
   statusDetail: HTMLElement | null;
   retryBtn: HTMLElement | null;
+  cancelBtn: HTMLElement | null;
+  stopBtn: HTMLElement | null;
   diagnosticsBtn: HTMLElement | null;
   diagnosticsMenuBtn: HTMLElement | null;
   recordBtn: HTMLElement | null;

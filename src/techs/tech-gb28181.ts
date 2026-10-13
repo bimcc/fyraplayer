@@ -1,5 +1,6 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, Gb28181Source, MetricsOptions, MpegtsLoader, ReconnectPolicy, Source } from '../types.js';
+import { Gb28181Source, Source, TechLoadOptions } from '../types.js';
+import { abortReason, throwIfAborted, waitWithSignal } from '../core/abort.js';
 import { MseFallback } from './wsRaw/mseFallback.js';
 
 interface GbStreamInfo {
@@ -101,6 +102,7 @@ async function buildControlHttpError(action: 'invite' | 'control', res: Response
 
 export class Gb28181Tech extends AbstractTech {
   private mse: MseFallback | null = null;
+  private loadController: AbortController | null = null;
   private session: { callId?: string; ssrc?: string; streamId?: string } = {};
 
   canPlay(source: Source): boolean {
@@ -109,58 +111,71 @@ export class Gb28181Tech extends AbstractTech {
 
   async load(
     source: Source,
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      mpegtsLoader?: MpegtsLoader;
-    }
+    opts: TechLoadOptions
   ): Promise<void> {
     if (source.type !== 'gb28181') {
       throw new Error('Gb28181Tech only supports gb28181 source type');
     }
+    throwIfAborted(opts.signal);
+    this.cleanup();
     const gbSource: Gb28181Source = { ...source };
     this.source = gbSource;
     this.buffer = opts.buffer;
     this.reconnect = opts.reconnect;
     this.metrics = opts.metrics;
     this.video = opts.video;
-    this.cleanup();
-
-    const invite = await this.performInvite(gbSource);
-    const mediaUrl = invite.url || gbSource.url;
-    if (!mediaUrl) {
-      throw new Error('gb28181 invite did not return a playable FLV/TS URL');
-    }
-
-    this.session = {
-      callId: invite.callId,
-      ssrc: invite.ssrc ?? gbSource.gb.ssrc,
-      streamId: invite.streamId ?? invite.streamInfo?.streamId
+    const controller = new AbortController();
+    this.loadController = controller;
+    const cancel = () => {
+      controller.abort(opts.signal && abortReason(opts.signal));
+      if (this.loadController === controller) this.mse?.stop();
     };
+    opts.signal?.addEventListener('abort', cancel, { once: true });
+    if (opts.signal?.aborted) cancel();
+    try {
+      const invite = await this.performInvite(gbSource, undefined, controller.signal);
+      throwIfAborted(controller.signal);
+      const mediaUrl = invite.url || gbSource.url;
+      if (!mediaUrl) {
+        throw new Error('gb28181 invite did not return a playable FLV/TS URL');
+      }
 
-    this.mse = new MseFallback();
-    await this.mse.start(
-      mediaUrl,
-      opts.video,
-      {
-        onReady: () => this.bus.emit('ready'),
-        onError: (e) => {
-          this.bus.emit('error', e);
-          this.bus.emit('network', { type: 'gb-fallback-error', fatal: true });
-        }
-      },
-      this.resolveMseFormat(gbSource, mediaUrl),
-      opts.mpegtsLoader
-    );
-    this.bus.emit('network', {
-      type: 'gb-control',
-      action: 'invite',
-      callId: this.session.callId,
-      ssrc: this.session.ssrc,
-      streamId: this.session.streamId
-    });
+      this.session = {
+        callId: invite.callId,
+        ssrc: invite.ssrc ?? gbSource.gb.ssrc,
+        streamId: invite.streamId ?? invite.streamInfo?.streamId
+      };
+
+      const mse = new MseFallback();
+      this.mse = mse;
+      await waitWithSignal(mse.start(
+        mediaUrl,
+        opts.video,
+        {
+          onReady: () => { if (!controller.signal.aborted && this.mse === mse) this.bus.emit('ready'); },
+          onError: (e) => {
+            if (controller.signal.aborted || this.mse !== mse) return;
+            this.bus.emit('error', e);
+            this.bus.emit('network', { type: 'gb-fallback-error', fatal: true });
+          }
+        },
+        this.resolveMseFormat(gbSource, mediaUrl),
+        opts.mpegtsLoader
+      ), controller.signal);
+      throwIfAborted(controller.signal);
+      this.bus.emit('network', {
+        type: 'gb-control',
+        action: 'invite',
+        callId: this.session.callId,
+        ssrc: this.session.ssrc,
+        streamId: this.session.streamId
+      });
+    } catch (error) {
+      if (this.loadController === controller) this.cleanup();
+      throw error;
+    } finally {
+      opts.signal?.removeEventListener('abort', cancel);
+    }
   }
 
   override async destroy(): Promise<void> {
@@ -206,7 +221,8 @@ export class Gb28181Tech extends AbstractTech {
     }
   }
 
-  private async performInvite(source: Gb28181Source, override?: unknown): Promise<GbInviteResult> {
+  private async performInvite(source: Gb28181Source, override?: unknown, signal?: AbortSignal): Promise<GbInviteResult> {
+    throwIfAborted(signal);
     const inviteUrl = source.control.invite;
     if (!inviteUrl) {
       return { url: source.url };
@@ -228,6 +244,7 @@ export class Gb28181Tech extends AbstractTech {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
     };
+    if (signal) requestInit.signal = signal;
     if (source.controlRequest?.headers) {
       requestInit.headers = {
         ...(requestInit.headers as Record<string, string>),
@@ -237,11 +254,13 @@ export class Gb28181Tech extends AbstractTech {
     if (source.controlRequest?.credentials) {
       requestInit.credentials = source.controlRequest.credentials;
     }
-    const res = await fetch(inviteUrl, requestInit);
+    const res = await waitWithSignal(fetch(inviteUrl, requestInit), signal);
+    throwIfAborted(signal);
     if (!res.ok) {
-      throw await buildControlHttpError('invite', res);
+      throw await waitWithSignal(buildControlHttpError('invite', res), signal);
     }
-    const json = (await res.json()) as GbControlResponse;
+    const json = (await waitWithSignal(res.json(), signal)) as GbControlResponse;
+    throwIfAborted(signal);
     const mappedUrl = asString(getByPath(json, source.responseMapping?.url));
     const mappedCallId = asString(getByPath(json, source.responseMapping?.callId));
     const mappedSsrc = asString(getByPath(json, source.responseMapping?.ssrc));
@@ -319,6 +338,8 @@ export class Gb28181Tech extends AbstractTech {
   }
 
   private cleanup(): void {
+    this.loadController?.abort();
+    this.loadController = null;
     this.mse?.stop();
     this.mse = null;
     this.session = {};

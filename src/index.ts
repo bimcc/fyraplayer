@@ -1,8 +1,8 @@
 /**
  * FyraPlayer Main Entry Point
  * 
- * Core modules are exported here. For optional plugins (PSV, Cesium, engines),
- * import from 'fyra/plugins' or './plugins/index.js' for tree-shaking.
+ * Core modules are exported here. Import optional plugins from the public
+ * '@bimccfyra/fyraplayer/plugins/…' subpaths. External renderers are application-owned.
  */
 
 // Types

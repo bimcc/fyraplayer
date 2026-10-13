@@ -5,6 +5,11 @@
     "noEmit": true,
     "rootDir": ".",
     "paths": {
+      "@bimccfyra/fyraplayer/plugins/playback-health": ["./src/plugins/playback-health.ts"],
+      "@bimccfyra/fyraplayer/plugins/gb-gateway": ["./src/plugins/gb-gateway.ts"],
+      "@bimccfyra/fyraplayer/plugins/webtransport": ["./src/plugins/webtransport.ts"],
+      "@bimccfyra/fyraplayer/plugins/snapshot": ["./src/plugins/snapshot.ts"],
+      "@bimccfyra/fyraplayer/plugins/frame-clock": ["./src/plugins/frame-clock.ts"],
       "@bimccfyra/fyraplayer": ["./src/index.ts"],
       "@bimccfyra/fyraplayer/plugins": ["./src/plugins/index.ts"],
       "@bimccfyra/fyraplayer/plugins/auth": ["./src/plugins/auth.ts"],
@@ -22,5 +27,5 @@
       "@bimccfyra/fyraplayer/techs/wsRaw/demuxer": ["./src/techs/wsRaw/demuxer.ts"]
     }
   },
-  "include": ["src/**/*.d.ts", "checks/public-api-smoke.ts"]
+  "include": ["src/**/*.d.ts", "checks/public-api-smoke.ts", "examples/multiview.ts"]
 }

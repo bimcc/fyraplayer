@@ -14,6 +14,11 @@ Those adapters should live in renderer packages such as `@beeviz/fyrapano`,
 
 ## Supported Outputs
 
+PanoramaLite is a first-party optional equirectangular renderer already included
+in the package; it does not make external PSV/Cesium dependencies part of core.
+KLV/MISB parsing and synchronization belong to independent fyraklv. See the
+[application integration](klv-integration.md) for explicit timestamp mapping.
+
 External bridges can rely on these stable player-facing outputs:
 
 | Output | Source | Use |
@@ -21,10 +26,12 @@ External bridges can rely on these stable player-facing outputs:
 | `HTMLVideoElement` | `PlayerOptions.video` | Default texture input for PSV, Cesium, maps, and custom WebGL renderers |
 | Player events | `player.on(...)` | Forward `ready`, `play`, `pause`, `error`, `network`, `stats`, `qos`, `metadata`, and `levelSwitch` into renderer UI |
 | Playback API | `play()`, `pause()`, `seek()`, `switchSource()`, `getQualityState()`, `setQualityLevel()` | Let renderer controls drive playback without touching Tech internals |
-| Metadata events | `metadata` + `createMetadataPlugin()` / `KlvBridge` | Connect KLV/SEI/private data to domain parsers and scene synchronization |
+| Metadata events | `metadata` + `createMetadataPlugin()` / `MetadataBridge` (KlvBridge alias) | Inject domain parsers; application/fyraklv owns synchronization |
 | `CanvasFrameBuffer` | `@bimccfyra/fyraplayer` main export | Optional canvas-backed texture/captureStream source for renderers that cannot consume the original video directly |
 | `BaseTarget` | `@bimccfyra/fyraplayer` main export | Optional base class for app-owned render targets |
 | Diagnostics | `createDiagnosticsPlugin()` | Export player state and recent evidence from renderer support consoles |
+| Presentation clock | `/plugins/frame-clock` (unreleased) | Observe HTMLVideoElement frame mediaTime; external canvas renderers still own their display clock and PTS mapping |
+| Video snapshot | `/plugins/snapshot` (unreleased) | Capture decoded video pixels as a Blob; renderer overlays and WebGL composites require renderer-owned capture |
 
 ## Ownership Boundary
 

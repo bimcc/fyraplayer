@@ -1,86 +1,110 @@
 {
   "name": "@bimccfyra/fyraplayer",
-  "version": "1.0.2",
-  "description": "Modern, extensible low-latency web player (WebRTC, LL-HLS, WS+WASM) with plugin/middleware architecture.",
+  "version": "1.1.0-rc.1",
+  "description": "Extensible web playback SDK with optional UI, monitoring, panorama and WebTransport plugins.",
   "type": "module",
   "packageManager": "pnpm@11.1.2",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "tag": "next"
   },
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./plugins/playback-health": {
+      "types": "./dist/plugins/playback-health.d.ts",
+      "import": "./dist/plugins/playback-health.js"
+    },
+    "./plugins/gb-gateway": {
+      "types": "./dist/plugins/gb-gateway.d.ts",
+      "import": "./dist/plugins/gb-gateway.js"
+    },
+    "./plugins/webtransport": {
+      "types": "./dist/plugins/webtransport.d.ts",
+      "import": "./dist/plugins/webtransport.js"
+    },
+    "./plugins/snapshot": {
+      "types": "./dist/plugins/snapshot.d.ts",
+      "import": "./dist/plugins/snapshot.js"
+    },
+    "./plugins/frame-clock": {
+      "types": "./dist/plugins/frame-clock.d.ts",
+      "import": "./dist/plugins/frame-clock.js"
+    },
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./core": {
-      "import": "./dist/core.js",
-      "types": "./dist/core.d.ts"
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
     },
     "./plugins": {
-      "import": "./dist/plugins/index.js",
-      "types": "./dist/plugins/index.d.ts"
+      "types": "./dist/plugins/index.d.ts",
+      "import": "./dist/plugins/index.js"
     },
     "./plugins/engines": {
-      "import": "./dist/plugins/engines/index.js",
-      "types": "./dist/plugins/engines/index.d.ts"
+      "types": "./dist/plugins/engines/index.d.ts",
+      "import": "./dist/plugins/engines/index.js"
     },
     "./plugins/metadata": {
-      "import": "./dist/plugins/metadata/index.js",
-      "types": "./dist/plugins/metadata/index.d.ts"
+      "types": "./dist/plugins/metadata/index.d.ts",
+      "import": "./dist/plugins/metadata/index.js"
     },
     "./plugins/ui-components": {
-      "import": "./dist/plugins/ui-components.js",
-      "types": "./dist/plugins/ui-components.d.ts"
+      "types": "./dist/plugins/ui-components.d.ts",
+      "import": "./dist/plugins/ui-components.js"
     },
     "./plugins/metrics": {
-      "import": "./dist/plugins/metrics.js",
-      "types": "./dist/plugins/metrics.d.ts"
+      "types": "./dist/plugins/metrics.d.ts",
+      "import": "./dist/plugins/metrics.js"
     },
     "./plugins/performance": {
-      "import": "./dist/plugins/performance.js",
-      "types": "./dist/plugins/performance.d.ts"
+      "types": "./dist/plugins/performance.d.ts",
+      "import": "./dist/plugins/performance.js"
     },
     "./plugins/panoramalite": {
-      "import": "./dist/plugins/panoramalite.js",
-      "types": "./dist/plugins/panoramalite.d.ts"
+      "types": "./dist/plugins/panoramalite.d.ts",
+      "import": "./dist/plugins/panoramalite.js"
     },
     "./plugins/reconnect": {
-      "import": "./dist/plugins/reconnect.js",
-      "types": "./dist/plugins/reconnect.d.ts"
+      "types": "./dist/plugins/reconnect.d.ts",
+      "import": "./dist/plugins/reconnect.js"
     },
     "./plugins/recording-api": {
-      "import": "./dist/plugins/recording.js",
-      "types": "./dist/plugins/recording.d.ts"
+      "types": "./dist/plugins/recording.d.ts",
+      "import": "./dist/plugins/recording.js"
     },
     "./plugins/diagnostics": {
-      "import": "./dist/plugins/diagnostics.js",
-      "types": "./dist/plugins/diagnostics.d.ts"
+      "types": "./dist/plugins/diagnostics.d.ts",
+      "import": "./dist/plugins/diagnostics.js"
     },
     "./plugins/auth": {
-      "import": "./dist/plugins/auth.js",
-      "types": "./dist/plugins/auth.d.ts"
+      "types": "./dist/plugins/auth.d.ts",
+      "import": "./dist/plugins/auth.js"
     },
     "./plugins/dash": {
-      "import": "./dist/plugins/dash.js",
-      "types": "./dist/plugins/dash.d.ts"
+      "types": "./dist/plugins/dash.d.ts",
+      "import": "./dist/plugins/dash.js"
     },
     "./vendor/dash.all.min.js": "./dist/vendor/dash.all.min.js",
     "./plugins/storage": {
-      "import": "./dist/plugins/storage.js",
-      "types": "./dist/plugins/storage.d.ts"
+      "types": "./dist/plugins/storage.d.ts",
+      "import": "./dist/plugins/storage.js"
     },
     "./techs/wsRaw/demuxer": {
-      "import": "./dist/techs/wsRaw/demuxer.js",
-      "types": "./dist/techs/wsRaw/demuxer.d.ts"
+      "types": "./dist/techs/wsRaw/demuxer.d.ts",
+      "import": "./dist/techs/wsRaw/demuxer.js"
     }
   },
   "files": [
     "dist/**/*",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE",
+    "RELEASE_NOTES.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
@@ -88,22 +112,30 @@
     "build:release": "pnpm build && pnpm bundle:iife",
     "check:public-api": "tsc -p tsconfig.public-api.json",
     "check:exports": "pnpm build && node checks/export-contract.mjs",
-    "check:release": "pnpm exec jest --runInBand && pnpm check:public-api && pnpm check:exports && pnpm check:sources && pnpm build:release",
+    "check:release": "pnpm check:metadata && pnpm test:coverage --runInBand && pnpm check:unused && pnpm check:public-api && pnpm check:sources && pnpm check:docs && pnpm check:plugins && pnpm build:release && node checks/export-contract.mjs && pnpm check:package && pnpm bundle:examples",
+    "check:plugins": "node checks/plugin-boundaries.mjs",
     "check:sources": "node checks/sources-contract.mjs",
     "serve:fmp4-fixture": "node checks/ffmpeg-fmp4-fixture.mjs",
     "long-run:browser": "node checks/browser-long-run.mjs",
     "long-run:assert": "node checks/browser-long-run-assert.mjs",
     "smoke:panoramalite": "node checks/panoramalite-smoke.mjs",
-    "bundle:examples": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm",
+    "bundle:examples": "vite build --config vite.config.ts",
     "bundle:iife": "esbuild src/iife.ts --bundle --outfile=dist/fyraplayer.iife.js --platform=browser --format=iife --global-name=FyraPlayerSDK",
-    "bundle:examples:watch": "esbuild examples/app.ts --bundle --outfile=examples/bundle.js --platform=browser --format=esm --watch",
-    "dev": "concurrently \"pnpm bundle:examples:watch\" \"pnpm serve:examples\"",
-    "serve:examples": "npx http-server examples -p 5173 -c-1",
+    "bundle:examples:watch": "vite build --config vite.config.ts --watch",
+    "dev": "vite --config vite.config.ts",
+    "serve:examples": "vite --config vite.config.ts",
     "dev:vite": "vite --config vite.config.ts",
     "dev:vite:host": "vite --config vite.config.ts --host --port 3000",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "preview:examples": "vite preview --config vite.config.ts",
+    "check:unused": "tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters",
+    "check:docs": "node checks/docs-contract.mjs",
+    "check:package": "node checks/package-consumer.mjs",
+    "check:metadata": "node checks/release-contract.mjs",
+    "release:candidate": "node checks/release-candidate.mjs",
+    "prepublishOnly": "pnpm check:release"
   },
   "dependencies": {
     "hls.js": "^1.6.16"
@@ -129,11 +161,22 @@
     "@types/node": "^20.19.41",
     "dashjs": "^5.1.1",
     "esbuild": "^0.28.0",
-    "fast-check": "^4.8.0",
     "jest": "^30.4.2",
     "mp4box": "^0.5.4",
     "ts-jest": "^29.4.10",
     "typescript": "^5.9.3",
     "vite": "^8.0.13"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bimcc/fyraplayer.git"
+  },
+  "homepage": "https://github.com/bimcc/fyraplayer#readme",
+  "bugs": {
+    "url": "https://github.com/bimcc/fyraplayer/issues"
   }
 }

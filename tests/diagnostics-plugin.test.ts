@@ -4,6 +4,7 @@ import {
   type DiagnosticsSnapshot,
 } from '../src/plugins/diagnostics.js';
 import type { EventBusLike, PluginContext, Source, TechName } from '../src/types.js';
+import { PluginManager } from '../src/core/pluginManager.js';
 
 type Handler = (payload?: unknown) => void;
 
@@ -246,6 +247,33 @@ describe('createDiagnosticsPlugin', () => {
     lifecycle?.destroy?.();
     bus.emit('error', { message: 'after destroy' });
     expect(handle?.snapshot().recent).toHaveLength(0);
+  });
+
+  test('failed onHandle rolls back its panel and listeners through the plugin scope', async () => {
+    const originalDocument = globalThis.document;
+    Object.defineProperty(globalThis, 'document', {
+      value: { createElement: (tag: string) => new ElementStub(tag) }, configurable: true,
+    });
+    const bus = new BusStub();
+    const host = new ElementStub('div');
+    const onEvent = jest.fn();
+    const failure = new Error('consumer setup failed');
+    const onError = jest.fn();
+    const manager = new PluginManager(onError);
+    try {
+      manager.register(createDiagnosticsPlugin({
+        panel: host as unknown as HTMLElement, onEvent,
+        onHandle: () => { throw failure; },
+      }));
+      manager.applyAll(createContext(bus));
+      await manager.unregisterAll();
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ phase: 'setup', error: failure }));
+      expect(host.querySelector('.fyra-diagnostics-panel')).toBeNull();
+      bus.emit('error', { message: 'late event' });
+      expect(onEvent).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(globalThis, 'document', { value: originalDocument, configurable: true });
+    }
   });
 
   test('renders an optional debug panel and removes it on destroy', () => {

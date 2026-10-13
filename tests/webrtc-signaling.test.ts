@@ -46,6 +46,76 @@ describe('WhipSignaling WHEP/WHIP diagnostics', () => {
     jest.useRealTimers();
   });
 
+  test('cancels ICE gathering and removes the listener and timer without posting', async () => {
+    jest.useFakeTimers();
+    const pc = new PeerConnectionStub();
+    pc.iceGatheringState = 'gathering';
+    const controller = new AbortController();
+    const add = jest.spyOn(pc, 'addEventListener');
+    const remove = jest.spyOn(pc, 'removeEventListener');
+    const fetchMock = jest.fn();
+    globalThis.fetch = fetchMock;
+    const loading = new WhipSignaling({ url: 'https://example.com/whep' }).negotiate(pc as unknown as RTCPeerConnection, controller.signal);
+    await jest.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith('icegatheringstatechange', add.mock.calls[0][1]);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('does not set local SDP when an old createOffer completes after cancellation', async () => {
+    let complete!: (offer: RTCSessionDescriptionInit) => void;
+    const pc = new PeerConnectionStub();
+    pc.createOffer = () => new Promise(resolve => { complete = resolve; });
+    const setLocal = jest.spyOn(pc, 'setLocalDescription');
+    const controller = new AbortController();
+    const loading = new WhipSignaling({ url: 'https://example.com/whep' }).negotiate(pc as unknown as RTCPeerConnection, controller.signal);
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    complete({ type: 'offer', sdp: 'old' });
+    await Promise.resolve();
+    expect(setLocal).not.toHaveBeenCalled();
+  });
+
+  test('cancels POST and suppresses diagnostics and SDP from a late response', async () => {
+    jest.useFakeTimers();
+    let complete!: (response: Response) => void;
+    const fetchMock = jest.fn(() => new Promise<Response>(resolve => { complete = resolve; }));
+    globalThis.fetch = fetchMock;
+    const events = jest.fn();
+    const pc = new PeerConnectionStub();
+    const setRemote = jest.spyOn(pc, 'setRemoteDescription');
+    const controller = new AbortController();
+    const loading = new WhipSignaling({ url: 'https://example.com/whep', onEvent: events }).negotiate(pc as unknown as RTCPeerConnection, controller.signal);
+    await jest.advanceTimersByTimeAsync(0);
+    const requestSignal = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    complete(sdpResponse('old answer'));
+    await Promise.resolve();
+    expect(requestSignal[1].signal?.aborted).toBe(true);
+    expect(setRemote).not.toHaveBeenCalled();
+    expect(events).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('keeps HTTP timeout active through reading a stalled response body', async () => {
+    jest.useFakeTimers();
+    const pc = new PeerConnectionStub();
+    const setRemote = jest.spyOn(pc, 'setRemoteDescription');
+    globalThis.fetch = jest.fn().mockResolvedValue({ ok: true, text: () => new Promise(() => {}) });
+    const events = jest.fn();
+    const loading = new WhipSignaling({ url: 'https://example.com/whep', timeoutMs: 25, onEvent: events }).negotiate(pc as unknown as RTCPeerConnection);
+    const rejected = expect(loading).rejects.toMatchObject({ name: 'TimeoutError' });
+    await jest.advanceTimersByTimeAsync(25);
+    await rejected;
+    expect(setRemote).not.toHaveBeenCalled();
+    expect(events).toHaveBeenCalledWith(expect.objectContaining({ type: 'whep-timeout' }));
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
   test('emits HTTP diagnostics for non-2xx WHEP responses', async () => {
     const events: Array<Record<string, unknown>> = [];
     Object.defineProperty(globalThis, 'fetch', {

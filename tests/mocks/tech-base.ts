@@ -1,4 +1,4 @@
-import type { Source } from '../../src/types.js';
+import type { Source, TechLoadOptions } from '../../src/types.js';
 import type { QualityState } from '../../src/types.js';
 
 type Handler = (...args: any[]) => void;
@@ -22,7 +22,7 @@ export class MockTechBase {
     return source.type === this.playableType;
   }
 
-  async load(source: Source): Promise<void> {
+  async load(source: Source, _opts?: TechLoadOptions): Promise<void> {
     this.loadCalls += 1;
     this.lastLoadedSource = source;
     if (this.emitReadyDuringLoad) {

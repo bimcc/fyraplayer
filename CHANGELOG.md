@@ -2,12 +2,62 @@
 
 All notable changes to FyraPlayer will be recorded here.
 
-## Unreleased
+## 1.1.0-rc.1 - 2026-10-14
+
+Release candidate for controlled integration; this entry does not assert registry publication.
+See [release scope, migration and limits](RELEASE_NOTES.md).
+
+### Playback and lifecycle
+
+- Serialize source loads, ignore obsolete completions, preserve same-Tech fallback URLs,
+  and expose actual playback sessions and timeline epochs.
+- Add reusable stop(), cooperative loading cancellation and per-attempt deadlines across
+  middleware, loaders, WebRTC signaling, direct fMP4 and legacy GB startup.
+- Add optional plugin lifecycle scopes, setup rollback, reverse cleanup and onPluginError;
+  invalidate asynchronous metadata, frame clocks and snapshots when sessions change.
+- Correct MTS/FLV routing, MSE startup failures, private PES reassembly and original TS PTS;
+  keep KLV/MISB parsing and synchronization in the independent fyraklv package.
+
+### Controls and optional capabilities
+
+- Unify normal/panorama SVG controls, add ordinary loop playback, hide unsupported or
+  single-level quality selectors, and protect cross-origin panorama transitions.
+- Add touch layouts, inline playback, page fullscreen fallback, gestures and keyboard focus
+  isolation for multiple players.
+- Add snapshot, frame-clock, playback-health and GB gateway adapter plugin entries.
+- Add experimental WebTransport + WebCodecs with a single fyra-media format, optional raw
+  metadata, original microsecond frame clocks, bounded queues and explicit fallback Sources.
+  Preserve decoder warmup keyframes instead of resetting repeatedly before first output.
+- Add application-owned four-player monitoring and fyraklv integration examples; these are
+  not extra SDK exports or capacity/synchronization guarantees.
+
+### Packaging and validation
+
+- Add lifecycle/demux/protocol regressions, coverage gates, NodeNext/Bundler tarball consumers,
+  plugin dependency checks and Linux/Windows CI configuration.
+- Add a reproducible local release-candidate command, version/notes/tag validation, frozen
+  tarball checksums and exact-tarball IIFE browser acceptance. Prereleases default to next.
+- Ship MIT licensing, third-party notices, DASH bundle notices and the Apache 2.0 text.
+- Unify examples on Vite; remove unused fast-check, obsolete declarations, orphan assets and
+  tracked generated/local files. Archive old designs while preserving valid tests and evidence.
+
+### Known limits
+
+- WebTransport remains video-only and experimental; HEVC and mobile/browser behavior depend
+  on the device. Local four-session tests do not establish capacity or a latency SLA.
+- Physical mobile devices, Safari/Firefox parity, several protocol long-runs, TURN/audio and
+  screen/telemetry sync remain explicit follow-ups. Legacy experimental Tech cancellation is
+  not complete. DRM, subtitles and browser-local recording remain outside this candidate.
+
+## 1.0.2 - Published baseline notes
+
+The following dependency and DASH changes were already present in the published 1.0.2 package,
+whose changelog still labelled them Unreleased. They are retained here as baseline history.
 
 - Upgraded playback and build/test dependencies: `hls.js` to `^1.6.16`,
   `dashjs` to `^5.1.1`, `vite` to `^8.0.13`, `esbuild` to `^0.28.0`,
   `jest` to `^30.4.2`, `ts-jest` to `^29.4.10`, `@types/jest` to
-  `^30.0.0`, `typescript` to `^5.9.3`, and `fast-check` to `^4.8.0`.
+  `^30.0.0`, `typescript` to `^5.9.3`.
 - Added pnpm build approval for `unrs-resolver`, which is pulled in by the
   Jest 30 resolver stack.
 - Moved DASH playback behind the optional `@bimccfyra/fyraplayer/plugins/dash` entry so

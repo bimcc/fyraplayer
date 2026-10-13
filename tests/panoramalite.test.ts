@@ -44,6 +44,8 @@ class BusStub implements EventBusLike {
 
 class ElementStub {
   textContent = '';
+  innerHTML = '';
+  readonly dataset: Record<string, string> = {};
   readonly style: Record<string, string> = {};
   className = '';
   type = '';
@@ -59,6 +61,8 @@ class ElementStub {
   readonly attributes = new Map<string, string>();
   readonly classList = {
     toggle: jest.fn(),
+    add: jest.fn(),
+    remove: jest.fn(),
   };
   clientWidth = 640;
   clientHeight = 320;

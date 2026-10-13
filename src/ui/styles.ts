@@ -3,7 +3,10 @@
  * Modern, responsive player UI with smooth animations
  * Layout: Progress bar on top (full width), controls below
  */
+import { controlIconSvg } from '../utils/controlIcons.js';
+
 export const UI_SHELL_STYLES = `
+  button[aria-pressed="true"] { color: #93c5fd; background: rgba(59,130,246,.24); }
   :host { 
     position: absolute; 
     inset: 0; 
@@ -50,7 +53,7 @@ export const UI_SHELL_STYLES = `
     align-items: center;
     justify-content: center;
     pointer-events: none;
-    z-index: 10;
+    z-index: 30;
   }
   
   /* Loading spinner */
@@ -112,7 +115,7 @@ export const UI_SHELL_STYLES = `
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
 
-  .retry-btn {
+  .retry-btn, .cancel-btn {
     display: none;
     margin: 8px auto 0;
     height: 28px;
@@ -196,6 +199,8 @@ export const UI_SHELL_STYLES = `
     opacity: 0;
     transform: translateY(10px);
   }
+  .shell.hide-controls .bottom, .shell.hide-controls .bottom * { pointer-events: none; }
+  .bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
   
   /* Progress bar row - FULL WIDTH on top */
   .progress-row { 
@@ -257,6 +262,8 @@ export const UI_SHELL_STYLES = `
     gap: 4px; 
     padding: 6px 12px 10px;
     pointer-events: auto;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
   }
   
   /* Time label in toolbar */
@@ -288,6 +295,8 @@ export const UI_SHELL_STYLES = `
     transition: background 0.15s ease, transform 0.1s ease;
     min-width: 32px;
     height: 32px;
+    flex-shrink: 0;
+    touch-action: manipulation;
   }
   
   button:hover { 
@@ -363,6 +372,7 @@ export const UI_SHELL_STYLES = `
     visibility: visible;
     transform: translateX(-50%) scale(1);
   }
+  .vol-wrap:focus-within .vol-pop { opacity: 1; visibility: visible; transform: translateX(-50%) scale(1); }
   
   .vol {
     width: 6px;
@@ -455,7 +465,7 @@ export const UI_SHELL_STYLES = `
     z-index: 30;
   }
   
-  .speed-wrap:hover .speed-menu {
+  .speed-wrap:hover .speed-menu, .speed-wrap.open .speed-menu {
     opacity: 1;
     visibility: visible;
     transform: translateX(-50%) scale(1);
@@ -504,6 +514,7 @@ export const UI_SHELL_STYLES = `
     visibility: visible;
     transform: scale(1);
   }
+  .more-menu, .speed-menu { max-height: min(280px, var(--fyra-menu-height, 65dvh)); overflow-y: auto; overscroll-behavior: contain; }
   
   .more-menu button {
     display: flex;
@@ -520,11 +531,14 @@ export const UI_SHELL_STYLES = `
     width: 16px;
     height: 16px;
   }
+  .quality-menu-row { display: none; padding: 8px; color: #fff; font-size: 12px; }
+  .quality-menu-row select { display: block; width: 100%; margin-top: 4px; min-height: 36px; }
   
   /* ========== COLLAPSIBLE BUTTONS ========== */
   .collapsible {
     display: flex;
   }
+  .pip-unavailable { display: none !important; }
   
   /* ========== RESPONSIVE: Small player ========== */
   /* 小窗口：宽度 < 400px */
@@ -533,12 +547,25 @@ export const UI_SHELL_STYLES = `
     .more-wrap { display: flex !important; }
   }
   
-  /* 使用媒体查询作为后备 */
-  :host-context(.fyra-small) .collapsible { display: none !important; }
-  :host-context(.fyra-small) .more-wrap { display: flex !important; }
-  
   /* 默认隐藏 more 按钮 */
   .more-wrap { display: none; }
+  :host(.fyra-small) .collapsible { display: none !important; }
+  :host(.fyra-small) .more-wrap { display: flex; }
+  :host(.fyra-small) .bar { gap: 2px; padding: 4px max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px)); }
+  :host(.fyra-small) .time { font-size: 11px; margin-left: 0; }
+  @media (pointer: coarse) {
+    button { min-width: 44px; height: 44px; }
+    .retry-btn, .cancel-btn { min-height: 44px; }
+    .click-area { touch-action: pan-y; }
+    .progress { height: 24px; background: linear-gradient(to bottom, transparent 10px, rgba(255,255,255,0.3) 10px, rgba(255,255,255,0.3) 14px, transparent 14px); touch-action: none; }
+    .progress:hover { height: 24px; }
+    .progress::-webkit-slider-thumb { width: 18px; height: 18px; }
+    .vol-wrap .vol-pop { display: none; }
+    .speed-wrap:not(.open) .speed-menu, .more-wrap:not(.open) .more-menu { opacity: 0; visibility: hidden; }
+    .more-menu, .speed-menu { bottom: 48px; }
+    .quality-menu-row select { min-height: 44px; font-size: 16px; }
+    .status-card { top: 50%; width: max-content; max-width: calc(100% - 24px); transform: translate(-50%, -50%); }
+  }
   
   /* Animations */
   @keyframes spin { 
@@ -552,7 +579,7 @@ export const UI_SHELL_STYLES = `
   }
   
   /* ========== RESPONSIVE: Very small (< 300px) ========== */
-  @media (max-width: 300px) {
+  @media (max-width: 300px) and (pointer: fine) {
     .bar { padding: 4px 8px 6px; gap: 2px; }
     button { min-width: 28px; height: 28px; padding: 4px; }
     .icon { width: 16px; height: 16px; }
@@ -573,6 +600,7 @@ export const UI_SHELL_HTML = `
         <div class="status-message" data-role="status-message"></div>
         <div class="status-detail" data-role="status-detail"></div>
         <button class="retry-btn" data-act="retry" data-role="retry" type="button">重试</button>
+        <button class="cancel-btn" data-act="stop" data-role="cancel" type="button">停止加载</button>
       </div>
       <div class="big-play" data-act="toggle-play">
         <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -589,10 +617,14 @@ export const UI_SHELL_HTML = `
           <svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         </button>
         <span class="time" data-role="time">00:00 / --:--</span>
+        <button class="collapsible" data-act="stop" title="停止播放与重连" aria-label="停止播放与重连" type="button">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>
+        </button>
         <div class="spacer"></div>
         <select class="quality collapsible" data-act="quality" style="display:none;"></select>
+        <button class="collapsible" data-act="loop" type="button" title="循环播放" aria-label="循环播放" aria-pressed="false" style="display:none;">${controlIconSvg('repeat')}</button>
         <div class="speed-wrap collapsible" style="position:relative;">
-          <button data-act="speed" title="播放速度">1x</button>
+          <button data-act="speed" title="播放速度" aria-expanded="false" aria-haspopup="true">1x</button>
           <div class="speed-menu">
             <button data-speed="0.5">0.5x</button>
             <button data-speed="0.75">0.75x</button>
@@ -627,10 +659,13 @@ export const UI_SHELL_HTML = `
         </button>
         <!-- More menu for collapsed items -->
         <div class="more-wrap">
-          <button data-act="more" title="更多">
+          <button data-act="more" title="更多" aria-label="更多控制" aria-expanded="false" aria-haspopup="true">
             <svg class="icon" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
           </button>
           <div class="more-menu">
+            <button data-act="stop" type="button">停止播放</button>
+            <button data-act="loop" type="button" title="循环播放" aria-label="循环播放" aria-pressed="false" style="display:none;">${controlIconSvg('repeat')}<span>循环播放</span></button>
+            <label class="quality-menu-row">画质/播放源<select class="quality-more" aria-label="画质或播放源"></select></label>
             <button data-act="speed-more" title="播放速度">
               <svg class="icon" viewBox="0 0 24 24"><path d="M10 8v8l6-4-6-4z"/></svg>
               <span>倍速</span>

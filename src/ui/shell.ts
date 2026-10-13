@@ -25,6 +25,7 @@ import {
   bindVideoEvents,
   bindBusEvents,
   addDomListener,
+  addBusListener,
   type EventCleanup,
 } from './events.js';
 
@@ -32,13 +33,19 @@ import {
  * FyraUiShell Custom Element
  * Provides player controls overlay with modern UI
  */
-export class FyraUiShell extends HTMLElement {
+// Keep public package imports safe for SSR/build tools. UI creation still needs a DOM.
+const HTMLElementBase = globalThis.HTMLElement ?? class {
+  constructor() { throw new Error('FyraUiShell requires a browser DOM'); }
+} as typeof HTMLElement;
+
+export class FyraUiShell extends HTMLElementBase {
   private player: PlayerAPI | null = null;
   private video: HTMLVideoElement | null = null;
   private bus: PluginContext['coreBus'] | null = null;
   private logEnabled = false;
   private duration = 0;
   private loading = true;
+  private stopped = false;
   private showStatusOverlay = true;
   private onRetry: (() => void | Promise<void>) | undefined;
   private showDiagnosticsButton = false;
@@ -59,6 +66,8 @@ export class FyraUiShell extends HTMLElement {
     statusMessage: null,
     statusDetail: null,
     retryBtn: null,
+    cancelBtn: null,
+    stopBtn: null,
     diagnosticsBtn: null,
     diagnosticsMenuBtn: null,
     recordBtn: null,
@@ -70,6 +79,7 @@ export class FyraUiShell extends HTMLElement {
 
   // Auto-hide controls
   private hideControlsTimer: ReturnType<typeof setTimeout> | null = null;
+  private suppressClickUntil = 0;
 
   // Event cleanup tracking
   private keyboardHandler: ReturnType<typeof createKeyboardHandler> | null = null;
@@ -80,7 +90,7 @@ export class FyraUiShell extends HTMLElement {
   // Responsive size observer
   private resizeObserver: ResizeObserver | null = null;
   private isSmallMode = false;
-  private readonly SMALL_THRESHOLD = 400;
+  private readonly SMALL_THRESHOLD = 520;
 
   private asRecord(value: unknown): Record<string, unknown> | null {
     return typeof value === 'object' && value !== null
@@ -89,6 +99,7 @@ export class FyraUiShell extends HTMLElement {
   }
 
   private getPlayerSources(): Source[] {
+    if (this.player?.getSources) return this.player.getSources();
     type PlayerWithOptions = PlayerAPI & {
       options?: {
         sources?: Source[];
@@ -211,6 +222,7 @@ export class FyraUiShell extends HTMLElement {
     this.bindResponsive();
     this.updateDuration();
     this.populateQuality();
+    this.updateLoopUi();
     this.updatePlayUi(isAlreadyPlaying);
   }
 
@@ -225,6 +237,8 @@ export class FyraUiShell extends HTMLElement {
       statusMessage: this.shadowRoot?.querySelector('[data-role="status-message"]') as HTMLElement,
       statusDetail: this.shadowRoot?.querySelector('[data-role="status-detail"]') as HTMLElement,
       retryBtn: this.shadowRoot?.querySelector('[data-role="retry"]') as HTMLElement,
+      cancelBtn: this.shadowRoot?.querySelector('[data-role="cancel"]') as HTMLElement,
+      stopBtn: this.shadowRoot?.querySelector('.bar [data-act="stop"]') as HTMLElement,
       diagnosticsBtn: this.shadowRoot?.querySelector('.bar [data-act="diagnostics"]') as HTMLElement,
       diagnosticsMenuBtn: this.shadowRoot?.querySelector('.more-menu [data-act="diagnostics"]') as HTMLElement,
       recordBtn: this.shadowRoot?.querySelector('.bar [data-act="record"]') as HTMLElement,
@@ -234,6 +248,14 @@ export class FyraUiShell extends HTMLElement {
       speedBtn: this.shadowRoot?.querySelector('[data-act="speed"]') as HTMLElement,
     };
     this.shell = this.shadowRoot?.querySelector('.shell') as HTMLElement;
+    if (this.elements.stopBtn) this.elements.stopBtn.style.display = this.player?.stop ? '' : 'none';
+    const menuStop = this.shadowRoot?.querySelector('.more-menu [data-act="stop"]') as HTMLElement | null;
+    if (menuStop) menuStop.style.display = this.player?.stop ? '' : 'none';
+    const pipAvailable = document.pictureInPictureEnabled && typeof this.video?.requestPictureInPicture === 'function';
+    this.shadowRoot?.querySelectorAll('[data-act="pip"]').forEach(button => {
+      (button as HTMLElement).style.display = pipAvailable ? '' : 'none';
+      button.classList.toggle('pip-unavailable', !pipAvailable);
+    });
     if (this.elements.diagnosticsBtn) {
       this.elements.diagnosticsBtn.style.display = this.showDiagnosticsButton ? '' : 'none';
     }
@@ -251,6 +273,11 @@ export class FyraUiShell extends HTMLElement {
 
   private updateOptionalControlVisibility(): void {
     const showCollapsible = this.isSmallMode ? 'none' : '';
+    if (this.elements.qualitySel) {
+      this.elements.qualitySel.style.display = this.elements.qualitySel.dataset.mode ? showCollapsible : 'none';
+    }
+    this.updateLoopUi();
+    if (this.elements.stopBtn) this.elements.stopBtn.style.display = this.player?.stop ? showCollapsible : 'none';
     if (this.elements.diagnosticsBtn) {
       this.elements.diagnosticsBtn.style.display = this.showDiagnosticsButton ? showCollapsible : 'none';
     }
@@ -280,11 +307,27 @@ export class FyraUiShell extends HTMLElement {
       const act = btn.getAttribute('data-act');
       try {
         if (act === 'toggle-play') await this.togglePlay();
-        if (act === 'fs') toggleFullscreen(this.host);
+        if (act === 'fs') await toggleFullscreen(this.host);
         if (act === 'pip') await togglePip(this.video);
         if (act === 'shot') await this.captureScreenshot();
         if (act === 'mute') this.handleMute();
+        if (act === 'loop' && this.video && Number.isFinite(this.video.duration) && this.video.duration > 0) {
+          this.video.loop = !this.video.loop;
+          this.updateLoopUi();
+          this.emitPreference('loop', this.video.loop);
+        }
+        if (act === 'more' || act === 'speed') {
+          const wrap = btn.parentElement;
+          if (wrap) {
+            const open = !wrap.classList.contains('open');
+            this.closeMenus();
+            wrap.classList.toggle('open', open);
+            btn.setAttribute('aria-expanded', String(open));
+            this.showControls();
+          }
+        }
         if (act === 'retry') await this.retryPlayback();
+        if (act === 'stop') await this.player?.stop?.();
         if (act === 'diagnostics') await this.openDiagnostics();
         if (act === 'record') await this.toggleRecording();
       } catch (err) {
@@ -309,6 +352,14 @@ export class FyraUiShell extends HTMLElement {
       this.emitPreference('muted', this.video.muted);
     }, this.eventCleanup);
 
+    const menuQuality = this.shadowRoot?.querySelector('.quality-more') as HTMLSelectElement | null;
+    if (menuQuality) addDomListener(menuQuality, 'change', () => {
+      if (!this.elements.qualitySel) return;
+      this.elements.qualitySel.value = menuQuality.value;
+      this.elements.qualitySel.dispatchEvent(new Event('change'));
+      this.closeMenus();
+    }, this.eventCleanup);
+
     if (this.elements.qualitySel) addDomListener(this.elements.qualitySel, 'change', () => {
       if (!this.elements.qualitySel || !this.player) return;
       const value = this.elements.qualitySel.value;
@@ -322,6 +373,7 @@ export class FyraUiShell extends HTMLElement {
             : numericValue;
         this.emitPreference('quality', level);
         this.player.setQualityLevel(level).catch((e) => this.log(`[quality] switch failed: ${e}`));
+        this.syncQualityMenu();
         return;
       }
       const idx = Number(value);
@@ -329,24 +381,30 @@ export class FyraUiShell extends HTMLElement {
         this.emitPreference('sourceIndex', idx);
         this.player.switchSource(idx).catch((e) => this.log(`[source] switch failed: ${e}`));
       }
+      this.syncQualityMenu();
     }, this.eventCleanup);
   }
 
   private bindEvents(): void {
     if (!this.video || !this.bus) return;
+    const loopObserver = new MutationObserver(() => this.updateLoopUi());
+    loopObserver.observe(this.video, { attributes: true, attributeFilter: ['loop'] });
+    this.eventCleanup.domCleanups.push(() => loopObserver.disconnect());
 
     bindVideoEvents(this.video, this.eventCleanup, {
-      onTimeUpdate: () => this.updateProgress(),
-      onDurationChange: () => this.updateDuration(),
-      onPlay: () => this.updatePlayUi(true),
+      onTimeUpdate: () => { if (!this.stopped) this.updateProgress(); },
+      onDurationChange: () => { if (!this.stopped) this.updateDuration(); },
+      onPlay: () => { if (!this.stopped) this.updatePlayUi(true); },
       onPause: () => this.updatePlayUi(false),
       onPlaying: () => {
+        if (this.stopped) return;
         this.setBuffering(false);
         this.setStatusMessage('');
         this.hideCover();
       },
-      onWaiting: () => this.setBuffering(true),
+      onWaiting: () => { if (!this.stopped) this.setBuffering(true); },
       onCanPlay: () => {
+        if (this.stopped) return;
         this.setBuffering(false);
         this.setStatusMessage('');
       },
@@ -367,6 +425,17 @@ export class FyraUiShell extends HTMLElement {
         this.hideCover();
       },
       onPause: () => this.updatePlayUi(false),
+      onStop: () => {
+        this.stopped = true;
+        this.updateLoopUi();
+        this.shell?.classList.remove('hide-controls');
+        this.setBuffering(false);
+        this.setStatusMessage('');
+        this.updatePlayUi(false);
+        if (this.elements.timeLabel) this.elements.timeLabel.textContent = '00:00 / --:--';
+        const progress = this.shadowRoot?.querySelector('.progress') as HTMLInputElement | null;
+        if (progress) progress.value = '0';
+      },
       onBuffer: () => this.setBuffering(true),
       onLevelSwitch: () => this.populateQuality(),
       onError: (eventPayload: unknown) => {
@@ -382,7 +451,11 @@ export class FyraUiShell extends HTMLElement {
         const attempt = typeof payloadRecord?.attempt === 'number' ? payloadRecord.attempt : undefined;
         const maxRetries = typeof payloadRecord?.maxRetries === 'number' ? payloadRecord.maxRetries : undefined;
         const details = code ? `${code}${attempt !== undefined ? ` ${attempt}/${maxRetries ?? '-'}` : ''}` : undefined;
-        if (type === 'reconnect' || code === 'RECONNECT_ATTEMPT') {
+        if (type === 'autoplay-blocked' || code === 'AUTOPLAY_BLOCKED') {
+          this.setBuffering(false);
+          this.setStatusMessage('浏览器阻止自动播放，请轻触播放按钮', details, true);
+          this.updatePlayUi(false);
+        } else if (type === 'reconnect' || code === 'RECONNECT_ATTEMPT') {
           this.setBuffering(true);
           this.setStatusMessage('视频流中断，正在重新连接...', details, false);
         } else if (type === 'reconnect-exhausted' || code === 'RECONNECT_EXHAUSTED') {
@@ -410,10 +483,30 @@ export class FyraUiShell extends HTMLElement {
         }
       },
     });
+    addBusListener(this.bus, 'sessionchange', event => {
+      const reason = this.asRecord(event)?.reason;
+      if (reason === 'load' || reason === 'switch' || reason === 'reconnect') {
+        this.stopped = false;
+        if (this.elements.qualitySel) {
+          this.elements.qualitySel.innerHTML = '';
+          this.elements.qualitySel.dataset.mode = '';
+          this.syncQualityMenu();
+        }
+        this.setBuffering(true);
+      }
+    }, this.eventCleanup);
   }
 
   private bindKeyboard(): void {
+    if (!this.host) return;
+    const host = this.host;
+    const originalTabIndex = host.getAttribute('tabindex');
+    if (originalTabIndex === null) host.tabIndex = 0;
+    this.eventCleanup.domCleanups.push(() => {
+      if (originalTabIndex === null && host.getAttribute('tabindex') === '0') host.removeAttribute('tabindex');
+    });
     const config: KeyboardConfig = {
+      target: host,
       onTogglePlay: () => {
         if (!this.loading) this.togglePlay();
       },
@@ -464,12 +557,34 @@ export class FyraUiShell extends HTMLElement {
       delay: 250,
     });
 
-    clickArea.addEventListener('click', this.clickHandler.handler);
-    this.eventCleanup.domCleanups.push(() => {
-      if (this.clickHandler) {
-        clickArea.removeEventListener('click', this.clickHandler.handler);
-      }
-    });
+    let touchStart: { x: number; y: number; id: number } | null = null;
+    addDomListener(clickArea, 'pointerdown', event => {
+      this.host?.focus({ preventScroll: true });
+      const pointer = event as PointerEvent;
+      if (pointer.pointerType !== 'touch') return;
+      touchStart = { x: pointer.clientX, y: pointer.clientY, id: pointer.pointerId };
+      this.suppressClickUntil = Date.now() + 700;
+    }, this.eventCleanup);
+    addDomListener(clickArea, 'pointercancel', () => { touchStart = null; }, this.eventCleanup);
+    addDomListener(clickArea, 'pointerup', event => {
+      const pointer = event as PointerEvent;
+      if (!touchStart || touchStart.id !== pointer.pointerId) return;
+      const moved = Math.hypot(pointer.clientX - touchStart.x, pointer.clientY - touchStart.y);
+      touchStart = null;
+      this.suppressClickUntil = Date.now() + 700;
+      if (moved > 12) return;
+      this.closeMenus();
+      if (this.video?.paused) { this.showControls(); if (!this.loading) void this.togglePlay(); }
+      else if (this.shell?.classList.contains('hide-controls')) this.showControls();
+      else this.hideControls();
+    }, this.eventCleanup);
+    addDomListener(clickArea, 'click', event => {
+      if (Date.now() < this.suppressClickUntil) return;
+      this.clickHandler?.handler(event as MouseEvent);
+    }, this.eventCleanup);
+    addDomListener(this.shell!, 'click', event => {
+      if (!(event.target as HTMLElement).closest('.more-wrap,.speed-wrap,.vol-wrap')) this.closeMenus();
+    }, this.eventCleanup);
   }
 
   private bindSpeedMenu(): void {
@@ -481,6 +596,7 @@ export class FyraUiShell extends HTMLElement {
       if (!btn) return;
       const speed = parseFloat(btn.getAttribute('data-speed') || '1');
       this.setPlaybackSpeed(speed);
+      this.closeMenus();
     };
 
     speedMenu.addEventListener('click', handler);
@@ -508,6 +624,7 @@ export class FyraUiShell extends HTMLElement {
         const next = speeds[(idx + 1) % speeds.length];
         this.setPlaybackSpeed(next);
       }
+      this.closeMenus();
       // shot and pip are handled by main bindUi
     };
 
@@ -523,17 +640,20 @@ export class FyraUiShell extends HTMLElement {
     const updateSize = () => {
       if (!this.host) return;
       const width = this.host.offsetWidth;
+      this.style.setProperty('--fyra-menu-height', `${Math.max(44, this.host.clientHeight - 66)}px`);
       const wasSmall = this.isSmallMode;
       this.isSmallMode = width < this.SMALL_THRESHOLD;
+      this.classList.toggle('fyra-small', this.isSmallMode);
 
-      if (wasSmall !== this.isSmallMode) {
-        this.updateResponsiveUI();
-      }
+      if (wasSmall !== this.isSmallMode) this.closeMenus();
+      this.updateResponsiveUI();
     };
 
     // Use ResizeObserver for efficient size detection
-    this.resizeObserver = new ResizeObserver(updateSize);
-    this.resizeObserver.observe(this.host);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(updateSize);
+      this.resizeObserver.observe(this.host);
+    } else addDomListener(window, 'resize', updateSize, this.eventCleanup);
 
     // Initial check
     updateSize();
@@ -562,37 +682,41 @@ export class FyraUiShell extends HTMLElement {
 
   private bindAutoHide(): void {
     if (!this.shell) return;
-
-    const showControls = () => {
-      this.shell?.classList.remove('hide-controls');
-      this.resetHideTimer();
-    };
-
-    const hideControls = () => {
-      if (this.video && !this.video.paused) {
-        this.shell?.classList.add('hide-controls');
-      }
-    };
-
     this.resetHideTimer = () => {
-      if (this.hideControlsTimer) {
-        clearTimeout(this.hideControlsTimer);
-      }
-      this.hideControlsTimer = setTimeout(hideControls, 3000);
+      if (this.hideControlsTimer) clearTimeout(this.hideControlsTimer);
+      this.hideControlsTimer = setTimeout(() => this.hideControls(), 3000);
     };
-
-    addDomListener(this.shell, 'mousemove', showControls, this.eventCleanup);
-    addDomListener(this.shell, 'mouseenter', showControls, this.eventCleanup);
-    addDomListener(
-      this.shell,
-      'mouseleave',
-      () => {
-        if (this.video && !this.video.paused) hideControls();
-      },
-      this.eventCleanup
-    );
-
+    addDomListener(this.shell, 'pointermove', event => {
+      if ((event as PointerEvent).pointerType === 'mouse') this.showControls();
+    }, this.eventCleanup);
+    addDomListener(this.shell, 'pointerdown', event => {
+      if ((event.target as HTMLElement).closest('.bottom')) this.showControls();
+    }, this.eventCleanup);
+    addDomListener(this.shell, 'focusin', () => this.showControls(), this.eventCleanup);
+    addDomListener(this.shell, 'focusout', () => this.resetHideTimer(), this.eventCleanup);
+    if (this.video) {
+      addDomListener(this.video, 'play', () => this.showControls(), this.eventCleanup);
+      addDomListener(this.video, 'pause', () => this.showControls(), this.eventCleanup);
+    }
     this.resetHideTimer();
+  }
+
+  private closeMenus(): void {
+    this.shadowRoot?.querySelectorAll('.more-wrap.open,.speed-wrap.open').forEach(wrap => {
+      wrap.classList.remove('open');
+      wrap.querySelector('button')?.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  private showControls(): void {
+    this.shell?.classList.remove('hide-controls');
+    this.resetHideTimer();
+  }
+
+  private hideControls(): void {
+    if (!this.video || this.video.paused || this.loading || this.shadowRoot?.querySelector('.open')) return;
+    if (this.shadowRoot?.activeElement?.matches(':focus-visible')) return;
+    this.shell?.classList.add('hide-controls');
   }
 
   private bindFullscreen(): void {
@@ -609,15 +733,14 @@ export class FyraUiShell extends HTMLElement {
 
   private async togglePlay(): Promise<void> {
     if (!this.player || !this.video) return;
+    if (this.loading && this.player.stop) {
+      await this.player.stop();
+      return;
+    }
     try {
       if (this.video.paused) {
         await this.player.play();
-        try {
-          await this.video.play();
-        } catch {
-          /* ignore */
-        }
-        this.updatePlayUi(true);
+        if (!this.stopped) this.updatePlayUi(!this.video.paused);
       } else {
         await this.player.pause();
         this.video.pause();
@@ -758,7 +881,7 @@ export class FyraUiShell extends HTMLElement {
     const fsIcon = this.shadowRoot?.querySelector('.fs-icon') as SVGElement | null;
     if (!fsIcon) return;
 
-    if (isFullscreen()) {
+    if (isFullscreen(this.host)) {
       fsIcon.innerHTML =
         '<path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>';
     } else {
@@ -813,6 +936,7 @@ export class FyraUiShell extends HTMLElement {
 
   private updateDuration(): void {
     if (!this.video) return;
+    this.updateLoopUi();
     const dur = getDuration(this.video);
     this.duration = dur;
     if (this.elements.timeLabel) {
@@ -830,6 +954,9 @@ export class FyraUiShell extends HTMLElement {
 
   private setBuffering(on: boolean): void {
     this.loading = on;
+    if (this.elements.cancelBtn) {
+      this.elements.cancelBtn.style.display = this.player?.stop && on ? 'inline-flex' : 'none';
+    }
     if (this.elements.spinner) {
       this.elements.spinner.style.display = on ? 'block' : 'none';
     }
@@ -855,6 +982,9 @@ export class FyraUiShell extends HTMLElement {
     if (this.elements.retryBtn) {
       this.elements.retryBtn.style.display = retry ? 'inline-flex' : 'none';
     }
+    if (this.elements.cancelBtn) {
+      this.elements.cancelBtn.style.display = this.player?.stop && message && !retry ? 'inline-flex' : 'none';
+    }
     if (transient && message) {
       window.setTimeout(() => {
         if (this.elements.statusMessage?.textContent === message) {
@@ -864,12 +994,23 @@ export class FyraUiShell extends HTMLElement {
     }
   }
 
+  private updateLoopUi(): void {
+    const available = !this.stopped && !!this.video && Number.isFinite(this.video.duration) && this.video.duration > 0;
+    this.shadowRoot?.querySelectorAll<HTMLButtonElement>('[data-act="loop"]').forEach(button => {
+      button.style.display = available && (!button.classList.contains('collapsible') || !this.isSmallMode) ? '' : 'none';
+      button.setAttribute('aria-pressed', String(!!this.video?.loop));
+      button.title = this.video?.loop ? '关闭循环播放' : '循环播放';
+      button.setAttribute('aria-label', button.title);
+    });
+  }
+
   private populateQuality(): void {
     if (!this.elements.qualitySel) return;
     const qualityState = this.player?.getQualityState?.();
-    if (qualityState?.supported && qualityState.levels.length > 0) {
+    if (qualityState?.supported && qualityState.levels.length > 1) {
       this.elements.qualitySel.style.display = 'block';
       this.elements.qualitySel.dataset.mode = 'quality';
+      this.elements.qualitySel.setAttribute('aria-label', '画质');
       this.elements.qualitySel.innerHTML = '';
 
       const auto = document.createElement('option');
@@ -886,6 +1027,7 @@ export class FyraUiShell extends HTMLElement {
 
       this.elements.qualitySel.value =
         qualityState.auto || qualityState.current == null ? 'auto' : String(qualityState.current);
+      this.syncQualityMenu();
       return;
     }
 
@@ -893,10 +1035,13 @@ export class FyraUiShell extends HTMLElement {
     if (!sources.length || sources.length === 1) {
       this.elements.qualitySel.style.display = 'none';
       this.elements.qualitySel.dataset.mode = '';
+      this.elements.qualitySel.innerHTML = '';
+      this.syncQualityMenu();
       return;
     }
     this.elements.qualitySel.style.display = 'block';
     this.elements.qualitySel.dataset.mode = 'source';
+    this.elements.qualitySel.setAttribute('aria-label', '播放源');
     this.elements.qualitySel.innerHTML = '';
     const currentSource = this.player?.getCurrentSource?.();
     const current = currentSource ? sources.indexOf(currentSource) : -1;
@@ -908,6 +1053,17 @@ export class FyraUiShell extends HTMLElement {
       this.elements.qualitySel?.appendChild(opt);
     });
     if (current >= 0) this.elements.qualitySel.value = String(current);
+    this.syncQualityMenu();
+  }
+
+  private syncQualityMenu(): void {
+    this.updateOptionalControlVisibility();
+    const original = this.elements.qualitySel;
+    const menu = this.shadowRoot?.querySelector('.quality-more') as HTMLSelectElement | null;
+    if (!original || !menu) return;
+    menu.innerHTML = original.innerHTML;
+    menu.value = original.value;
+    if (menu.parentElement) menu.parentElement.style.display = original.dataset.mode ? 'block' : 'none';
   }
 
   private applyCover(poster?: string): void {
@@ -935,7 +1091,7 @@ export class FyraUiShell extends HTMLElement {
 }
 
 // Register custom element
-if (!customElements.get('fyra-ui-shell')) {
+if (typeof customElements !== 'undefined' && !customElements.get('fyra-ui-shell')) {
   customElements.define('fyra-ui-shell', FyraUiShell);
 }
 

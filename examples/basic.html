@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>FyraPlayer Demo</title>
     <style>
       * { box-sizing: border-box; }
@@ -81,8 +82,8 @@
       .row + .row {
         margin-top: 12px;
       }
-      .panorama-options[hidden] {
-        display: none;
+      [hidden], .panorama-options[hidden] {
+        display: none !important;
       }
       .panorama-options {
         padding-top: 10px;
@@ -262,15 +263,34 @@
         white-space: pre-wrap;
         word-break: break-all;
       }
+      @media (max-width: 600px) {
+        body { padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+        h1 { font-size: 20px; }
+        .panel { padding: 12px; }
+        .row { gap: 8px; }
+        #source-select { width: 100%; min-width: 0 !important; }
+        .url-input { flex: 1 1 100%; width: 100%; min-width: 0; }
+        #type-select { flex: 1; min-width: 0 !important; }
+        .options { width: 100%; margin-left: 0; gap: 8px 16px; }
+        .panel button, select, input[type="text"] { min-height: 44px; }
+        input[type="text"], select { font-size: 16px; min-width: 0; max-width: 100%; }
+        .opt { min-height: 36px; }
+        .gb-grid { grid-template-columns: minmax(0, 1fr); }
+        .gb-invite-row { flex-wrap: wrap; }
+        .gb-invite-row input { flex: 1 1 100%; min-width: 0; }
+        .info-bar { gap: 8px; }
+        .info-bar > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <h1>🎬 FyraPlayer Demo</h1>
+      <p><a href="./multiview.html">打开多路监看示例</a></p>
       
       <!-- Player -->
       <div class="player-shell">
-        <video id="player" controls></video>
+        <video id="player" controls playsinline></video>
         <div id="overlay" class="overlay">
           <div class="spinner"></div>
           <div id="overlay-text"></div>
@@ -280,16 +300,19 @@
       <!-- Main Controls -->
       <div class="panel">
         <div class="row">
-          <button id="btn-play">▶ Play</button>
-          <button id="btn-pause">⏸ Pause</button>
+          <button id="btn-play" type="button" aria-label="播放">播放</button>
+          <button id="btn-pause" type="button" aria-label="暂停">暂停</button>
+          <button id="btn-stop" type="button" disabled>停止</button>
           <select id="source-select" style="min-width:160px;"></select>
           <div class="options">
             <label class="opt"><input id="toggle-skin" type="checkbox" checked /> 皮肤</label>
             <label class="opt"><input id="toggle-native" type="checkbox" /> 隐藏控件</label>
             <label class="opt"><input id="toggle-low-latency" type="checkbox" /> LL-HLS</label>
             <label class="opt"><input id="toggle-panorama" type="checkbox" /> 全景模式</label>
+            <label class="opt" id="wt-hevc-option" hidden><input id="wt-hevc" type="checkbox" /> 允许 H.265 实验解码</label>
           </div>
         </div>
+        <p id="panorama-feedback" role="status" hidden style="color:#92400e;overflow-wrap:anywhere;"></p>
         <div class="row">
           <input id="input-url" class="url-input" type="text" placeholder="输入流地址..." />
           <select id="type-select" style="min-width:100px;">
@@ -299,8 +322,11 @@
             <option value="fmp4">fMP4</option>
             <option value="webrtc">WebRTC</option>
             <option value="ws-raw">FLV/WS</option>
-            <option value="gb28181">GB28181</option>
             <option value="file">File</option>
+            <optgroup label="高级接入">
+              <option value="gb28181">GB28181 网关（兼容）</option>
+              <option value="webtransport">WebTransport 视频（实验）</option>
+            </optgroup>
           </select>
           <button id="btn-load" class="primary">Load</button>
           <input type="file" id="file-input" accept="video/*,.ts,.mp4,.mkv,.webm,.flv" style="display:none;" />
@@ -315,12 +341,13 @@
       </div>
 
       <!-- GB28181 Config (Collapsible) -->
-      <div class="section" id="gb-section">
+      <div class="section" id="gb-section" hidden>
         <div class="section-header" onclick="this.parentElement.classList.toggle('open')">
           <span class="icon">▶</span>
-          <span>GB28181 配置</span>
+          <span>GB28181 网关接入 · 兼容示例</span>
         </div>
         <div class="section-body">
+          <p style="margin:0 0 12px;font-size:13px;color:#555;">填写视频服务器的开流接口。服务器负责 GB28181 收流与转封装；此兼容示例播放返回的 FLV/TS。已有媒体地址时，直接选择对应播放类型。新接入请使用可选 gb-gateway 适配器。</p>
           <div class="gb-grid">
             <div class="gb-field">
               <label>Invite URL</label>
@@ -368,7 +395,11 @@
       <!-- Info Bar -->
       <div class="info-bar">
         <div id="stats">bitrate: - | fps: - | res: -</div>
-        <div id="wc-support">WebCodecs: checking...</div>
+        <div id="mse-support">MSE 配置探测：检测中</div>
+        <div id="native-support">原生播放探测：检测中</div>
+        <div id="wc-support" title="API 对若干编码配置的支持报告；实际播放还受码流、容器和设备限制，不代表已确认硬件解码。">WebCodecs 配置探测：检测中</div>
+        <div id="playback-path">播放路径：未加载</div>
+        <div id="playback-health">播放观测：未加载</div>
         <div id="plugin-status">plugins: ui=on | panoramalite=not-ready</div>
         <div id="ts-note"></div>
       </div>
@@ -377,6 +408,6 @@
       <div class="log" id="log"></div>
     </div>
 
-    <script type="module" src="./bundle.js"></script>
+    <script type="module" src="./app.ts"></script>
   </body>
 </html>

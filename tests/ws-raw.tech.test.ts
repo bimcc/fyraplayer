@@ -5,9 +5,12 @@ const pipelineStartMock = jest.fn(async () => {});
 const pipelineStopMock = jest.fn();
 const fallbackStartMock = jest.fn();
 const fallbackStopMock = jest.fn();
+let pipelineCallbacks: { onFallback: (reason: string) => void; onMetadata?: (event: unknown) => void };
 
 jest.mock('../src/techs/wsRaw/pipeline.js', () => ({
-  WsRawPipeline: jest.fn().mockImplementation(() => ({
+  WsRawPipeline: jest.fn().mockImplementation((_source: unknown, _video: unknown, _buffer: unknown, callbacks: typeof pipelineCallbacks) => {
+    pipelineCallbacks = callbacks;
+    return {
     start: pipelineStartMock,
     stop: pipelineStopMock,
     getStats: () => ({ ts: Date.now() }),
@@ -15,7 +18,8 @@ jest.mock('../src/techs/wsRaw/pipeline.js', () => ({
     disableMetadataExtraction: jest.fn(),
     getDetectedPrivateDataPids: () => [],
     getDetectedSeiTypes: () => []
-  }))
+    };
+  })
 }));
 
 jest.mock('../src/techs/wsRaw/mseFallback.js', () => ({
@@ -45,6 +49,27 @@ function createSource(overrides: Partial<WSRawSource> = {}): WSRawSource {
 }
 
 describe('WSRawTech commercial pipeline contract', () => {
+  test('MSE startup cancels and experimental fallback announces its timeline before data', async () => {
+    const tech = new WSRawTech();
+    const change = jest.fn(), metadata = jest.fn();
+    tech.on('streamchange', change); tech.on('metadata', metadata);
+    await tech.load(createSource({ pipeline: 'experimental', transport: 'ts', metadata: { privateData: { enable: true } } }), { video: createVideoStub() });
+    pipelineCallbacks.onMetadata?.({ type: 'private-data' });
+    const controller = new AbortController();
+    pipelineCallbacks.onFallback('decode failed');
+    await Promise.resolve();
+    expect(change).toHaveBeenCalledWith(expect.objectContaining({ reason: 'fallback', source: expect.objectContaining({ pipeline: 'mse' }) }));
+    pipelineCallbacks.onMetadata?.({ type: 'private-data' });
+    expect(metadata).toHaveBeenCalledTimes(1);
+    await tech.destroy();
+    fallbackStartMock.mockImplementationOnce(() => new Promise(() => {}));
+    const loading = tech.load(createSource(), { video: createVideoStub(), signal: controller.signal });
+    await Promise.resolve();
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fallbackStopMock).toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     pipelineStartMock.mockReset();
     pipelineStopMock.mockReset();
@@ -83,5 +108,21 @@ describe('WSRawTech commercial pipeline contract', () => {
     expect(pipelineStopMock).toHaveBeenCalledTimes(1);
     expect(fallbackStartMock).toHaveBeenCalledTimes(1);
     expect(fallbackStartMock.mock.calls[0][0]).toBe('wss://media.example.com/live.ts');
+  });
+
+  test('background fallback failures emit fatal events and stopped pipelines cannot restart fallback', async () => {
+    const tech = new WSRawTech();
+    const error = jest.fn(), network = jest.fn();
+    tech.on('error', error);
+    tech.on('network', network);
+    await tech.load(createSource({ pipeline: 'experimental' }), { video: createVideoStub() });
+    fallbackStartMock.mockRejectedValueOnce(new Error('MSE unavailable'));
+    pipelineCallbacks.onFallback('decode failed');
+    await new Promise(resolve => setImmediate(resolve));
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: 'MSE unavailable' }));
+    expect(network).toHaveBeenCalledWith({ type: 'ws-fallback-error', fatal: true });
+    await tech.destroy();
+    pipelineCallbacks.onFallback('late callback');
+    expect(fallbackStartMock).toHaveBeenCalledTimes(1);
   });
 });

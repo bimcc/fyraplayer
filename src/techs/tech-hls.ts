@@ -6,7 +6,7 @@ import { Renderer } from './wsRaw/renderer.js';
 import { Demuxer } from './wsRaw/demuxer.js';
 import { probeWebCodecs } from '../utils/webcodecs.js';
 import { buildBrowserManagedMp4MimeCandidates, isH265CodecString, selectSupportedMediaSourceMime } from '../utils/browserCodecs.js';
-import { buildHlsPlaybackConfig, buildLowLatencyConfig } from './hlsConfig.js';
+import { buildHlsPlaybackConfig } from './hlsConfig.js';
 import { decideWebCodecsCodec } from '../utils/decodeDecision.js';
 
 type HlsEventHandler = (...args: unknown[]) => void;

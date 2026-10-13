@@ -46,12 +46,72 @@ function createSource(): Gb28181Source {
 
 describe('Gb28181Tech gateway adapter contract', () => {
   const fetchMock = jest.fn();
+  const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    mseStartMock.mockClear();
+    mseStartMock.mockReset().mockResolvedValue(undefined);
     mseStopMock.mockClear();
     fetchMock.mockReset();
     (globalThis as any).fetch = fetchMock;
+  });
+
+  afterEach(() => { globalThis.fetch = originalFetch; });
+
+  test('aborts pending invite without creating a media adapter or sending bye', async () => {
+    let complete!: (response: unknown) => void;
+    fetchMock.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    const controller = new AbortController();
+    const tech = new Gb28181Tech();
+    const loading = tech.load(createSource(), { video: createVideoStub(), signal: controller.signal });
+    const requestSignal = fetchMock.mock.calls[0][1].signal as AbortSignal;
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    complete({ ok: true, json: async () => ({ url: 'wss://media/old.flv' }) });
+    await Promise.resolve();
+    expect(requestSignal.aborted).toBe(true);
+    expect(mseStartMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await tech.destroy();
+  });
+
+  test('ignores late invite JSON after destroy', async () => {
+    let complete!: (body: unknown) => void;
+    let started!: () => void;
+    const bodyStarted = new Promise<void>(resolve => { started = resolve; });
+    fetchMock.mockResolvedValueOnce({ ok: true, json: () => { started(); return new Promise(resolve => { complete = resolve; }); } });
+    const tech = new Gb28181Tech();
+    const loading = tech.load(createSource(), { video: createVideoStub() });
+    const rejected = expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    await bodyStarted;
+    await tech.destroy();
+    await rejected;
+    complete({ url: 'wss://media/old.flv', callId: 'old' });
+    await Promise.resolve();
+    expect(mseStartMock).not.toHaveBeenCalled();
+  });
+
+  test('stops partially started MSE and suppresses late ready/error callbacks', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ url: 'wss://media/old.flv' }) });
+    let started!: () => void;
+    const adapterStarted = new Promise<void>(resolve => { started = resolve; });
+    mseStartMock.mockImplementationOnce(() => { started(); return new Promise(() => {}); });
+    const controller = new AbortController();
+    const tech = new Gb28181Tech();
+    const ready = jest.fn();
+    const errors = jest.fn();
+    tech.on('ready', ready);
+    tech.on('error', errors);
+    const loading = tech.load(createSource(), { video: createVideoStub(), signal: controller.signal });
+    await adapterStarted;
+    const callbacks = mseStartMock.mock.calls[0][2];
+    controller.abort();
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+    callbacks.onReady();
+    callbacks.onError(new Error('late'));
+    expect(mseStopMock).toHaveBeenCalled();
+    expect(ready).not.toHaveBeenCalled();
+    expect(errors).not.toHaveBeenCalled();
+    await tech.destroy();
   });
 
   test('invite supports responseMapping dot-path and starts standard MSE playback', async () => {

@@ -1,6 +1,21 @@
 import { DASHTech } from '../src/techs/tech-dash.js';
 import { HLSTech } from '../src/techs/tech-hls.js';
 
+test('DASH loader cancellation cannot initialize a player after teardown', async () => {
+  let release!: (value: import('../src/techs/tech-dash.js').DashJsModuleLike) => void;
+  const create = jest.fn();
+  const tech = new DASHTech({ dashjsLoader: () => new Promise(resolve => { release = resolve; }) });
+  const controller = new AbortController();
+  const video = { load() {}, removeAttribute() {}, pause() {} } as unknown as HTMLVideoElement;
+  const loading = tech.load({ type: 'dash', url: 'a.mpd' }, { video, signal: controller.signal });
+  controller.abort();
+  await expect(loading).rejects.toMatchObject({ name: 'AbortError' });
+  await tech.destroy();
+  release({ MediaPlayer: Object.assign(() => ({ create }), { events: {} }) } as unknown as import('../src/techs/tech-dash.js').DashJsModuleLike);
+  await Promise.resolve(); await Promise.resolve();
+  expect(create).not.toHaveBeenCalled();
+});
+
 type Handler = (...args: unknown[]) => void;
 
 const HLS_EVENTS = {

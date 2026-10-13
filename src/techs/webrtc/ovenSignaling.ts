@@ -1,6 +1,7 @@
-﻿import { WebRTCSignalConfig } from "../../types.js";
+import { WebRTCSignalConfig } from "../../types.js";
 
 import type { SignalAdapterEvent } from "./signalAdapter.js";
+import { abortReason, throwIfAborted, waitWithSignal } from '../../core/abort.js';
 
 type SignalCandidate = { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
 
@@ -54,6 +55,7 @@ interface OvenMessage {
  * Supports Trickle ICE with proper candidate exchange.
  */
 export class OvenSignaling {
+  private lifecycle = new AbortController();
   private ws: WebSocket | null = null;
   private config: Extract<WebRTCSignalConfig, { type: "oven-ws" }>;
   private onOffer?: (sdp: string, iceServers?: RTCIceServer[]) => void;
@@ -71,39 +73,57 @@ export class OvenSignaling {
     this.eventCb = onEvent;
   }
 
-  async connect(): Promise<void> {
+  async connect(signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    throwIfAborted(this.lifecycle.signal);
     if (this.ws) return;
-    await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(this.config.url);
-      this.ws = ws;
-      ws.onopen = () => {
-        console.log('[oven] WebSocket connected, requesting offer...');
-        this.eventCb?.({ type: "ws-open" });
-        // OME expects request_offer command
-        this.send({ command: "request_offer" });
-        resolve();
-      };
-      ws.onerror = (e) => {
-        console.error('[oven] WebSocket error:', e);
-        this.eventCb?.({ type: "ws-error", error: e });
-        reject(e);
-      };
-      ws.onmessage = (evt) => this.handleMessage(evt);
-      ws.onclose = (evt) => {
-        const wasClean = evt.wasClean;
-        const hasSession = !!this.connectionId;
-        console.log(`[oven] WebSocket closed: code=${evt.code}, reason=${evt.reason}, wasClean=${wasClean}`);
-        this.eventCb?.({ 
-          type: "ws-close", 
-          // Once we have a session, rely on ICE/PC state instead of WS close.
-          fatal: !wasClean && !hasSession,
-          code: evt.code,
-          reason: evt.reason,
-          hasSession
-        });
-        this.ws = null;
-      };
-    });
+    const cancel = () => this.lifecycle.abort(signal && abortReason(signal));
+    signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      await waitWithSignal(new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(this.config.url);
+        this.ws = ws;
+        let opened = false;
+        const active = () => this.ws === ws && !this.lifecycle.signal.aborted;
+        ws.onopen = () => {
+          if (!active()) return;
+          opened = true;
+          console.log('[oven] WebSocket connected, requesting offer...');
+          this.eventCb?.({ type: "ws-open" });
+          // OME expects request_offer command
+          this.send({ command: "request_offer" });
+          resolve();
+        };
+        ws.onerror = (e) => {
+          if (!active()) return;
+          console.error('[oven] WebSocket error:', e);
+          this.eventCb?.({ type: "ws-error", error: e });
+          reject(e);
+        };
+        ws.onmessage = (evt) => { if (active()) this.handleMessage(evt); };
+        ws.onclose = (evt) => {
+          if (!active()) return;
+          if (!opened) reject(new Error('Oven WebSocket closed before opening'));
+          const wasClean = evt.wasClean;
+          const hasSession = !!this.connectionId;
+          console.log(`[oven] WebSocket closed: code=${evt.code}, reason=${evt.reason}, wasClean=${wasClean}`);
+          this.eventCb?.({
+            type: "ws-close",
+            // Once we have a session, rely on ICE/PC state instead of WS close.
+            fatal: !wasClean && !hasSession,
+            code: evt.code,
+            reason: evt.reason,
+            hasSession
+          });
+          this.ws = null;
+        };
+      }), this.lifecycle.signal);
+    } catch (error) {
+      await this.destroy();
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', cancel);
+    }
   }
 
 
@@ -292,17 +312,26 @@ export class OvenSignaling {
     }
   }
 
-  async waitOffer(timeoutMs = 10000): Promise<void> {
+  async waitOffer(timeoutMs = 10000, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    throwIfAborted(this.lifecycle.signal);
     if (!this.ws) throw new Error("ws not connected");
+    if (this.connectionId) return;
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.resolveReady = undefined;
-        reject(new Error("offer timeout"));
-      }, timeoutMs);
-      this.resolveReady = () => {
+      const finish = (error?: unknown) => {
         clearTimeout(timer);
-        resolve();
+        this.resolveReady = undefined;
+        signal?.removeEventListener('abort', cancel);
+        this.lifecycle.signal.removeEventListener('abort', cancel);
+        if (error !== undefined) reject(error);
+        else resolve();
       };
+      const cancel = () => finish(abortReason(signal?.aborted ? signal : this.lifecycle.signal));
+      const timer = setTimeout(() => finish(new Error('offer timeout')), timeoutMs);
+      this.resolveReady = () => finish();
+      signal?.addEventListener('abort', cancel, { once: true });
+      this.lifecycle.signal.addEventListener('abort', cancel, { once: true });
+      if (signal?.aborted || this.lifecycle.signal.aborted) cancel();
     });
   }
 
@@ -371,6 +400,7 @@ export class OvenSignaling {
   }
 
   async destroy(): Promise<void> {
+    this.lifecycle.abort();
     // Send stop command before closing (if connected)
     // Use numeric value 1 for OPEN state
     if (this.ws && this.ws.readyState === 1 && this.connectionId) {
@@ -383,11 +413,15 @@ export class OvenSignaling {
     }
     
     if (this.ws) {
+      this.ws.onopen = this.ws.onmessage = this.ws.onerror = this.ws.onclose = null;
       this.ws.close();
       this.ws = null;
     }
     
     this.connectionId = null;
     this.peerId = null;
+    this.onOffer = undefined;
+    this.onCandidate = undefined;
+    this.eventCb = undefined;
   }
 }

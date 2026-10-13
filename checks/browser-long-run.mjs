@@ -268,12 +268,14 @@ async function getJson(url) {
 }
 
 async function getDemoPage(cdpPort, demoUrl) {
-  const pages = await getJson(`http://127.0.0.1:${cdpPort}/json`);
-  const page = pages.find((item) => item.type === 'page' && item.url === demoUrl)
-    || pages.find((item) => item.type === 'page' && item.url.startsWith(demoUrl.replace(/\/basic\.html$/, '/')))
-    || pages.find((item) => item.type === 'page');
-  if (!page?.webSocketDebuggerUrl) throw new Error('No debuggable browser page found');
-  return page;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const pages = await getJson(`http://127.0.0.1:${cdpPort}/json`);
+    const page = pages.find((item) => item.type === 'page' && item.url === demoUrl);
+    if (page?.webSocketDebuggerUrl) return page;
+    await sleep(250);
+  }
+  throw new Error(`No debuggable page found for ${demoUrl}`);
 }
 
 class CdpSession {
@@ -321,6 +323,24 @@ class CdpSession {
       // ignore
     }
   }
+}
+
+async function waitForDemoReady(session) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const result = await session.send('Runtime.evaluate', {
+        expression: 'Boolean(window.fyraLongRun && document.getElementById("btn-load"))',
+        returnByValue: true
+      });
+      if (result.result?.value) return;
+    } catch (error) {
+      // Initial navigation and Vite dependency reload can replace the first context.
+      if (!/context|target|navigation/i.test(String(error))) throw error;
+    }
+    await new Promise(resolveReady => setTimeout(resolveReady, 250));
+  }
+  throw new Error('Demo application did not become ready within 30 seconds');
 }
 
 async function runInBrowser(session, runOptions) {
@@ -661,6 +681,7 @@ async function main() {
 
     const page = await getDemoPage(cdpPort, demoUrl);
     session = new CdpSession(page.webSocketDebuggerUrl);
+    await waitForDemoReady(session);
     const report = await runInBrowser(session, {
       source: options.source,
       sourceUrl: options.sourceUrl,
@@ -705,7 +726,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message || String(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.stack || error.message || String(error));
+    process.exitCode = 1;
+  });
+}
+
+export { CdpSession, spawnBrowser, findBrowserExecutable, getDemoPage };

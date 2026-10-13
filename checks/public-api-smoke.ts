@@ -600,3 +600,75 @@ const recordingErrorInfo: PlayerRecordingErrorInfo = {
   status: 403,
 };
 new RecordingApiError(recordingErrorInfo).info.code.toString();
+import { MetadataBridge } from '@bimccfyra/fyraplayer/plugins/metadata';
+import { createFyraKlvPlugin } from '../examples/integrations/fyraklv.js';
+import { createSnapshotPlugin, type SnapshotHandle } from '@bimccfyra/fyraplayer/plugins/snapshot';
+import { createFrameClockPlugin, mediaTimeToPts90k, type FrameClockHandle } from '@bimccfyra/fyraplayer/plugins/frame-clock';
+
+let captureHandle: SnapshotHandle | undefined;
+let clockHandle: FrameClockHandle | undefined;
+createSnapshotPlugin({ onHandle: handle => { captureHandle = handle; } });
+createFrameClockPlugin({ fallback: 'none', onHandle: handle => { clockHandle = handle; } });
+void captureHandle?.capture({ maxWidth: 640 });
+const displayed = clockHandle?.getLatest();
+if (displayed) mediaTimeToPts90k(displayed.mediaTime, { mediaTime: 0, pts90k: 90000n });
+const scopedPlugin: PluginCtor = ctx => {
+  const handler = () => {};
+  ctx.player.on('ready', handler);
+  ctx.lifecycle?.onCleanup(() => ctx.player.off('ready', handler));
+  void ctx.lifecycle?.signal;
+};
+void scopedPlugin;
+const sessionOptions: import('@bimccfyra/fyraplayer').PlayerOptions = {
+  video: '#video', sources: [], loadTimeoutMs: 15000,
+};
+void sessionOptions;
+const sessionObserver: PluginCtor = ({ player }) => {
+  const stopPlayback: (() => Promise<void>) | undefined = player.stop?.bind(player);
+  void stopPlayback;
+  player.on('stop', () => {});
+  player.on('sessionchange', event => {
+    event.epoch.toFixed();
+    event.session?.source.url.toString();
+  });
+  player.getPlaybackSession?.()?.tech.toString();
+};
+void sessionObserver;
+const reusableStop: () => Promise<void> = player.stop.bind(player);
+void reusableStop;
+
+const metadataAlias: typeof MetadataBridge = KlvBridge;
+void metadataAlias;
+createFyraKlvPlugin({
+  createService: () => ({ processLiveData: (_raw: Uint8Array, _pts: bigint) => {}, getInterpolatedStateAtPts: (_pts: bigint) => null, reset() {}, destroy() {} }),
+  mediaTimeToPts: seconds => BigInt(Math.round(seconds * 90000)),
+  onHandle: handle => { handle.getState(); }
+});
+import { createGbGatewayAdapter, type GbGatewaySession } from '@bimccfyra/fyraplayer/plugins/gb-gateway';
+import { createWebTransportTechPlugin, encodeTransportConfig, encodeTransportChunk, encodeTransportMetadata, transportTimestampToPts90k, type WebTransportSource, type WebTransportHandle } from '@bimccfyra/fyraplayer/plugins/webtransport';
+import { createWebTransportKlvIntegration } from '../examples/integrations/webtransport-klv.js';
+import { createGatewayPlayer } from '../examples/integrations/gb-gateway.js';
+const wtSource: WebTransportSource = {type:'webtransport',url:'https://example.com/video',allowH265:true,fallbacks:[{type:'hls',url:'https://example.com/live.m3u8'}]};
+// @ts-expect-error The single media format has no per-source protocol selector.
+wtSource.protocol = 'fyra-media';
+const gatewaySession: GbGatewaySession = {id:'session-1',source:wtSource};
+const gateway = createGbGatewayAdapter({invite:async (_source, signal) => { signal.throwIfAborted();return gatewaySession; }});
+const wtPlugin=createWebTransportTechPlugin({maxDecodeQueue:8,onFrame:(_frame,info)=>{info.timestamp.toFixed();}});
+const options: import('@bimccfyra/fyraplayer').PlayerOptions = {video:'#video',sources:[wtSource],plugins:[gateway.plugin,wtPlugin],middleware:[gateway.middleware]};
+void options;
+encodeTransportConfig({codec:'avc1.42E01E',codedWidth:320,codedHeight:200});
+encodeTransportChunk({key:true,timestamp:1000,data:new Uint8Array([0,0,0,1,0x65])});
+void createGatewayPlayer;
+let transportClock:WebTransportHandle | undefined;
+createWebTransportTechPlugin({onHandle:handle => {transportClock=handle;}});
+transportClock?.getLatestFrame()?.timelineId.toFixed();
+transportTimestampToPts90k(5000017);
+encodeTransportMetadata({type:'private-data',timestamp:5000017,identifier:300,data:new Uint8Array([2,8])});
+const mediaIntegration=createWebTransportKlvIntegration({createService:()=>({processLiveData:(_raw:Uint8Array,_pts:bigint)=>{},getInterpolatedStateAtPts:(_pts:bigint)=>null,reset(){},destroy(){}})});
+void new FyraPlayer({video:'#video',sources:[wtSource],plugins:mediaIntegration.plugins});
+mediaIntegration.getState();
+import { createPlaybackHealthPlugin, type PlaybackHealthHandle } from '@bimccfyra/fyraplayer/plugins/playback-health';
+let health: PlaybackHealthHandle | undefined;
+createPlaybackHealthPlugin({frameSource:'external',onHandle:handle=>{health=handle;},onEvent:(event,snapshot)=>{event.precision.toString();snapshot.firstFrameMs?.toFixed();}});
+health?.reportFrame({mediaTime:5,sessionEpoch:1});
+health?.setSuspended(true);health?.snapshot().recent.map(event=>event.type);

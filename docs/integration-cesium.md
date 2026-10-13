@@ -1,86 +1,26 @@
-# FyraPlayer + Cesium 集成指南
+# FyraPlayer + Cesium 集成
 
-使用 FyraPlayer 进行低延迟播放，将视频输出到 Cesium（通过 @beeviz/cesium），并桥接元数据到 fyraklv 进行姿态/位置/时间同步。
+FyraPlayer 提供视频元素与通用事件；fyraklv 提供 KLV/MISB 解析和 PTS 查询；Cesium 或应用拥有纹理、地图、投影与场景对象。
 
-## 依赖项
+| 模块 | 职责 |
+| --- | --- |
+| FyraPlayer | Source/Tech 播放生命周期、通用 metadata 出口 |
+| MetadataBridge / createMetadataPlugin | 调用注入解析器；旧 KlvBridge 名称兼容 |
+| 应用 createFyraKlvPlugin 示例 | 连接播放器事件与 KLVStreamManager，管理 reset/destroy |
+| fyraklv | KLV/MISB 语义解析、状态缓冲和插值 |
+| Cesium/应用桥接 | 纹理与场景生命周期、媒体时间轴锚点、按显示时刻更新姿态 |
 
-- `@bimccfyra/fyraplayer` - 播放器核心
-- `@beeviz/cesium` - Cesium 集成（包含 FyraPlayerCesiumAdapter、VideoSource、UAVVisualizer）
-- `fyraklv` - KLV/MISB 元数据解析
+此前文档使用的 FyraPlayerCesiumAdapter、VideoSource、UAVVisualizer 是外部项目接口，不是本包导出；请按实际安装的外部项目版本核对名称与参数。本仓库不依赖 Cesium。
 
-## 适配器位置
+## 接入步骤
 
-> **重要**：Cesium 适配器**不在 fyraplayer 包内**，而是在 `@beeviz/cesium` 中。
+1. 通过公开 Player API 创建并初始化播放器；把 video 元素交给应用已有的 Cesium 纹理实现，参考 [通用桥接](render-bridges.md)。
+2. 若流含 KLV，按 [fyraklv 接入](klv-integration.md) 安装应用层插件；注入新的 KLVStreamManager 并提供已确认的视频秒数到 90 kHz PTS 的映射。
+3. 在 Cesium 的渲染循环中调用 handle.getState()，非 null 时再更新姿态。若实验播放路径的 video.currentTime 不可靠，调用 handle.getStateAtPts(displayPts90k)，传入应用确认的显示帧 PTS。
+4. 切源时更新时间锚点；插件清空旧 KLV 缓冲。退出时解除 Cesium 渲染回调和纹理绑定，再 await player.destroy()。
 
-| 组件                      | 所在包                        | 说明                              |
-| ------------------------- | ----------------------------- | --------------------------------- |
-| `FyraPlayerCesiumAdapter` | `@beeviz/cesium`              | 将 FyraPlayer 视频输出接入 Cesium |
-| `KlvBridge`               | `@bimccfyra/fyraplayer/plugins/metadata` | 元数据事件桥接                    |
+不能按 KLV 网络到达时刻直接调用 updatePose 并宣称已经与视频同步。也不能默认首个 KLV PTS 等于视频零点。PTS 回绕、断流重启或 fallback 切换到不同时间轴时需要重新建立锚点。
 
-## 快速开始
+WS TS 元数据提取需要 pipeline: 'experimental' 和 metadata.privateData.enable；默认/回退 MSE 不产生同等事件。仅安装桥接插件不能增加提取能力。SEI 与 private-data 必须先按事件类型区分再交给对应解析器。
 
-```typescript
-// 适配器从 @beeviz/cesium 导入（不是 fyraplayer）
-import {
-  FyraPlayerCesiumAdapter,
-  VideoSource,
-  UAVVisualizer,
-} from "@beeviz/cesium";
-import { KlvBridge } from "@bimccfyra/fyraplayer/plugins/metadata";
-import { KLVStreamManager } from "fyraklv";
-
-const videoEl = document.querySelector("#video") as HTMLVideoElement;
-const sources = [
-  {
-    type: "ws-raw",
-    url: "wss://example.com/live.ts",
-    codec: "h264",
-    transport: "ts",
-    metadata: { privateData: { enable: true } },
-  },
-];
-
-// KLV 解析
-const klvManager = new KLVStreamManager();
-const bridge = new KlvBridge({
-  parse: (evt) => {
-    klvManager.processLiveData(evt.raw, BigInt(Math.floor(evt.pts * 90)));
-    return klvManager.getFilteredInterpolatedStateAtPts(BigInt(Math.floor(evt.pts * 90)));
-  },
-  onData: (result) => {
-    // 姿态/位置数据，传给 Cesium 可视化组件
-    uav.updatePose(result);
-  },
-  onError: (err) => console.warn("KLV parse error", err),
-});
-
-// 创建适配器
-const adapter = new FyraPlayerCesiumAdapter({
-  video: videoEl,
-  sources,
-  techOrder: ["ws-raw", "hls", "dash"],
-  onMetadata: (evt) => bridge.handle(evt),
-});
-
-await adapter.init();
-
-// Cesium 侧
-const videoSource = new VideoSource(videoEl);
-const uav = new UAVVisualizer(viewer, {
-  /* options */
-});
-```
-
-## 职责划分
-
-| 层              | 职责                                                           |
-| --------------- | -------------------------------------------------------------- |
-| FyraPlayer      | 拉流/解码/协议降级，发出 `metadata` 事件（原始 payload + pts） |
-| KlvBridge       | 事件转发，错误处理                                             |
-| fyraklv         | KLV 语义解析、时间同步，输出姿态/位置数据                      |
-| @beeviz/cesium  | 消费 videoEl 作为纹理，渲染 UAV/轨迹/视锥体                    |
-
-## 提示
-
-- 在 ws-raw Source 上启用元数据提取：`metadata.privateData.enable` 或 `metadata.sei.enable`
-- FyraPlayer 核心不包含 KLV 解析逻辑，所有语义解析在 fyraklv 中通过 KlvBridge 完成
+纹理 CORS、源切换、canvas 非空、上下文恢复和长期资源使用需要在具体 Cesium 应用验证，不能由播放器单元测试代替。

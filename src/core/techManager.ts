@@ -1,6 +1,7 @@
-import { TechName, Source, BufferPolicy, MetricsOptions, ReconnectPolicy, Tech, DataChannelOptions } from '../types.js';
+import { TechName, Source, Tech, TechLoadOptions } from '../types.js';
 import { EventBus } from './eventBus.js';
 import { enhanceNetworkEvent } from './networkEvents.js';
+import { abortReason, createLoadScope, throwIfAborted } from './abort.js';
 
 interface TechEntry {
   name: TechName;
@@ -13,7 +14,12 @@ interface TechLoadError {
   reason: unknown;
 }
 
-type TechWillLoadHook = (name: TechName, tech: Tech) => void;
+interface SelectionOptions extends TechLoadOptions {
+  onTechWillLoad?: (name: TechName, tech: Tech, source: Source, signal: AbortSignal) => void;
+  onTechLoadFailed?: () => void;
+  shouldContinue?: () => boolean;
+  loadTimeoutMs?: number;
+}
 
 type SourceWithPreferTech = Source & {
   preferTech?: TechName;
@@ -104,8 +110,8 @@ export class TechManager {
   }
 
   /**
-   * Mark a tech as failed to avoid repeated failures in the same session
-   * Requirements 5.5: Track failed Techs
+   * Explicitly disable an unavailable Tech until resetFailedTechs().
+   * Individual URL load failures do not disable same-Tech fallback sources.
    */
   markTechFailed(tech: TechName): void {
     this.failedTechs.add(tech);
@@ -132,18 +138,10 @@ export class TechManager {
   async selectAndLoad(
     sources: Source[],
     techOrder: TechName[],
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: import('../types.js').WebCodecsConfig;
-      dataChannel?: DataChannelOptions;
-      mpegtsLoader?: import('../types.js').MpegtsLoader;
-      onTechWillLoad?: TechWillLoadHook;
-    }
+    opts: SelectionOptions
   ): Promise<{ source: Source; tech: TechName } | null> {
     await this.destroyCurrent();
+    if (opts.signal?.aborted || opts.shouldContinue?.() === false) return null;
     const errors: TechLoadError[] = [];
     
     // Requirements 5.5: Filter out failed techs
@@ -152,12 +150,14 @@ export class TechManager {
     for (const source of sources) {
       // Try primary source first
       const result = await this.tryLoadSource(source, effectiveOrder, opts, errors);
+      if (opts.shouldContinue?.() === false) return null;
       if (result) return result;
       
       // Requirements 5.2: Try fallbacks if primary fails
       if ('fallbacks' in source && source.fallbacks && source.fallbacks.length > 0) {
         for (const fallback of source.fallbacks) {
           const fbResult = await this.tryLoadSource(fallback, effectiveOrder, opts, errors);
+          if (opts.shouldContinue?.() === false) return null;
           if (fbResult) {
             // Requirements 5.4: Emit fallback event
             this.bus.emit('network', enhanceNetworkEvent({
@@ -190,35 +190,38 @@ export class TechManager {
   private async tryLoadSource(
     source: Source,
     techOrder: TechName[],
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: import('../types.js').WebCodecsConfig;
-      dataChannel?: DataChannelOptions;
-      mpegtsLoader?: import('../types.js').MpegtsLoader;
-      onTechWillLoad?: TechWillLoadHook;
-    },
+    opts: SelectionOptions,
     errors: TechLoadError[]
   ): Promise<{ source: Source; tech: TechName } | null> {
     // Requirements 5.6: Respect user-configured techOrder as priority
     const preferred = (source as SourceWithPreferTech).preferTech;
     const ordered = preferred ? [preferred, ...techOrder.filter((t) => t !== preferred)] : techOrder;
     
-    for (const name of ordered) {
+    for (const name of new Set(ordered)) {
+      if (opts.signal?.aborted || opts.shouldContinue?.() === false) return null;
       // Skip failed techs
       if (this.failedTechs.has(name)) continue;
       
       const impl = this.techs.find((t) => t.name === name)?.impl;
       if (!impl || !impl.canPlay(source)) continue;
       
+      const scope = createLoadScope(opts.signal, opts.loadTimeoutMs);
       try {
         this.current = { name, impl };
-        opts.onTechWillLoad?.(name, impl);
-        await impl.load(source, opts);
+        opts.onTechWillLoad?.(name, impl, source, scope.signal);
+        throwIfAborted(scope.signal);
+        // Await cooperative termination; never race/reuse an uncooperative Tech instance.
+        await impl.load(source, { ...opts, signal: scope.signal });
+        throwIfAborted(scope.signal);
+        if (opts.shouldContinue?.() === false) {
+          await this.destroyCurrent();
+          return null;
+        }
         return { source, tech: name };
       } catch (err) {
+        scope.dispose();
+        const reason = scope.signal.aborted ? abortReason(scope.signal) : err;
+        if (opts.shouldContinue?.() !== false) opts.onTechLoadFailed?.();
         if (this.current?.impl === impl) {
           this.current = null;
         }
@@ -227,11 +230,12 @@ export class TechManager {
         } catch {
           /* ignore cleanup errors while trying fallback techs */
         }
-        errors.push({ tech: name, source, reason: err });
-        console.warn(`[techManager] load failed for ${name}`, err);
-        // Mark tech as failed for this session
-        this.markTechFailed(name);
-      }
+        errors.push({ tech: name, source, reason });
+        if (opts.signal?.aborted || opts.shouldContinue?.() === false) return null;
+        console.warn(`[techManager] load failed for ${name}`, reason);
+        // A URL failure does not disable this Tech for another source.
+        // Explicit markTechFailed() remains available for unavailable Techs.
+      } finally { scope.dispose(); }
     }
     
     return null;
@@ -246,8 +250,9 @@ export class TechManager {
 
   async destroyCurrent(): Promise<void> {
     if (this.current) {
-      await this.current.impl.destroy();
+      const current = this.current;
       this.current = null;
+      await current.impl.destroy();
     }
   }
 }

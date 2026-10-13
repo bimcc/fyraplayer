@@ -1,5 +1,4 @@
 import type {
-  PlayerRecordingCode,
   PlayerRecordingErrorInfo,
   PlayerRecordingEvent,
   PlayerRecordingStatus,
@@ -179,7 +178,7 @@ function toRecordingErrorInfo(error: unknown): PlayerRecordingErrorInfo {
 }
 
 export function createRecordingApiPlugin(options: RecordingApiPluginOptions): PluginCtor {
-  return ({ coreBus, player, techs }) => {
+  return ({ coreBus, player, techs, lifecycle }) => {
     let active = false;
     let status: PlayerRecordingStatus = 'idle';
     let recordingId: string | undefined;
@@ -208,7 +207,8 @@ export function createRecordingApiPlugin(options: RecordingApiPluginOptions): Pl
       nextStatus: PlayerRecordingStatus,
       response?: unknown,
       error?: unknown
-    ): PlayerRecordingEvent => {
+    ): void => {
+      if (destroyed) return;
       const errorInfo = error === undefined ? undefined : toRecordingErrorInfo(error);
       status = nextStatus;
       active = status === 'recording' || status === 'starting';
@@ -228,7 +228,6 @@ export function createRecordingApiPlugin(options: RecordingApiPluginOptions): Pl
       };
       coreBus.emit('recording', event);
       options.onEvent?.(event);
-      return event;
     };
 
     const resolveEndpoint = async (
@@ -286,15 +285,20 @@ export function createRecordingApiPlugin(options: RecordingApiPluginOptions): Pl
         timedOut = true;
         controller.abort();
       }, timeoutMs);
-      const ctx = makeBaseContext(action, endpoint);
-      const headers = await resolveHeaders(ctx);
-      const defaultBody = options.buildBody
-        ? await options.buildBody({ ...ctx, headers })
-        : buildDefaultBody({ ...ctx, headers });
-      const body = method.toUpperCase() === 'GET'
-        ? undefined
-        : JSON.stringify(mergeBody(defaultBody, extraBody));
+      const checkCancelled = () => {
+        if (controller.signal.aborted) throw new DOMException('Recording request cancelled', 'AbortError');
+      };
       try {
+        const ctx = makeBaseContext(action, endpoint);
+        const headers = await resolveHeaders(ctx);
+        checkCancelled();
+        const defaultBody = options.buildBody
+          ? await options.buildBody({ ...ctx, headers })
+          : buildDefaultBody({ ...ctx, headers });
+        checkCancelled();
+        const body = method.toUpperCase() === 'GET'
+          ? undefined
+          : JSON.stringify(mergeBody(defaultBody, extraBody));
         const response = await fetch(endpoint, {
           method,
           headers,
@@ -302,6 +306,7 @@ export function createRecordingApiPlugin(options: RecordingApiPluginOptions): Pl
           credentials: options.credentials,
           signal: controller.signal,
         });
+        checkCancelled();
         if (!response.ok) {
           throw createRecordingError({
             code: 'RECORDING_HTTP_ERROR',
@@ -312,8 +317,9 @@ export function createRecordingApiPlugin(options: RecordingApiPluginOptions): Pl
             body: await parseErrorBody(response, options.maxErrorBodyLength ?? 512),
           });
         }
+        let parsed: RecordingApiResponse;
         try {
-          return options.parseResponse
+          parsed = options.parseResponse
             ? await options.parseResponse(response, { ...ctx, headers, body })
             : await defaultParseResponse(response);
         } catch (error) {
@@ -324,6 +330,8 @@ export function createRecordingApiPlugin(options: RecordingApiPluginOptions): Pl
             cause: error,
           });
         }
+        checkCancelled();
+        return parsed;
       } catch (error) {
         if (isAbortError(error)) {
           throw createRecordingError({
@@ -393,11 +401,16 @@ export function createRecordingApiPlugin(options: RecordingApiPluginOptions): Pl
       getRecordingId: () => recordingId,
       destroy: () => {
         destroyed = true;
+        active = false;
         inFlight?.abort();
         inFlight = null;
+        lifecycle?.signal.removeEventListener('abort', handle.destroy);
       },
     };
 
+    lifecycle?.onCleanup(handle.destroy);
+    lifecycle?.signal.addEventListener('abort', handle.destroy, { once: true });
+    if (lifecycle?.signal.aborted) handle.destroy();
     options.onHandle?.(handle);
 
     return {

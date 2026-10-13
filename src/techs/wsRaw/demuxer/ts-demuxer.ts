@@ -135,14 +135,8 @@ export function demuxTs(
     const flushed = flushAudioPes(ts, state);
     if (flushed) frames.push(flushed);
   }
-  if (ctx.callbacks?.onPrivateData) {
-    for (const pid of ts.privateDataPids) {
-      const pesBuf = ts.privateDataPes.get(pid);
-      if (pesBuf && pesBuf.data.length > 0) {
-        flushPrivateDataPes(pid, ts, ctx);
-      }
-    }
-  }
+  // Private PES boundaries are unrelated to network chunk boundaries.
+  // Bounded packets flush on completion, unbounded packets on the next start.
 
   state.leftover = usable < buf.byteLength ? buf.subarray(usable) : null;
   return frames;
@@ -244,22 +238,29 @@ function parsePmt(
   void pcrPid;
 }
 
-function parsePes(payload: Uint8Array): { headerLen: number; ptsMs?: number } | null {
+function parsePes(payload: Uint8Array): { headerLen: number; payloadLength: number; ptsMs?: number; pts90k?: bigint } | null {
   if (payload.byteLength < 9) return null;
   if (!(payload[0] === 0x00 && payload[1] === 0x00 && payload[2] === 0x01)) return null;
   const flags = payload[7];
   const headerDataLen = payload[8];
+  const packetLength = payload[4] * 256 + payload[5];
+  const payloadLength = packetLength === 0 ? -1 : packetLength - 3 - headerDataLen;
+  if (packetLength !== 0 && payloadLength < 0) return null;
+  if (payload.byteLength < 9 + headerDataLen) return null;
   let ptsMs: number | undefined;
+  let pts90k: bigint | undefined;
   if ((flags & 0x80) !== 0 && headerDataLen >= 5) {
+    // PTS has 33 bits. JS bitwise operators would truncate it to a signed 32-bit value.
     const pts =
-      ((payload[9] & 0x0e) << 29) |
-      (payload[10] << 22) |
-      ((payload[11] & 0xfe) << 14) |
-      (payload[12] << 7) |
+      (payload[9] & 0x0e) * 2 ** 29 +
+      payload[10] * 2 ** 22 +
+      (payload[11] & 0xfe) * 2 ** 14 +
+      payload[12] * 2 ** 7 +
       ((payload[13] & 0xfe) >> 1);
+    pts90k = BigInt(pts);
     ptsMs = Math.round(pts / 90);
   }
-  return { headerLen: 9 + headerDataLen, ptsMs };
+  return { headerLen: 9 + headerDataLen, payloadLength, ptsMs, pts90k };
 }
 
 
@@ -320,16 +321,25 @@ function processPrivateDataPes(
   if (payloadStart) {
     const existingPes = ts.privateDataPes.get(pid);
     if (existingPes && existingPes.data.length) {
-      flushPrivateDataPes(pid, ts, ctx);
+      if (existingPes.expectedLength === -1) flushPrivateDataPes(pid, ts, ctx);
+      else ts.privateDataPes.delete(pid); // Incomplete bounded packet: do not parse a partial KLV.
     }
     const header = parsePes(data);
     if (!header) return;
     data = data.subarray(header.headerLen);
-    ts.privateDataPes.set(pid, { pts: header.ptsMs ?? 0, data: [] });
+    ts.privateDataPes.set(pid, { pts: header.ptsMs ?? 0, pts90k: header.pts90k, data: [], expectedLength: header.payloadLength, size: 0 });
+    if (header.payloadLength === 0) {
+      ts.privateDataPes.delete(pid);
+      return;
+    }
   }
   const pesBuf = ts.privateDataPes.get(pid);
   if (pesBuf && data.byteLength) {
-    pesBuf.data.push(data);
+    const bytes = pesBuf.expectedLength > 0 ? data.subarray(0, pesBuf.expectedLength - pesBuf.size) : data;
+    pesBuf.data.push(bytes);
+    pesBuf.size += bytes.byteLength;
+    if (pesBuf.expectedLength > 0 && pesBuf.size >= pesBuf.expectedLength) flushPrivateDataPes(pid, ts, ctx);
+    else if (pesBuf.size > 4 * 1024 * 1024) ts.privateDataPes.delete(pid); // Bound malformed/unbounded input.
   }
 }
 
@@ -402,7 +412,7 @@ function flushPrivateDataPes(pid: number, ts: TsState, ctx: TsDemuxerContext): v
   console.log(`[demuxer] 📤 Extracting private data: PID=0x${pid.toString(16).toUpperCase()} (${streamTypeName}), ${payload.length} bytes @ PTS ${pes.pts}ms`);
 
   try {
-    ctx.callbacks?.onPrivateData?.(pid, payload, pes.pts || 0);
+    ctx.callbacks?.onPrivateData?.(pid, payload, pes.pts || 0, pes.pts90k);
   } catch (err) {
     console.warn('[demuxer] onPrivateData callback error:', err);
   }

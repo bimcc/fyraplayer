@@ -1,4 +1,5 @@
 import { MiddlewareEntry, MiddlewareKind, MiddlewareContext, MiddlewareResult } from '../types.js';
+import { createLoadScope, throwIfAborted, waitWithSignal } from './abort.js';
 
 const CONTROL_TIMEOUT_MS = 2000;
 
@@ -12,19 +13,24 @@ export class MiddlewareManager {
     this.chains.get(entry.kind)!.push(entry);
   }
 
-  async run(kind: MiddlewareKind, ctx: MiddlewareContext): Promise<MiddlewareContext> {
+  async run(kind: MiddlewareKind, ctx: MiddlewareContext, loadTimeoutMs = 0): Promise<MiddlewareContext> {
     const chain = this.chains.get(kind) ?? [];
     let acc: MiddlewareContext = { ...ctx };
     for (const entry of chain) {
-      const res = await this.execute(entry, kind, acc);
-      if (res) acc = { ...acc, ...res };
+      throwIfAborted(ctx.signal);
+      const res = await this.execute(entry, kind, acc, loadTimeoutMs);
+      if (res) acc = { ...acc, ...res, signal: ctx.signal };
     }
     return acc;
   }
 
-  private async execute(entry: MiddlewareEntry, kind: MiddlewareKind, ctx: MiddlewareContext): Promise<MiddlewareResult | void> {
+  private async execute(entry: MiddlewareEntry, kind: MiddlewareKind, ctx: MiddlewareContext, loadTimeoutMs: number): Promise<MiddlewareResult | void> {
     if (kind !== 'control') {
-      return entry.fn(ctx);
+      const scope = createLoadScope(ctx.signal, entry.timeoutMs ?? loadTimeoutMs);
+      try {
+        throwIfAborted(scope.signal);
+        return await waitWithSignal(Promise.resolve(entry.fn({ ...ctx, signal: scope.signal })), scope.signal);
+      } finally { scope.dispose(); }
     }
     const timeoutMs = entry.timeoutMs ?? CONTROL_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;

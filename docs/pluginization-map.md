@@ -1,193 +1,62 @@
-# FyraPlayer Pluginization Map
+# 插件职责与架构判断
 
-> Created: 2026-05-16  
-> Purpose: define what is already pluginized, what should remain core, and what should move to optional plugins later.
+当前“Player 编排 + Tech 播放实现 + 显式可选插件”的方向合理。KLV 留在独立 fyraklv，应用持有时间映射与渲染集成；不应把解析器、设备管理或多路布局塞进播放器内核。
 
-This document is the decision map for plugin boundaries. Use it when adding a feature: if the feature is not required for the minimal playback lifecycle, prefer a plugin or adapter.
+本文描述候选版本源码，改动见 [CHANGELOG](../CHANGELOG.md)。详细推进顺序见 [监控/无人机路线](monitoring-roadmap.md)。
 
----
+## 保持在核心的能力
 
-## 1. Boundary Principle
+- Player 生命周期、加载代次、切源、恢复仲裁、Tech 选择及事件一致性。
+- 中间件链：request/signal/control/resolve；插件不能自行改写核心内部状态。
+- Tech 协议与解码实现、缓存策略及通用 metadata 数据出口。
+- 已提供实际所选源/会话 epoch 和协作加载取消契约；更多 Tech 内部 discontinuity、取消适配和统一能力查询仍需补齐，见 [会话契约](playback-sessions.md)。
 
-Keep the core small:
+每个协议的 ABR、重连与低延迟控制应有明确的控制方。新插件不应再启动一个与核心/Tech 竞争的恢复或追帧循环。
 
-- source selection and loading lifecycle;
-- Tech registration and active Tech control;
-- event bus and stable event payloads;
-- middleware execution;
-- basic reconnect/fallback coordination;
-- minimal stats collection needed by the player itself.
+## 已有可选能力
 
-Move out of core:
+公开子路径以 [package.json](../package.json) 为准，下表省略包名前缀 `@bimccfyra/fyraplayer`。
 
-- UI surfaces and product-specific controls;
-- analytics/reporting destinations;
-- auth/signing/server URL conversion;
-- metadata parsing and business semantics;
-- DRM, subtitles, ads, browser-side recording, screenshots;
-- renderer integrations such as PSV/Cesium;
-- vendor-specific stream-server behavior unless exposed through a generic adapter.
+| 能力 | 入口 | 边界 |
+| --- | --- | --- |
+| UI | `/plugins/ui-components` | 显式启用；业务布局仍由应用管理 |
+| DASH | `/plugins/dash` | 注册 Tech，运行时加载 dash.js |
+| Engine/source resolver | `/plugins/engines` | 服务器 URL 转换与构造期 resolve 中间件 |
+| GB gateway | `/plugins/gb-gateway` | 可选控制面；配对 middleware/plugin，应用注入会话/释放/PTZ，媒体播放交给标准 Tech |
+| WebTransport media | `/plugins/webtransport` | 可选独立 Tech；可靠单向视频帧 + WebCodecs，可选原始 private-data/SEI 与原始时钟；首帧验证、取消和显式备用源；实验且无音频 |
+| Auth/signing/recovery | `/plugins/auth` | 注入应用 token/签名策略；恢复需与核心网络恢复协调 |
+| Preferences | `/plugins/storage` | 可选本地偏好，不承担业务数据持久化 |
+| Metrics/performance | `/plugins/metrics`、`/plugins/performance` | 采样、预算和 reporter；不是多路资源调度器 |
+| Reconnect 诊断 | `/plugins/reconnect` | 观察重连事件，实际恢复由核心实现 |
+| Diagnostics/debug panel | `/plugins/diagnostics` | 快照、事件记录、可选面板 |
+| Backend recording | `/plugins/recording-api` | start/stop/status 后端 API；不是浏览器录像或服务端裁剪实现 |
+| Screenshot | `/plugins/snapshot` | 新增 Blob 截图与无 UI handle；现有 UI 复用编码逻辑 |
+| Displayed-frame clock | `/plugins/frame-clock` | 新增显示帧时间采样及显式 PTS 锚点换算；不自动校时 |
+| Playback health | `/plugins/playback-health` | 可选首帧/卡顿/恢复观察、精度标记和 QoS；不控制重连、不推断端到端延迟 |
+| Metadata bridge | `/plugins/metadata` | private-data/SEI 通用解析回调；MetadataBridge 保留 KlvBridge 兼容别名 |
+| PanoramaLite | `/plugins/panoramalite` | 可选轻量 WebGL2 全景渲染，图片/视频/直播；设备长跑仍需验证 |
 
-Rule of thumb: if a feature can be removed without making basic playback impossible, it should be optional.
+第三方 Tech 通过 `PluginContext.techs.register()` 注册并持有 unregister handle。PSV/Cesium 桥接在应用或各自渲染器包中；GB28181 invite/PTZ 是薄网关适配，SIP/RTP/PS、设备权限及执行状态属于后端。
 
----
+## 本轮加固的插件契约
 
-## 2. Already Pluginized
+工厂仍为同步 `(ctx) => void | { destroy() }`；新增可选 `ctx.lifecycle.signal/onCleanup`。Player 始终提供 scope，类型可选是为了兼容自定义宿主。支持初始化失败时回收已注册资源、安装顺序的逆序销毁、并发清理等待与错误隔离。异步任务可在 Player.destroy 开始时响应 abort，不必等最终 Tech 清理。
 
-| Capability | Current Form | Location | Notes |
-|---|---|---|---|
-| UI controls | `createUiComponentsPlugin()` | `src/ui/shell.ts`, `src/plugins/ui-components.ts` | Explicit plugin entry with quality/source controls, interruption status layer, retry button, preference events, diagnostics entry, screenshot feedback, and recording toggle hook |
-| Storage/preferences | `createStoragePlugin()` | `src/plugins/storage.ts` | Persists last source index plus opt-in volume, mute, speed, quality, and low-latency preferences with lifecycle cleanup and bounded restore |
-| Metrics | `createMetricsPlugin()` | `src/plugins/metrics.ts` | Reporter-based plugin factory; products provide their own callbacks/reporters |
-| Performance monitor | `createPerformanceMonitorPlugin()` | `src/plugins/performance.ts` | Optional budget/sampling plugin; emits `PERFORMANCE_BUDGET` QoS warnings without changing playback |
-| Reconnect logs | `createReconnectPlugin()` | `src/plugins/reconnect.ts` | Optional diagnostics callbacks/logging with lifecycle cleanup; not reconnect policy owner |
-| Diagnostics snapshot/export/debug panel | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | `src/plugins/diagnostics.ts` | Optional support/QA surface that collects state, source, Tech, stats, network, QoS, retry and ICE clues, with a lightweight DOM panel when enabled |
-| Auth/signing/recovery | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | `src/plugins/auth.ts` | Optional request/signal middleware helper plus runtime recovery plugin for explicit 401/403 or custom expiry matchers |
-| Source resolver | `createSourceResolverMiddleware()` | `src/plugins/engines/sourceResolver.ts` | Converts `auto` sources through `EngineFactory` into primary/fallback `Source` objects |
-| Metadata parser | `createMetadataPlugin()` | `src/plugins/metadata/KlvBridge.ts` | Optional parser bridge for KLV/SEI/private-data business semantics |
-| Generic render outputs | `CanvasFrameBuffer`, `BaseTarget` | `src/render/` | Generic video/canvas bridge helpers only; PSV/Cesium/map/panorama adapters stay external |
-| Third-party Techs | `PluginContext.techs.register()` | `src/types.ts`, `src/player.ts`, `src/core/techManager.ts` | Controlled plugin API for custom Tech registration, replacement, tech-order insertion, and teardown |
-| Custom plugins | `PluginCtor` | `src/types.ts` | Supports lifecycle with optional `destroy()` |
+插件返回的 destroy 先执行，scope cleanup 后执行；同一清理函数重复登记需幂等。生命周期错误通过 PlayerOptions.onPluginError 报告。使用细节和示例见 [监控插件 API](monitoring-plugins.md)。
 
-### 2.1 Public Plugin Entry Points
+暂不增加动态 middleware 安装、插件依赖排序、manifest/版本协商或全局服务容器。存在具体消费需求后再添加窄接口；当前数组顺序和显式工厂组合足够。
 
-Use these subpaths for product integrations. Prefer the narrow subpath over the
-aggregate `@bimccfyra/fyraplayer/plugins` import when bundle size matters.
+## 后续插件与应用层能力
 
-| Entry | Main Factory / Type | Runtime Ownership | Notes |
-|---|---|---|---|
-| `@bimccfyra/fyraplayer/plugins/ui-components` | `createUiComponentsPlugin()` | Product-owned UI shell | Optional controls, status overlay, retry, screenshot callback, diagnostics entry, and recording toggle hook |
-| `@bimccfyra/fyraplayer/plugins/diagnostics` | `createDiagnosticsPlugin()`, `createDebugPanelPlugin()` | Support/QA tooling | Collects state/source/Tech/recent events and can export diagnostic JSON |
-| `@bimccfyra/fyraplayer/plugins/storage` | `createStoragePlugin()` | Browser preference persistence | Stores only local playback preferences; not account/cloud sync |
-| `@bimccfyra/fyraplayer/plugins/auth` | `createAuthSigningMiddleware()`, `createAuthRecoveryPlugin()` | App/backend auth policy | Injects headers/credentials/tokens/signatures and optionally reloads current source on explicit auth expiry |
-| `@bimccfyra/fyraplayer/plugins/recording-api` | `createRecordingApiPlugin()` | Backend recording service | API control only; browser-side local recording stays out of scope |
-| `@bimccfyra/fyraplayer/plugins/performance` | `createPerformanceMonitorPlugin()` | QA/performance budget | Emits warnings; does not change playback behavior |
-| `@bimccfyra/fyraplayer/plugins/metrics` | `createMetricsPlugin()` | Product reporter/exporter | Products decide endpoint, batching, privacy, and sampling policy |
-| `@bimccfyra/fyraplayer/plugins/reconnect` | `createReconnectPlugin()` | Product observability | Logs/callbacks only; core player owns reconnect/fallback policy |
-| `@bimccfyra/fyraplayer/plugins/metadata` | `createMetadataPlugin()`, `KlvBridge` | Domain parser | KLV/SEI/private data semantics remain product-specific |
-| `@bimccfyra/fyraplayer/plugins/engines` | `createSourceResolverMiddleware()` | Stream-server adapter | Converts vendor/project URLs into concrete `Source` fallback chains |
-| `@bimccfyra/fyraplayer/plugins/panoramalite` | `createPanoramaLitePlugin()` | First-party renderer plugin | WebGL2 equirectangular image/video/live panorama renderer without Three.js/PSV dependency |
+| 候选能力 | 决定 |
+| --- | --- |
+| 启动/卡顿/冻结观测 | playback-health 已实现基础；继续做真实弱网、后台和设备矩阵验证 |
+| Live edge/DVR | 等 Tech 能力和实际源契约后实现，尊重协议已有 latency controller |
+| KLV 同步适配 | 保持应用层示例；依赖 fyraklv、真实媒体锚点与一致的回绕/重启处理 |
+| 多路预算/焦点/批量恢复 | [应用层示例](multiview.md) 已提供实例/启动名额与可见性策略；不是每个 Player 各自控制其他实例的插件；设备容量、码流/带宽预算待验证 |
+| ROI/标注/告警、PTZ UI | 按业务需要提供适配器；服务端设备执行与权限外置 |
+| 精确帧步进/时间片导出 | 先具备解码、关键帧索引或后端能力，避免仅封装按钮就声称支持 |
+| 字幕/DRM/广告/WebXR | 暂缓，保留可选扩展方向 |
 
-Installation policy:
-
-- Plugins are installed through the `FyraPlayer` constructor `plugins` array.
-- A product may expose safe runtime controls for an installed plugin, such as
-  PanoramaLite ordinary/panorama mode switching through `handle.setEnabled()`.
-- The bundled `examples/basic.html` follows this pattern: PanoramaLite is
-  installed with the player instance, ordinary sources keep it in standby, and
-  `[全景]` sources or the mode switch enable it while replacing the visible UI
-  surface with PanoramaLite viewer controls. Source platforms should mark these
-  sources with `presentation.mode = 'panorama'` or `tags: ['panorama']`; use
-  `isPanoramaSource()` / `getSourcePresentation()` as the app/plugin decision
-  helper.
-- Arbitrary end-user plugin installation is not part of the public 1.0 API.
-- If a plugin is not installed on a player instance, recreate the player with
-  the required plugin instead of mutating internal plugin manager state.
-- Keep plugin state scoped and lifecycle-safe: detach DOM listeners, bus
-  listeners, timers, network requests, and renderer resources in `destroy()`.
-
----
-
-## 3. Modular But Not Yet Standard Plugins
-
-| Capability | Current Form | Recommended Direction |
-|---|---|---|
-| KLV/metadata bridge | `KlvBridge` class plus `createMetadataPlugin()` | Keep parsing optional; parser semantics stay outside core |
-| Stream server engines | `EngineFactory`, engine classes, `createSourceResolverMiddleware()` | Keep URL conversion optional; middleware is the standard player integration pattern |
-| Middleware | `request/signal/control/resolve` entries | Keep as core extension point; provide common plugin factories |
-| Tech registration | Built-ins plus `PluginContext.techs.register()` | Keep third-party Techs plugin-owned; use module augmentation for custom `TechName`/`Source` types |
-| Render targets | `render/` abstractions plus external PSV/Cesium docs and `docs/render-bridges.md` | Keep external renderers as plugins/adapters |
-| GB28181 gateway control / PTZ | Built-in adapter Tech | Keep as thin invite/control adapter. `player.control('gb:ptz')` submits UI/business intent plus session context to the gateway; full SIP/RTP/PS, GB PTZ XML/SIP MESSAGE, ONVIF/vendor SDK mapping, permissions, and device execution state belong in backend or external gateway packages |
-
----
-
-## 4. Candidate Plugins
-
-| Plugin | Priority | Status | Why Plugin |
-|---|---|---:|---|
-| Analytics/Reporter | P1 | partial | Metrics and performance reporter hooks exist; deployment-specific exporters are still external |
-| Error UX / Error Codes | P1 | partial | Core emits structured errors and diagnostics can export them; products still decide final display/reporting |
-| Source Resolver | P1 | done | Engine URL conversion and fallback chains are vendor/project-specific |
-| Auth / Signing | P1 | done | Middleware helper exists for headers, credentials, token injection, URL signing, and refreshed headers; recovery plugin can refresh app-owned auth state and reload current source on explicit 401/403 or custom matcher |
-| Playback Preferences | P2 | done | Volume, mute, speed, source, quality, and low-latency preference persistence are optional storage plugin features |
-| Metadata Parser | P2 | done | KLV, SEI, ID3, and private data semantics differ by domain; `createMetadataPlugin()` keeps parsing optional |
-| Debug Panel | P1 | partial | Lightweight diagnostics panel exists; richer branded support-console UX remains product UI work |
-| Performance Monitor | P2 | done | Sampling/budget rules are optional and product-tunable |
-| Screenshot / Recording | P2 | done for current scope | UI screenshot download/feedback and recording toggle hook exist; backend recording API plugin supports start/stop/status, structured recording events, and normalized backend errors. Browser-side recording, permissions, storage, retention, and privacy policy stay out of scope/product-owned |
-| Render Target Bridge | P2 | done for player package boundary | `docs/render-bridges.md` documents external bridge ownership and supported video/canvas/event/metadata outputs; concrete PSV/Cesium/map adapters remain external |
-| PanoramaLite | P2 | done for product-demo scope; hardening continues | First-party lightweight WebGL2 equirectangular panorama renderer plugin for panoramic video, panoramic images, and live panorama playback. API, renderer, texture binding, runtime ordinary/panorama mode toggle, source presentation metadata trigger, panorama drag/zoom, optional in-view playback/fullscreen controls, unified main demo mode switching, source-type orientation defaults, non-degrading render scheduling, unit coverage, demo, and Edge smoke evidence exist. Upload/canvas caps remain optional fallback knobs. Keep it dependency-free; see `docs/panoramalite.md` |
-| Panorama gyro / WebXR mode | P3 | deferred | Default PanoramaLite should remain screen-oriented yaw/pitch/fov playback. DeviceOrientation gyro and headset/WebXR stereo presentation require permissions, calibration, session lifecycle, and device-specific input handling, so they should be explicit opt-in modes or separate plugins. |
-| DRM | P3 | deferred | Requires EME/license/vendor config; not current focus |
-| Subtitles/Text Tracks | P3 | deferred | Important later, but should not block playback stabilization |
-| Ads / SSAI / CSAI | P3 | deferred | Product/business feature; separate lifecycle and compliance concerns |
-
----
-
-## 5. Suggested Plugin API Improvements
-
-Current `PluginContext` is useful but narrow. Before adding many plugins, consider:
-
-```ts
-interface PluginContext {
-  player: PlayerAPI;
-  coreBus: EventBusLike;
-  techs: TechRegistry;
-  storage?: KeyValueStore | null;
-  ui?: UISurface;
-}
-```
-
-Implemented additions:
-
-- controlled `TechRegistry.register()` surface with unregister handles;
-- diagnostics/debug panel plugin entrypoints;
-- auth/signing middleware helper for construction-time middleware composition;
-- auth recovery plugin for explicit 401/403 or product-provided expiry matchers;
-- `preference` event for pluginized playback preference persistence;
-- UI action hooks for diagnostics, screenshot, and recording toggle;
-- backend recording API plugin handle/events and normalized backend error codes;
-
-Still recommended:
-
-- `registerMiddleware(entry)` for plugin-provided middleware;
-- `registerSourceResolver(name, resolver)` for engine/source adapters;
-- `logger` or `diagnostics` interface instead of direct `console.*`;
-- plugin metadata: `name`, `version`, `capabilities`;
-- deterministic plugin teardown order.
-
-Do not expose mutable internal player state directly. Add narrow APIs only when a plugin use case needs them.
-
----
-
-## 6. Near-Term Actions
-
-| ID | Priority | Task | Acceptance |
-|---|---|---|---|
-| PL-001 | P1 | done: keep UI as explicit plugin | README/API/code agree |
-| PL-002 | P1 | done: convert engine URL resolution into a documented resolver middleware pattern | `auto` source examples can use `createSourceResolverMiddleware()` without app-specific glue |
-| PL-003 | P1 | done: turn metrics into reporter plugin factory | Consumers can provide endpoint/callback without editing plugin code |
-| PL-004 | P2 | done: wrap `KlvBridge` into `createMetadataPlugin()` | Metadata parsing can be enabled with one plugin |
-| PL-005 | P2 | done: add controlled third-party Tech registration API | External Techs do not need to patch `FyraPlayer` constructor |
-| PL-006 | P3 | Keep DRM and subtitles as plugin placeholders | No core implementation until playback baseline is stable |
-| PL-007 | P2 | done: add optional performance budget monitor | Consumers can track FPS/latency/backpressure budgets without core playback coupling |
-| PL-008 | P1 | done: add lifecycle-safe storage/reconnect plugin factories | Built-in utility plugins detach listeners on destroy |
-| PL-009 | P1 | done: add optional diagnostics snapshot/export/debug panel plugin | Support/QA can inspect current state and export recent evidence without parsing console output |
-| PL-010 | P1 | done: add auth/signing and recovery helpers | Commercial token/header/signature policies can be composed without core changes; optional recovery can refresh app-owned auth state and reload the current source without adding auth policy to core |
-| PL-011 | P2 | done: expand playback preference persistence | Volume/mute/speed/low-latency/quality preferences stay optional and scoped |
-| PL-012 | P2 | done for current capture scope; render bridges remain external | UI screenshot and recording-toggle hooks exist; backend recording API plugin support exists with structured errors; browser recording stays out of scope; PSV/Cesium/map/panorama integrations stay out of core |
-| PL-013 | P2 | done: document render bridge boundary | `docs/render-bridges.md` defines the bridge contract without adding renderer dependencies to core |
-| PL-014 | P2 | done for product-demo scope; hardening continues | Lightweight WebGL2 panorama plugin supports equirectangular image/video/live sources without Three.js/PSV/WebGPU dependencies. Current hardening items are long-run WebGL resource sampling, controlled source-switch/context-restore browser evidence, and deployment-specific orientation validation |
-
----
-
-## 7. Decision Checklist
-
-Before adding a new feature to core, answer:
-
-- Is playback impossible without this feature?
-- Does every protocol Tech need it?
-- Does it need business-specific configuration?
-- Can it be implemented by listening to events or middleware?
-- Can it be removed from a bundle without breaking basic playback?
-
-If the answer favors optional behavior, make it a plugin.
+主入口和 `/core` 仍广泛导出，不能宣传为最小内核。snapshot/frame-clock/playback-health/metadata 独立入口由 `pnpm check:plugins` 检查，不得引入 UI、Tech、Player 或第三方运行时依赖。测试用 stub 不能替代真实包消费和浏览器验证。
+新增 gb-gateway 同样保持轻量；webtransport 的依赖检查允许 AbstractTech，但不允许内建媒体 Tech、Player、UI 或第三方运行时包。两者使用公开扩展契约，不修改核心 Tech 选择逻辑。网关 release 回调期限属于应用责任，WebTransport 只负责视频及通用原始元数据分帧，不等同于完整低延迟监控方案。

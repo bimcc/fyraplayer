@@ -103,7 +103,7 @@ function getSourceIndex(sources: Source[], source: Source | undefined): number {
 }
 
 export function createDiagnosticsPlugin(options: DiagnosticsPluginOptions = {}): PluginCtor {
-  return ({ coreBus, player, techs }) => {
+  return ({ coreBus, player, techs, lifecycle }) => {
     const maxEvents = Math.max(1, options.maxEvents ?? 200);
     const recent: DiagnosticsEventRecord[] = [];
     let latestStats: EngineStats | undefined;
@@ -382,6 +382,7 @@ export function createDiagnosticsPlugin(options: DiagnosticsPluginOptions = {}):
       recent.length = 0;
     };
 
+    lifecycle?.onCleanup(cleanup);
     coreBus.on('ready', readyHandler);
     coreBus.on('play', playHandler);
     coreBus.on('pause', pauseHandler);

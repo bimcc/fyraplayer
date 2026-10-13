@@ -141,6 +141,47 @@ describe('createRecordingApiPlugin', () => {
     lifecycle?.destroy?.();
   });
 
+  test('cleans request timers when asynchronous headers fail', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetchMock = jest.fn();
+      Object.defineProperty(globalThis, 'fetch', { value: fetchMock, configurable: true });
+      let handle!: RecordingApiHandle;
+      createRecordingApiPlugin({
+        startUrl: '/recording', headers: async () => { throw new Error('token unavailable'); },
+        onHandle: value => { handle = value; },
+      })(createContext(new BusStub()));
+      await expect(handle.start()).rejects.toMatchObject({ info: { code: 'RECORDING_REQUEST_ERROR' } });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(0);
+      handle.destroy();
+    } finally { jest.useRealTimers(); }
+  });
+
+  test('scope abort during request preparation prevents network and late events', async () => {
+    const bus = new BusStub();
+    const fetchMock = jest.fn();
+    Object.defineProperty(globalThis, 'fetch', { value: fetchMock, configurable: true });
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let release!: (value: Record<string, string>) => void;
+    const headers = new Promise<Record<string, string>>(resolve => { release = resolve; });
+    const controller = new AbortController();
+    let handle!: RecordingApiHandle;
+    createRecordingApiPlugin({
+      startUrl: '/recording', headers: () => { entered(); return headers; },
+      onHandle: value => { handle = value; },
+    })({ ...createContext(bus), lifecycle: { signal: controller.signal, onCleanup() {} } });
+    const request = handle.start();
+    await started;
+    controller.abort();
+    release({});
+    await expect(request).rejects.toMatchObject({ info: { code: 'RECORDING_ABORTED' } });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(handle.isRecording()).toBe(false);
+    expect(bus.events).toHaveLength(1); // Only the pre-destroy starting event.
+  });
+
   test('queries backend status without creating a browser recorder', async () => {
     const bus = new BusStub();
     const fetchMock = jest.fn().mockResolvedValue(jsonResponse({ recordingId: 'rec-2', active: true }));

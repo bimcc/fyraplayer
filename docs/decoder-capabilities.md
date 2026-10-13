@@ -1,99 +1,33 @@
-# 解码能力总览
+# 解码能力与支持口径
 
-本文档总结当前 FyraPlayer 的解码能力，包含技术架构、已实现的能力、覆盖的编码/协议，以及后续可能规划。
+2026-10-13。H.265 并非只有 MSE 路径：普通 MP4 使用原生 video，HLS/DASH/fMP4 主要使用浏览器托管的 MSE/native 路径，WebCodecs 实验路径直接调用 VideoDecoder。浏览器、操作系统、容器和实际码流共同决定能否播放；探测通过不等于已解码真实媒体，更不保证使用硬件解码。
 
-## 1) 技术架构概览
+| 路径 | 配置探测 | 当前接入和限制 |
+| --- | --- | --- |
+| native video | video.canPlayType(MIME) | 普通 MP4/WebM；HLS 在对应浏览器使用原生回退。返回的是格式能力报告 |
+| MSE | MediaSource.isTypeSupported(MIME) | HLS/hls.js、DASH/dash.js、direct fMP4、TS/FLV/mpegts.js；必须匹配封装与精确 codec string |
+| WebCodecs | VideoDecoder.isConfigSupported(config) | WS/File 等既有实验管线，以及新的可选 WebTransport 视频 Tech；接收的是解复用后的编码访问单元 |
+| H.264 WASM | 应用部署的 decoder asset | 旧实验管线中的 worker/decoder 适配；默认路径 /decoders/h264bsd/decoder.js 只是约定，npm 包不附带可用软解资产 |
+| H.265 WASM | 未提供 | 当前没有内置 HEVC 软解兜底；需要服务端转码或显式提供兼容备用源 |
 
-FyraPlayer 采用「多技术栈（Tech）+ 统一事件与降级策略」的架构：
+## H.265 选择
 
-- Source 由 TechManager 选择适配 Tech（webrtc / hls / dash / fmp4 / ws-raw / file / gb28181）。
-- 每个 Tech 独立负责拉流、容器解析、解码与渲染。
-- 浏览器托管播放（native video / MSE / hls.js / dash.js）作为 HLS、DASH、fMP4、普通 MP4 的主路径，实际解码由浏览器、系统编解码器与硬件能力决定。
-- WebCodecs 作为 ws-raw/file 等实验路径的硬解优先路径；WASM 作为 H.264 兜底解码器。
-- H.265/HEVC 不承诺内置 WASM 软解。当前目标是把浏览器托管 H.265 路径的能力探测、codec string 选择和失败诊断做扎实。
+- MP4：默认 File/native；实际 H.265 支持以目标设备播放证据为准。
+- HLS/DASH：由 hls.js/dash.js、MSE 或原生 HLS 与系统解码器共同处理。转封装不能解决浏览器不支持 HEVC 编码的问题，必要时服务端转码 H.264。
+- direct fMP4：按 mimeType/videoCodecString/codec 提示构造 hvc1/hev1 候选，用 MSE 探测；正确的 init segment、hvcC 和媒体数据仍是必要条件。
+- 新 [WebTransport 插件](webtransport.md)：独立 Tech，收到服务端精确配置后探测，HEVC 须 allowH265=true；只支持已分帧的视频，没有 TS/FLV 解复用、音频或 WASM 回退。
+- 旧 ws-raw/File WebCodecs 管线：继续实验性质，不把编码字符串解析或 mock 测试等同于端到端播放承诺。
 
-核心解码管线（以 ws-raw 为例）：
+## 公共探测与示例显示
 
-```
-WebSocket/WebTransport
-  -> Demux(FLV/TS/AnnexB)
-  -> JitterBuffer
-  -> Decoder(WebCodecs 优先 / WASM 兜底)
-  -> Renderer(WebGL/Canvas)
-```
+`FyraPlayer.probeBrowserManagedCodecs()` 分别返回 native 与 MSE 的 H.264/H.265 代表配置结果；`FyraPlayer.probeWebCodecs()` 返回 WebCodecs 代表配置结果，包括 AV1/VP9 等。它们没有探测用户全部输入 profile、位深或分辨率；AV1/VP9 报告支持不意味着新 WebTransport 协议接受这些编码。
 
-## 2) 已实现能力
+示例页分别显示 native、MSE、WebCodecs 配置探测，并单独显示实际所选 Tech/可报告的 codec。实际播放证据应包含首帧、持续帧推进、错误事件和资源清理。isConfigSupported 无法证明硬件型号或实际硬件解码使用情况。
 
-### 2.1 WebCodecs 解码
+## 传输和回退边界
 
-- H.264：支持 Baseline/Main/High 等常见 profile，codec string 由 SPS 动态解析生成。
-- H.265：支持 H.265（hvc1/hev1），codec string 由 VPS/SPS 动态生成；需要浏览器硬解能力支持。
-- AV1 / VP9：可探测支持能力，用于判定是否可走 WebCodecs。
-- 音频：AAC/Opus 通过 AudioDecoder。
+WebRTC 依赖协商出的浏览器编码能力；GB28181 是服务端控制/转换边界，见 [网关接入](gb28181.md)。新 WebTransport 使用 HTTP/3 可靠单向流和显式分帧；旧 ws-raw.webTransport 是 datagram 实验路径，两者不兼容。
 
-### 2.2 浏览器托管 H.265 播放
+既有实验管线的 MSE/WASM 回退各有资源、地址及容器前提，不能宣传统一的“任何协议自动降级”。新 WebTransport 只遍历显式备用 Source；同一个 WebTransport endpoint 不会直接交给 MSE。当前不包含客户端转码或全浏览器 HEVC 兼容。
 
-- HLS：默认通过 hls.js + MSE；Safari/iOS 等不支持 hls.js MSE 时回退原生 HLS。播放器负责拉流、缓冲和事件归一化，真正 H.265 解码由浏览器/系统负责。
-- fMP4：通过 MSE 追加 fMP4 segment。播放器会按 `mimeType`、`videoCodecString` 或 `codec: 'h265'` 构造 hvc1/hev1 候选，并用 `MediaSource.isTypeSupported()` 选择可用 MIME。
-- MP4 文件：默认通过 `video.src` 原生播放；可选 WebCodecs MP4 路径仍以浏览器能力探测为准。
-- 公共能力探测：`FyraPlayer.probeBrowserManagedCodecs()` 返回 native video 与 MSE 的 H.264/H.265 支持情况；`FyraPlayer.probeWebCodecs()` 仍只表示 WebCodecs 能力。
-
-### 2.3 WASM 软解兜底
-
-- H.264：默认 h264bsd 解码器（可替换/扩展）。
-- H.265：当前不推进内置 WASM 软解，只保留为未来可能的可选增强方向。
-- 适用场景：WebCodecs 不支持或浏览器能力不足时的兜底路径（当前主要用于 H.264）。
-
-### 2.4 MSE 回退
-
-- HLS（hls.js）/ DASH（dash.js）/ fMP4（MSE）等基于 MSE 的播放路径已实现。
-- ws-raw / file / hls 在 WebCodecs 失败时可回退到 MSE（或 WASM）。
-
-## 3) 覆盖编码与容器
-
-### 3.1 视频编码
-
-- H.264（WebCodecs + WASM）
-- H.265（浏览器托管 MSE/native + WebCodecs；不含内置 WASM 软解）
-- AV1（WebCodecs 探测）
-- VP9（WebCodecs 探测）
-
-### 3.2 音频编码
-
-- AAC（WebCodecs）
-- Opus（WebCodecs）
-
-### 3.3 容器/比特流
-
-- TS、FLV、AnnexB（ws-raw 解复用）
-- fMP4（MSE）
-- MP4（原生 video.src）
-
-## 4) 覆盖协议/传输
-
-- WebRTC
-- HLS / DASH
-- HTTP/HTTPS（文件与 fMP4）
-- WebSocket / WebTransport（ws-raw）
-
-## 5) 关键策略与现状说明
-
-- codec string 动态生成：从 SPS/VPS 中解析 profile/level/compatibility，优先匹配实际码流。
-- 能力探测：`MediaSource.isTypeSupported()` / `HTMLVideoElement.canPlayType()` 用于浏览器托管路径，`VideoDecoder.isConfigSupported()` 用于 WebCodecs 路径。
-- 自动降级：WebCodecs 失败时优先切 MSE，必要时仅对 H.264 启用 WASM 兜底。
-- H.265 策略：浏览器托管路径优先，要求正确的 `hvc1`/`hev1` codec string、容器形态和系统解码能力；不把 H.265 WASM 作为当前交付目标。
-- 低延迟场景：ws-raw + WebCodecs 优先，必要时走 WASM。
-
-## 6) 未来可能规划
-
-- H.265 WASM 软解仅作为未来可能推进步骤：需要独立 decoder asset、Worker/SIMD/SharedArrayBuffer 能力、COOP/COEP 部署要求、性能边界和低分辨率兜底策略，不进入当前主线。
-- WASM 解码器性能优化（多线程/SharedArrayBuffer / COOP/COEP 配置支持）当前仅面向已有 H.264 兜底路径。
-- 更完整的 codec string 覆盖（H.264 High10/High422/High444）。
-- 统一「解码决策引擎」：容器识别 -> SPS/VPS -> WebCodecs capability -> fallback。
-
----
-
-如需更详细的实现细节，可参考：
-
-- `docs/api.md`（API 与 Tech 说明）
-- `docs/gb28181.md`（GB28181 网关适配边界）
+结果以 [支持场景](supported-scenarios.md) 和 [带日期验证矩阵](playback-verification-matrix.md) 为准。弱网、长跑、多路容量和移动真机仍需各自验证。

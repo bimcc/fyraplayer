@@ -3,6 +3,9 @@
  * Extracted from ui-components.ts for better maintainability
  */
 
+import { captureSnapshot } from '../plugins/snapshot.js';
+import { getFullscreenElement, toggleContainerFullscreen } from '../utils/fullscreen.js';
+
 export function formatTime(sec: number): string {
   if (!isFinite(sec) || sec < 0) return '--:--';
   const s = Math.floor(sec % 60).toString().padStart(2, '0');
@@ -29,50 +32,26 @@ export interface CaptureFrameResult {
   ts: number;
 }
 
-export function captureFrame(video: HTMLVideoElement | null): Promise<CaptureFrameResult | null> {
-  if (!video) return Promise.resolve(null);
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 1280;
-  canvas.height = video.videoHeight || 720;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return Promise.resolve(null);
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        resolve(null);
-        return;
-      }
-      const ts = Date.now();
-      const filename = `snapshot-${ts}.png`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      resolve({
-        blob,
-        width: canvas.width,
-        height: canvas.height,
-        filename,
-        ts,
-      });
-    });
-  });
+export async function captureFrame(video: HTMLVideoElement | null): Promise<CaptureFrameResult | null> {
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return null;
+  const result = await captureSnapshot(video);
+  const url = URL.createObjectURL(result.blob);
+  try {
+    const link = video.ownerDocument.createElement('a');
+    link.href = url;
+    link.download = result.filename;
+    link.click();
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  return result;
 }
 
 export async function toggleFullscreen(target: HTMLElement | null): Promise<void> {
-  const el = target || document.body;
-  if (!document.fullscreenElement) {
-    await el.requestFullscreen?.();
-  } else {
-    await document.exitFullscreen?.();
-  }
+  await toggleContainerFullscreen(target || document.body);
 }
 
-export function isFullscreen(): boolean {
-  return !!document.fullscreenElement;
+export function isFullscreen(target?: HTMLElement | null): boolean {
+  const current = getFullscreenElement();
+  return target ? current === target : !!current;
 }
 
 type DocumentWithPip = Document & {
@@ -106,6 +85,8 @@ export function toggleMute(video: HTMLVideoElement | null): boolean {
  * Keyboard shortcut handler configuration
  */
 export interface KeyboardConfig {
+  /** Bind shortcuts to one player container. Omit only for legacy global consumers. */
+  target?: HTMLElement;
   onTogglePlay?: () => void;
   onFullscreen?: () => void;
   onPip?: () => void;
@@ -126,7 +107,10 @@ export function createKeyboardHandler(config: KeyboardConfig): {
   detach: () => void;
 } {
   const handler = (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+    if (e.defaultPrevented || e.isComposing || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+    const path = e.composedPath();
+    if (path.some(node => node instanceof HTMLElement && (node.isContentEditable ||
+      ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(node.tagName)))) return;
     
     switch (e.code) {
       case 'Space':
@@ -167,8 +151,8 @@ export function createKeyboardHandler(config: KeyboardConfig): {
 
   return {
     handler,
-    attach: () => window.addEventListener('keydown', handler),
-    detach: () => window.removeEventListener('keydown', handler),
+    attach: () => (config.target ?? window).addEventListener('keydown', handler as EventListener),
+    detach: () => (config.target ?? window).removeEventListener('keydown', handler as EventListener),
   };
 }
 

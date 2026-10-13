@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>FyraPlayer 多路监看</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef2f6; color: #172338; font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 1440px; margin: auto; padding: 24px; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+    h1 { font-size: 24px; margin: 0; } a { color: #2456a6; }
+    .intro { color: #536278; max-width: 900px; }
+    .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 20px 0; }
+    button, input, select { font: inherit; min-height: 44px; border: 1px solid #c3cddb; border-radius: 7px; background: white; color: inherit; padding: 8px 12px; }
+    button { cursor: pointer; } button:hover { background: #e8f0fc; } button:disabled { opacity: .5; cursor: default; }
+    .primary { background: #2459b7; color: white; border-color: #2459b7; } .primary:hover { background: #174792; }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #65a7fa; outline-offset: 2px; }
+    #summary { color: #536278; } #grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+    .tile { min-width: 0; border: 2px solid transparent; border-radius: 12px; padding: 14px; background: white; box-shadow: 0 2px 10px #1522380c; }
+    .tile[data-focused="true"] { border-color: #2866c4; }
+    .tile-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+    .tile h2 { margin: 0; font-size: 16px; } .state { color: #536278; font-size: 13px; }
+    .player-shell { position: relative; background: #080d15; border-radius: 6px; overflow: hidden; aspect-ratio: 16/9; }
+    .player-shell:focus-visible { outline: 3px solid #65a7fa; outline-offset: 2px; }
+    video { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .source-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .source-form input { width: 100%; min-width: 0; font-size: 16px; }
+    .source-form select { flex: 1; min-width: 0; }
+    .observation { font-size: 13px; color: #536278; margin: 9px 0 0; min-height: 20px; overflow-wrap: anywhere; }
+    .error { color: #9c3417; } footer { color: #536278; font-size: 13px; margin-top: 22px; }
+    @media(max-width:700px) { main { padding: 14px; } #grid { grid-template-columns: 1fr; } h1 { font-size: 22px; } }
+  </style>
+</head>
+<body><main>
+  <header><h1>多路监看</h1><a href="./basic.html">返回单路播放器</a></header>
+  <p class="intro">为每个窗口选择视频源。选中窗口优先占用播放名额；窗口离屏或页面进入后台时关闭连接，返回后按启动上限恢复。所有窗口默认静音。</p>
+  <div class="toolbar">
+    <button id="start-all" class="primary" type="button">启动全部</button>
+    <button id="stop-all" type="button">停止全部</button>
+    <label>同时播放 <select id="active-budget"><option>1</option><option>2</option><option selected>4</option></select></label>
+    <label>同时启动 <select id="starting-budget"><option>1</option><option selected>2</option><option>4</option></select></label>
+    <span id="summary" role="status">尚未启动</span>
+  </div>
+  <div id="grid"></div>
+  <footer>这是应用层调度示例。回到窗口会重新开流，文件从头播放；错误由“重试”恢复。四路功能验证不代表设备的解码容量、跨路同步或公网低延迟保证。KLV 按每路独立接入，不随多路布局自动启用。</footer>
+</main><script type="module" src="./multiview.ts"></script></body>
+</html>

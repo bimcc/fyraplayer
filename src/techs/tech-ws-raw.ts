@@ -1,5 +1,6 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, MetadataEvent, MetadataDetectedEvent, MetricsOptions, MpegtsLoader, ReconnectPolicy, Source, WSRawSource } from '../types.js';
+import { MetadataEvent, MetadataDetectedEvent, Source, WSRawSource, TechLoadOptions } from '../types.js';
+import { throwIfAborted, waitWithSignal } from '../core/abort.js';
 import { WsRawPipeline } from './wsRaw/pipeline.js';
 import { MseFallback } from './wsRaw/mseFallback.js';
 import { DEFAULT_H264_DECODER_URL, DEFAULT_H264_DECODER_CANDIDATES } from './wsRaw/defaultDecoders.js';
@@ -16,6 +17,7 @@ export class WSRawTech extends AbstractTech {
   private fallbackStarted = false;
   private pipelineActive = false;
   private frameHook?: (frame: VideoFrame) => void;
+  private generation = 0;
 
   canPlay(source: Source): boolean {
     return source.type === 'ws-raw';
@@ -23,15 +25,9 @@ export class WSRawTech extends AbstractTech {
 
   async load(
     source: Source,
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: import('../types.js').WebCodecsConfig;
-      mpegtsLoader?: MpegtsLoader;
-    }
+    opts: TechLoadOptions
   ): Promise<void> {
+    throwIfAborted(opts.signal);
     const wsSource = { ...(source as WSRawSource) };
     // set default decoderUrl when codec hint is missing
     if (!wsSource.decoderUrl) {
@@ -46,71 +42,102 @@ export class WSRawTech extends AbstractTech {
     this.metrics = opts.metrics;
     this.video = opts.video;
     this.cleanup();
+    const generation = this.generation;
+    const isCurrent = () => generation === this.generation && !opts.signal?.aborted;
     this.useExperimental = wsSource.pipeline === 'experimental';
     this.fallbackStarted = false;
     this.pipelineActive = false;
 
-    const startFallback = async (reason?: string) => {
-      if (this.fallbackStarted) return;
+    let fallbackPromise: Promise<void> | undefined;
+    const startFallback = (reason?: string): Promise<void> => {
+      if (!isCurrent()) return Promise.resolve();
+      if (fallbackPromise) return fallbackPromise;
       this.fallbackStarted = true;
-      this.pipeline?.stop();
-      this.fallback = new MseFallback();
-      await this.fallback.start(wsSource.url, opts.video, {
-        onReady: () => this.bus.emit('ready'),
-        onError: (e) => {
-          this.bus.emit('error', e);
-          this.bus.emit('network', { type: 'ws-fallback-error', fatal: true });
-        }
-      }, wsSource.transport === 'ts' ? 'mpegts' : 'flv', opts.mpegtsLoader);
-      if (reason) this.bus.emit('network', { type: 'fallback', reason });
+      this.pipelineActive = false;
+      fallbackPromise = Promise.resolve().then(async () => {
+        if (!isCurrent()) return;
+        this.pipeline?.stop();
+        this.bus.emit('streamchange', { reason: 'fallback', source: { ...wsSource, pipeline: 'mse' } });
+        if (!isCurrent()) return;
+        this.fallback = new MseFallback();
+        await waitWithSignal(this.fallback.start(wsSource.url, opts.video, {
+          onReady: () => { if (isCurrent()) this.bus.emit('ready'); },
+          onError: (e) => {
+            if (!isCurrent()) return;
+            this.bus.emit('error', e);
+            this.bus.emit('network', { type: 'ws-fallback-error', fatal: true });
+          }
+        }, wsSource.transport === 'ts' ? 'mpegts' : 'flv', opts.mpegtsLoader), opts.signal);
+        if (isCurrent() && reason) this.bus.emit('network', { type: 'fallback', reason });
+      });
+      return fallbackPromise;
+    };
+    const fallbackInBackground = (reason?: string) => {
+      void startFallback(reason).catch(error => {
+        if (!isCurrent()) return;
+        this.bus.emit('error', error);
+        if (isCurrent()) this.bus.emit('network', { type: 'ws-fallback-error', fatal: true });
+      });
     };
 
     // Check if metadata extraction is enabled and valid
     const metadataConfig = this.getMetadataConfig(wsSource);
 
-    if (this.useExperimental) {
-      try {
-        this.pipeline = new WsRawPipeline(wsSource, opts.video, opts.buffer, {
-          onReady: () => this.bus.emit('ready'),
-          onError: (e) => {
-            this.bus.emit('error', e);
-            void startFallback();
-          },
-          onNetwork: (evt) => {
-            // 自动回退：视频解码连续错误
-            const decodeErrors = typeof evt?.errors === 'number' ? evt.errors : 0;
-            if (evt?.type === 'video-decode-error' && decodeErrors >= 3) {
-              void startFallback('video-decode-error');
-              return;
-            }
-            // 音频解码失败且音频为必需时切换到 MSE
-            if (evt?.type === 'audio-fallback' && wsSource.audioOptional === false) {
-              void startFallback('audio-fallback');
-              return;
-            }
-            this.bus.emit('network', evt);
-          },
-          onFallback: (reason) => void startFallback(reason),
-          // Metadata event handler - emit to EventBus
-          onMetadata: metadataConfig.enabled
-            ? (event: MetadataEvent) => this.bus.emit('metadata', event)
-            : undefined,
-          // Metadata detection handler - emit to EventBus
-          onMetadataDetected: metadataConfig.detectOnly
-            ? (event: MetadataDetectedEvent) => this.bus.emit('metadata', event)
-            : undefined
-        }, { webCodecsConfig: opts.webCodecs, frameHook: this.frameHook });
-        await this.pipeline.start();
-        this.pipelineActive = true;
-        return;
-      } catch (err) {
-        console.warn('[ws-raw] experimental pipeline failed, falling back to MSE', err);
-        this.pipeline?.stop();
-        this.pipeline = null;
+    try {
+      if (this.useExperimental) {
+        try {
+          this.pipeline = new WsRawPipeline(wsSource, opts.video, opts.buffer, {
+            onReady: () => { if (isCurrent() && !this.fallbackStarted) this.bus.emit('ready'); },
+            onError: (e) => {
+              if (!isCurrent() || this.fallbackStarted) return;
+              this.bus.emit('error', e);
+              fallbackInBackground();
+            },
+            onNetwork: (evt) => {
+              if (!isCurrent() || this.fallbackStarted) return;
+              // 自动回退：视频解码连续错误
+              const decodeErrors = typeof evt?.errors === 'number' ? evt.errors : 0;
+              if (evt?.type === 'video-decode-error' && decodeErrors >= 3) {
+                fallbackInBackground('video-decode-error');
+                return;
+              }
+              // 音频解码失败且音频为必需时切换到 MSE
+              if (evt?.type === 'audio-fallback' && wsSource.audioOptional === false) {
+                fallbackInBackground('audio-fallback');
+                return;
+              }
+              this.bus.emit('network', evt);
+            },
+            onFallback: fallbackInBackground,
+            // Metadata event handler - emit to EventBus
+            onMetadata: metadataConfig.enabled
+              ? (event: MetadataEvent) => { if (isCurrent() && !this.fallbackStarted) this.bus.emit('metadata', event); }
+              : undefined,
+            // Metadata detection handler - emit to EventBus
+            onMetadataDetected: metadataConfig.detectOnly
+              ? (event: MetadataDetectedEvent) => { if (isCurrent() && !this.fallbackStarted) this.bus.emit('metadata', event); }
+              : undefined
+          }, { webCodecsConfig: opts.webCodecs, frameHook: this.frameHook });
+          await this.pipeline.start();
+          throwIfAborted(opts.signal);
+          if (!isCurrent()) return;
+          this.pipelineActive = !this.fallbackStarted;
+          if (fallbackPromise) await fallbackPromise;
+          return;
+        } catch (err) {
+          throwIfAborted(opts.signal);
+          if (fallbackPromise) throw err;
+          console.warn('[ws-raw] experimental pipeline failed, falling back to MSE', err);
+          this.pipeline?.stop();
+          this.pipeline = null;
+        }
       }
+      // fallback path
+      await startFallback();
+    } catch (error) {
+      this.cleanup();
+      throw error;
     }
-    // fallback path
-    await startFallback();
   }
 
   /**
@@ -184,6 +211,7 @@ export class WSRawTech extends AbstractTech {
   }
 
   private cleanup(): void {
+    ++this.generation;
     this.pipeline?.stop();
     this.pipeline = null;
     this.pipelineActive = false;

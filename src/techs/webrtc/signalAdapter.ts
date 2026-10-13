@@ -1,6 +1,7 @@
 ﻿import { Source, WebRTCSignalConfig } from "../../types.js";
 import { OvenSignaling } from "./ovenSignaling.js";
 import { WhipSignaling } from "./signaling.js";
+import { createLoadScope, throwIfAborted, waitWithSignal } from '../../core/abort.js';
 
 export type SignalAdapterEvent = {
   type: string;
@@ -12,7 +13,7 @@ export interface WebRTCSignalAdapter {
   /**
    * 完成信令协商并将媒体流绑定到 RTCPeerConnection。
    */
-  setup(pc: RTCPeerConnection, src: Extract<Source, { type: "webrtc" }>, onEvent?: (evt: SignalAdapterEvent) => void): Promise<void>;
+  setup(pc: RTCPeerConnection, src: Extract<Source, { type: "webrtc" }>, onEvent?: (evt: SignalAdapterEvent) => void, signal?: AbortSignal): Promise<void>;
   changeRendition?(renditionName?: string | null, auto?: boolean): void;
   destroy(): Promise<void>;
 }
@@ -23,19 +24,32 @@ class OvenWsAdapter implements WebRTCSignalAdapter {
   private pendingCandidates: Array<{ candidate: string; sdpMid?: string; sdpMLineIndex?: number }> = [];
   private remoteDescriptionSet = false;
   private wsHost: string | null = null;
+  private lifecycle: AbortController | null = null;
 
   constructor(private cfg: Extract<WebRTCSignalConfig, { type: "oven-ws" }>) {}
 
-  async setup(pc: RTCPeerConnection, _src: Extract<Source, { type: "webrtc" }>, onEvent?: (evt: SignalAdapterEvent) => void): Promise<void> {
-    this.sig = new OvenSignaling(this.cfg, onEvent);
+  async setup(pc: RTCPeerConnection, _src: Extract<Source, { type: "webrtc" }>, onEvent?: (evt: SignalAdapterEvent) => void, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    const sig = new OvenSignaling(this.cfg, onEvent);
+    this.sig = sig;
+    const lifecycle = new AbortController();
+    this.lifecycle = lifecycle;
+    const cancel = () => lifecycle.abort(signal?.reason);
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
+    const active = () => this.sig === sig && !lifecycle.signal.aborted;
+    const scope = createLoadScope(lifecycle.signal, 10000);
+    let resolveAnswer!: () => void;
+    let rejectAnswer!: (error: unknown) => void;
+    const answerDone = new Promise<void>((resolve, reject) => { resolveAnswer = resolve; rejectAnswer = reject; });
+    void answerDone.catch(() => {});
     this.pendingCandidates = [];
     this.remoteDescriptionSet = false;
     this.wsHost = this.extractWsHost(this.cfg.url);
     
-    await this.sig.connect();
-    
     // Handle remote offer from OME (with optional ICE servers)
     this.sig.onRemoteOffer(async (sdp, iceServers) => {
+      if (!active()) return;
       try {
         // Update ICE servers if provided by OME
         if (iceServers && iceServers.length > 0) {
@@ -65,15 +79,17 @@ class OvenWsAdapter implements WebRTCSignalAdapter {
         }
         
         console.log('[oven-adapter] Setting remote description (offer)');
-        await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp }));
+        await waitWithSignal(pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp })), lifecycle.signal);
+        if (!active()) return;
         this.remoteDescriptionSet = true;
         
         // Process any pending ICE candidates
         if (this.pendingCandidates.length > 0) {
           console.log('[oven-adapter] Processing', this.pendingCandidates.length, 'pending ICE candidates');
           for (const cand of this.pendingCandidates) {
+            if (!active() || scope.signal.aborted) return;
             try {
-              await this.addIceCandidateWithFallback(pc, cand);
+              await this.addIceCandidateWithFallback(pc, cand, active);
             } catch (e) {
               console.warn('[oven-adapter] Failed to add pending ICE candidate:', e);
             }
@@ -83,12 +99,17 @@ class OvenWsAdapter implements WebRTCSignalAdapter {
 
         
         console.log('[oven-adapter] Creating answer');
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        const answer = await waitWithSignal(pc.createAnswer(), lifecycle.signal);
+        if (!active()) return;
+        await waitWithSignal(pc.setLocalDescription(answer), lifecycle.signal);
+        if (!active()) return;
         console.log('[oven-adapter] Local description set');
         this.sig?.sendAnswer(pc.localDescription || answer);
         onEvent?.({ type: "answer-sent" });
+        resolveAnswer();
       } catch (err) {
+        rejectAnswer(err);
+        if (!active() || scope.signal.aborted) return;
         console.error('[oven-adapter] Failed to process offer:', err);
         onEvent?.({ type: "offer-error", error: err });
       }
@@ -96,6 +117,7 @@ class OvenWsAdapter implements WebRTCSignalAdapter {
     
     // Handle remote ICE candidates
     this.sig.onRemoteCandidate(async (cand) => {
+      if (!active()) return;
       if (!this.remoteDescriptionSet) {
         // Queue candidates until remote description is set
         console.log('[oven-adapter] Queuing ICE candidate (remote description not set yet)');
@@ -104,7 +126,8 @@ class OvenWsAdapter implements WebRTCSignalAdapter {
       }
       
       try {
-        await this.addIceCandidateWithFallback(pc, cand);
+        await this.addIceCandidateWithFallback(pc, cand, active);
+        if (!active()) return;
         onEvent?.({ type: "remote-candidate-added", cand });
       } catch (e) {
         console.warn('[oven-adapter] Failed to add ICE candidate:', e);
@@ -113,6 +136,7 @@ class OvenWsAdapter implements WebRTCSignalAdapter {
     
     // Send local ICE candidates to OME
     pc.onicecandidate = (e) => {
+      if (!active()) return;
       if (e.candidate) {
         this.sig?.sendCandidate(e.candidate);
         onEvent?.({ type: "local-candidate", cand: e.candidate.candidate });
@@ -120,16 +144,25 @@ class OvenWsAdapter implements WebRTCSignalAdapter {
     };
     
     try {
-      await this.sig.waitOffer(10000);
+      await sig.connect(scope.signal);
+      await sig.waitOffer(10000, scope.signal);
+      await waitWithSignal(answerDone, scope.signal);
     } catch (err) {
-      onEvent?.({ type: "offer-timeout", fatal: true, error: err instanceof Error ? err.message : err });
+      if (active() && !signal?.aborted) onEvent?.({ type: "offer-timeout", fatal: true, error: err instanceof Error ? err.message : err });
+      await this.destroy();
       throw err;
+    } finally {
+      scope.dispose();
+      signal?.removeEventListener('abort', cancel);
     }
   }
 
   async destroy(): Promise<void> {
-    await this.sig?.destroy();
+    this.lifecycle?.abort();
+    this.lifecycle = null;
+    const sig = this.sig;
     this.sig = null;
+    await sig?.destroy();
     this.pendingCandidates = [];
     this.remoteDescriptionSet = false;
     this.wsHost = null;
@@ -209,10 +242,12 @@ class OvenWsAdapter implements WebRTCSignalAdapter {
 
   private async addIceCandidateWithFallback(
     pc: RTCPeerConnection,
-    cand: { candidate: string; sdpMid?: string; sdpMLineIndex?: number }
+    cand: { candidate: string; sdpMid?: string; sdpMLineIndex?: number },
+    active: () => boolean
   ): Promise<void> {
     // Add candidate as-is
     await pc.addIceCandidate(new RTCIceCandidate(cand));
+    if (!active()) return;
     // Add a cloned candidate that replaces private IP with WS host (matches OvenPlayer)
     const clone = this.buildCandidateClone(cand, this.wsHost);
     if (clone) {
@@ -230,7 +265,8 @@ class WhipWhepAdapter implements WebRTCSignalAdapter {
   async setup(
     pc: RTCPeerConnection,
     src: Extract<Source, { type: "webrtc" }>,
-    onEvent?: (evt: SignalAdapterEvent) => void
+    onEvent?: (evt: SignalAdapterEvent) => void,
+    signal?: AbortSignal
   ): Promise<void> {
     this.sig = new WhipSignaling({
       url: this.cfg.url,
@@ -243,7 +279,7 @@ class WhipWhepAdapter implements WebRTCSignalAdapter {
       onEvent
     });
     pc.onicecandidate = null; // no trickle
-    await this.sig.negotiate(pc);
+    await this.sig.negotiate(pc, signal);
   }
 
   async destroy(): Promise<void> {

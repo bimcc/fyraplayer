@@ -12,13 +12,29 @@
  *   - Cesium adapter: @beeviz/cesium
  */
 
-// Metadata bridge (KLV/MISB)
+// Optional video capture and presentation clock
+export * from './playback-health.js';
+export * from './gb-gateway.js';
+export * from './webtransport.js';
 export {
+  captureSnapshot, createSnapshotPlugin,
+  type SnapshotOptions, type SnapshotResult, type SnapshotHandle, type SnapshotPluginOptions,
+} from './snapshot.js';
+export {
+  createFrameClockPlugin, mediaTimeToPts90k,
+  type FrameClockSample, type FrameClockHandle, type FrameClockPluginOptions,
+  type FrameClockResetReason, type MediaPtsAnchor,
+} from './frame-clock.js';
+
+// Generic metadata bridge; parsing semantics are supplied by the consumer.
+export {
+  MetadataBridge,
+  type MetadataBridgeOptions,
   KlvBridge,
   createMetadataPlugin,
   type KlvBridgeOptions,
   type MetadataPluginOptions,
-} from './metadata/KlvBridge.js';
+} from './metadata/MetadataBridge.js';
 
 // Metrics reporter plugin
 export {

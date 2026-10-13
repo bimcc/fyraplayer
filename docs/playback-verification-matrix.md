@@ -5,6 +5,55 @@
 
 This document is the evidence log for `CR-005`. Unit tests prove code-level behavior; this matrix proves browser playback behavior. Do not mark a protocol/browser combination as passed without a dated run record.
 
+## 2026-10-14：WebTransport 慢解码与四路追加验证
+
+| 范围 | 环境 / 结果 | 证据与限制 |
+| --- | --- | --- |
+| 慢首帧及生命周期 | 45 suites / 314 tests：通过 | wt-warmup-release.log：59.09/47.79/57.43/61.30% 覆盖率，43 导出文件/21 tarball 入口及完整构建；新增 7 项验证保留预热前缀、关键帧恢复、配置/暂停/追帧重置、metadata、停止及超时。旧实现失败记录 wt-startup-before.log |
+| HTTP/3 小队列突发 | Edge 155.0.4283.45 / aioquic：通过 | wt-warmup-browser.json：前 40 帧无间隔，maxDecodeQueue=2，H.264 38 帧/HEVC 8 帧；HEVC 实际触发 decode-queue-warmup，首个原始关键帧保留并继续出帧 |
+| 四路同时启动及停止 | 2×H.264 + 2×HEVC：通过 | 同报告 concurrent：320×200/20fps，9/9/9/8 帧，首帧约 152/188/374/419ms 单次样本；所有 tracks=ended、srcObject=null，120ms 窗内无迟到帧。不代表高分辨率容量、p95、硬解或弱网指标 |
+| 单路及真实 fyraklv 回归 | 同环境：通过 | 同报告普通 H.264 14 帧/HEVC 9 帧，取消/显式备用源通过；无 KLV 8 帧/8 元数据，真实 KLV 34 帧/46 元数据，原始时间/纬度匹配、重置/停止清空。没有新增移动真机或屏幕同步精度证据 |
+
+## 2026-10-14：WebTransport 唯一协议追加验证
+
+当前接入使用 [fyra-media 单一格式](webtransport.md)，不再提供版本参数；下文历史 v1/v2 名称保留当时验证含义。
+
+| 范围 | 环境 / 结果 | 证据与限制 |
+| --- | --- | --- |
+| 单一格式与发布检查 | 45 suites / 307 tests：通过 | wt-unified-release.log：59.00/47.68/57.43/61.24% 覆盖率，43 导出文件/21 tarball 入口、类型/边界/构建通过；新增未知 kind 拒绝回归，Source 与解析器无版本参数 |
+| HTTP/3 纯视频及无 KLV 元数据 | Edge 155.0.4283.45 / aioquic：通过 | wt-unified-browser-isolated.json：H.264 14 帧；无 KLV 路径 8 帧/8 元数据，原始时间匹配、停止 tracks=ended；挂起约 2.1ms 停止与显式 MP4 备用源通过。本机单次功能样本 |
+| 独立 fyraklv 查询与时间重启 | 同环境：通过 | 同报告 34 个 canvas 帧/46 条元数据的原始时钟及变化纬度匹配；重置/暂停/停止通过。wt-unified-klv.log 验证独立包及超过 33 位时间换算；不是屏幕与真实遥测同步精度证明 |
+| HEVC 实际解码及负载限制 | 独立复测通过；并发测试出现超时 | 同报告 hvc1.1.6.L60.90 实际 8 帧；首轮 wt-unified-browser.json 在与移动 runner 同时运行时，配置支持但 catchup 后首帧超时。两轮均保留，具体因果及负载稳定性未确认 |
+| 移动配置与控制回归 | Chromium 320/393/844px 触摸模拟：通过 | wt-unified-mobile.json / PNG：无版本控件/Source 参数、窄屏无溢出、挂起停止恢复输入、普通/全景/全屏及菜单通过；非 iOS/Android 真机证据 |
+
+## 2026-10-14：多路监看追加验证
+
+| 范围 | 环境 / 结果 | 证据与限制 |
+| --- | --- | --- |
+| 应用层四路与独立键盘 | Edge 155.0.4283.45 / 4×1920×1200 MP4：通过 | multiview-built-final.json / PNG：四路真实帧、活动≤4/启动≤2、焦点优先、返回启动≤1、离屏释放、停止意图与销毁；本地功能检查，非容量/同步指标 |
+| HLS 就绪与坏源隔离 | 本地 ffmpeg H.264 HLS 与 403：通过 | 同报告 hlsReady：21 帧/0.53s；实际等待 ready/首帧、皮肤停止释放；坏源仅 1 次请求且其他路继续。后台以共用接口模拟，移动滚动用真实 IntersectionObserver |
+| 第十阶段发布与单路移动回归 | 45 suites / 306 tests：通过 | multiview-release.log：59.02/47.76/57.43/61.26% 覆盖率，43 导出文件/21 tarball 入口、类型/边界/构建通过；multiview-single-mobile.json 验证既有触摸、全景、全屏和画质菜单 |
+
+## 2026-10-13：历史阶段结果
+
+| 范围 | 环境 / 结果 | 证据与限制 |
+| --- | --- | --- |
+| 第九阶段完整发布门禁 | 44 suites / 296 tests：通过 | controls-health-release.log：59.10/47.94/57.51/61.33% statements/branches/functions/lines，43 导出文件、21 tarball JS/类型入口、公共类型/边界及 ESM/IIFE/Vite 通过 |
+| 第九阶段移动控制与默认 v2 | Chromium 触摸模拟 320/393/844px：通过 | controls-health-mobile-final.json：版本选择移除，默认 v2 进入实际 Source；触摸、停止恢复、全景、全屏、源切换通过。注入 quality state/events 验证单档位隐藏、多档位 Auto/手动，不是实际网络 ABR 或移动真机证据 |
+| 第九阶段控制栏/全景切换 | Edge，本地 CORS 允许/拒绝 fixture 与 5190 开发页：通过 | controls-health-browser.json / controls-health-dev-final.json：空画质隐藏及 resize、真实片尾循环、普通/全景共享状态、允许 CORS 后重载/播放、拒绝保留原播放器、挂起检查停止取消；公网 H.265 URL 本轮访问失败，没有该源的响应头证据 |
+| 可选 playback-health | 原生 MP4 + 真实 captureStream：通过 | playback-health-browser-final.json：video-frame 首帧、停止/恢复出帧、暂停/应用挂起排除、QoS、track ended；本机启动较慢如实计入观察。受控画面冻结不等于弱网或物理屏幕故障诊断 |
+| WebTransport v2 + 独立 fyraklv | Edge 155.0.4283.45 / aioquic loopback：通过 | wt-metadata-browser-final.json：34 个 canvas 绘制帧/46 条完整 KLV，逐帧原始时间及变化的纬度全部匹配；5000017us→450002 tick，配置重启至 1000017us；配置间隙时 clock/state=null、buffer=0，暂停不绘制、停止清空并结束 tracks。实际 H.264 17 帧、HEVC 9 帧通过；未测屏幕/真实遥测同步误差 |
+| v2 协议与生命周期发布门禁 | 43 suites / 283 tests：通过 | wt-metadata-release.log：statements 58.14%、branches 46.43%、functions 56.56%、lines 60.64%；41 导出文件、20 tarball JS/类型入口、公开类型、插件边界及 ESM/IIFE/Vite 通过。外部 fyraklv 原始微秒及超过 33 位的查询通过，wt-metadata-klv-final.log |
+| v2 示例与移动布局 | Chromium 触摸模拟：通过 | wt-metadata-mobile-final.json / 同名前缀 webtransport-config.png：v1/v2 条件显示，320px 配置无横向溢出；所选 v2 传入实际 Source，挂起连接停止后输入恢复；393/320/844px 既有播放、停止恢复、全屏、全景手势通过；没有 iOS/Android 真机证据 |
+| 当前打包 IIFE/轻量插件回归 | Edge：通过 | wt-metadata-package.json / 同名 log：81 帧、2.54s，UI 从 1 到 0；无 UI 截图 320×200/22340 bytes，切源 epoch=4、销毁 session/clock=null、capture 拒绝 AbortError |
+| 可选 WebTransport + H.264 | Edge 155.0.4283.45、Windows、aioquic 1.3.0 HTTP/3 loopback：通过 | 实际原生 WebTransport、avc1.42C00C、320×200、14 解码帧、原始 PTS 5.00→6.15s、非空画面，暂停恢复、首帧挂起约 1ms 停止、显式 MP4 备用源、capture tracks ended；`.fyra-long-run/webtransport-browser-selector.json` 与 `webtransport-browser-selector-repeat.json`。不是公网弱网/长跑/多路延迟证明 |
+| 同插件 HEVC | 同环境：配置与实际解码通过 | hvc1.1.6.L60.90 Annex B、320×200，allowH265=true，最终两轮报告记录实际帧与 loaded session；未证明硬解，不能扩大到其他浏览器/设备。旧报告保留：Windows Proactor fixture 停止 UDP 收包导致连接超时，切 SelectorEventLoop 后连续运行通过 |
+| GB gateway adapter | Jest 契约：通过；真实设备未验证 | 8 tests 验证 invite/释放/控制取消、备用源保留、递归源拒绝、迟到结果与重连耗尽；gateway-exhaustion-tests.log。没有 SIP/RTP/PS 或设备 PTZ 成功证据 |
+| 示例高级配置与移动回归 | Chromium 触摸模拟 320/393/844px：通过 | 普通源隐藏网关/HEVC 配置，高级类型对应显隐；native/MSE/WebCodecs 分开报告，触摸/全屏/停止恢复无回归；gateway-webtransport-mobile.json 与 PNG。没有 iOS/Android 真机证据 |
+| 桌面与打包 IIFE | Edge：通过 | gateway-webtransport-desktop.json：错误/挂起地址停止、复用、普通/全景控制；gateway-webtransport-package-final.json：2.25s/72 帧、UI 清理、截图 320×200、会话 epoch 与 clock 清理 |
+| 第七阶段发布门禁 | 43 suites / 273 tests：通过 | gateway-webtransport-release-final.log，41 导出文件/20 tarball JS 类型入口、公共类型、插件边界及构建；随后 gateway 重连耗尽新增一项通过，该阶段总数 274 |
+| 第七阶段最终完整覆盖率 | 43 suites / 274 tests：通过 | gateway-webtransport-coverage-final.log，全仓库门禁通过；单套覆盖率不能代替该结果。该阶段文档 33 files / 168 links 与 diff 检查通过 |
+
 ---
 
 ## 1. How To Run
@@ -263,7 +312,22 @@ Append new rows; do not overwrite historical failures.
 
 ## 7. Promotion Rules
 
+2026-10-13 第三阶段 Edge headless 会话复核：最终 IIFE MP4 播放至 2.59 秒/80 帧，JPEG 截图 320×200（22329 bytes）；相同 URL 重新加载时 session epoch 2→4，新的帧时钟样本 sessionEpoch=4；销毁后 session/clock 为 null，capture 拒绝 AbortError。证据 `.fyra-long-run/session-plugins-browser.json`。仅确认本地单路会话与插件生命周期，没有扩大真实协议或多路性能承诺。
+
+2026-10-13 第二阶段新增 Edge headless 单路功能复核：最终 IIFE 播放本地 MP4 推进至 2.61 秒/82 帧，UI 销毁后为 0；无 UI Player 的 frame-clock 产生 4 个 video-frame 样本，snapshot 返回可解码的 320×200 JPEG（22326 bytes），销毁后时钟清空、截图拒绝 AbortError。原始记录 `.fyra-long-run/monitoring-plugins-browser.json`。此结果不扩展为多路容量、所有协议或 KLV 端到端同步验证。
+
 - A protocol is `verified` only after at least Chrome and Edge pass, unless the browser scope explicitly excludes it.
 - Safari support must be recorded separately because native HLS and WebCodecs/MSE behavior differ.
 - Public docs should call a source/protocol `experimental` until at least one real browser run exists in this file.
 - GB28181 means server-side gateway integration. The browser player does not implement SIP/RTP/PS; placeholders are acceptable, but they do not count as commercial verification.
+> 2026-10 整理：本表历史证据保留原测试日期和环境；本轮新增验证单独记录在 [本轮复盘](review-2026-10.md)，不能将旧结果理解为本次全矩阵重测。
+
+## 2026-10-13 移动模拟补充
+
+| 环境 | 场景 | 结果与边界 |
+| --- | --- | --- |
+| Edge/Chromium CDP mobile + touch，Windows | 最终 Vite 构建，本地 MP4 / 403 HLS，320×720、393×852、844×390 | 通过：44px 按钮同排无越界、触摸播放/暂停/唤出/进度拖动、菜单与错误停止再播放；全景拖动/捏合、页面内全屏横竖屏适配及销毁恢复滚动。证据 `.fyra-long-run/mobile-built-final.json` 和同名前缀 PNG。 |
+| Edge/Chromium CDP mobile + touch，Windows | 最终 IIFE，320px 两个本地 MP4 源 | 通过：布局与 44px 源选择器；change 事件验证“更多”菜单内的源切换和选中状态。未验证系统原生选项弹窗。证据同上。 |
+| Edge headless，Windows | 最终 IIFE + 无 UI snapshot/frame-clock | 通过：2.98 秒/93 帧、320×200 可解码截图、重载 epoch 更新、销毁资源清理。证据 `.fyra-long-run/mobile-package-browser.json`。 |
+| Edge headless 桌面鼠标模式，Windows | 最终 Vite 构建，普通/全景控制栏与错误地址恢复 | 通过：403 HLS/挂起 fMP4 停止、同实例恢复、原生容器全屏、自动隐藏/键盘音量，宽/窄控制区分别高 60/54px。证据 `.fyra-long-run/mobile-desktop-controls-pass.json`。 |
+| iOS Safari / Android Chrome / WebView 真机 | 有声播放、系统音量/安全区/全屏、后台恢复及实际媒体协议 | 待验证；Chromium 移动模拟不代表真机浏览器兼容。接入和验收步骤见 [移动端播放](mobile-playback.md)。 |

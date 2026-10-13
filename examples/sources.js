@@ -1,4 +1,4 @@
-﻿// Example sources derived from testmedia.md
+﻿// Canonical example source list. Local/public URLs require their respective services.
 export default [
   // === HLS 测试流 ===
   { type: 'hls', url: 'https://sf1-cdn-tos.huoshanstatic.com/obj/media-fe/xgplayer_doc_video/hls/xgplayer-demo.m3u8', lowLatency: false, preferTech: 'hls' },

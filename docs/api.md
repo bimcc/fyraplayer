@@ -2,6 +2,8 @@
 
 通用低延迟 Web 播放器，支持 WebRTC、HLS/DASH、fMP4、WebSocket+WebCodecs、本地文件等多种播放技术。
 
+当前拟发布版本 1.1.0-rc.1；改动见 [CHANGELOG](../CHANGELOG.md)，交付边界见 [候选说明](../RELEASE_NOTES.md)。架构与边界见 [architecture.md](architecture.md)。
+
 ## 核心类
 
 ### FyraPlayer
@@ -14,6 +16,7 @@ class FyraPlayer implements PlayerAPI {
   init(): Promise<void>
   play(): Promise<void>
   pause(): Promise<void>
+  stop(): Promise<void>
   seek(time: number): Promise<void>
   destroy(): Promise<void>
   
@@ -21,6 +24,7 @@ class FyraPlayer implements PlayerAPI {
   getState(): PlayerState
   getSources(): Source[]
   getCurrentSource(): Source | undefined
+  getPlaybackSession(): PlaybackSession | null
   getVideoElement(): HTMLVideoElement
   get currentTime(): number  // 当前播放时间（秒）
   
@@ -50,13 +54,25 @@ class FyraPlayer implements PlayerAPI {
 }
 ```
 
+init 并发调用共享加载。switchSource 使旧加载代次失效并按顺序清理 Tech；只执行队列中仍有效的源。destroy 幂等，调用后实例不可复用。加载中间件和 Tech 接收可选 signal；已适配路径响应取消，未适配的 Tech.load 仍需自行结束。getCurrentSource 保留请求源语义，新 getPlaybackSession/sessionchange 提供所选源与 epoch，见 [会话与取消契约](playback-sessions.md)。
+
+本候选新增 `stop()`：调用时立即取消加载和重连、使状态变为 idle 并清空会话，返回 Promise 等待 Tech 资源释放。插件和已配置源保留，可继续调用 play/init/switchSource；释放过程中的重复 stop 合并。pause 在正常播放时仍暂停，加载、错误或等待重连时转为 stop。普通 UI 提供停止按钮和恢复状态中的“停止加载”；示例页的停止直接销毁当前实例并恢复输入，下一次播放创建新实例。未适配 signal 的自定义 Tech 仍可能延迟最终清理。
+
 ## 类型定义
+
+普通皮肤在存在多个可切换画质档位时提供 Auto/手动画质；单档位和不支持画质选择的源隐藏控件。多 Source 时可回退为播放源选择。有限时长视频显示循环按钮，窄屏放在“更多”中，直接同步 video.loop 与 preference(loop)；直播不提供循环。
+
+普通皮肤快捷键绑定本播放器容器，需 Tab 或点击画面取得焦点；忽略表单/可编辑区、按钮、链接、Shadow DOM 交互元素与组合键。多实例的焦点与资源调度示例见 [多路监看](multiview.md)。
+
+可选 `createPlaybackHealthPlugin` 从 `/plugins/playback-health` 导入，提供 snapshot/reportFrame/setSuspended/destroy handle 和首帧、卡顿、恢复、错误与 QoS 观察。计时口径和排除条件见 [监控插件](monitoring-plugins.md)，核心不默认安装。
 
 ### TechName
 
 ```typescript
 type TechName = 'webrtc' | 'hls' | 'dash' | 'fmp4' | 'ws-raw' | 'file' | 'gb28181';
 ```
+
+上述为内建/兼容名称；CustomTechNameMap/CustomSourceMap 允许可选插件扩展。导入 `/plugins/webtransport` 后类型增加 webtransport；仍需显式安装 createWebTransportTechPlugin。参数、分帧及限制见 [WebTransport](webtransport.md)。网关的新控制面使用 createGbGatewayAdapter 配对 middleware/plugin，见 [GB28181](gb28181.md)，不作为另一种媒体编码。
 
 ### PlayerOptions
 
@@ -66,9 +82,12 @@ interface PlayerOptions {
   techOrder?: TechName[]
   autoplay?: boolean
   muted?: boolean
+  playsInline?: boolean // 默认 true；所有 Tech 共用 video 的行内播放配置
   preload?: 'none' | 'metadata' | 'auto'
   video: HTMLVideoElement | string
   plugins?: PluginCtor[]
+  onPluginError?: (failure: PluginFailure) => void
+  loadTimeoutMs?: number // 每个加载步骤/Tech 尝试；默认 0，不是首帧超时
   middleware?: MiddlewareEntry[]
   metrics?: MetricsOptions
   buffer?: BufferPolicy
@@ -79,6 +98,37 @@ interface PlayerOptions {
 ```
 
 UI controls are enabled only through `plugins: [createUiComponentsPlugin(...)]`.
+
+移动端触摸、窄屏菜单与全屏回退见 [移动端接入](mobile-playback.md)。浏览器拒绝 `play()` 的 `NotAllowedError` 产生 `network.code = 'AUTOPLAY_BLOCKED'` 警告并使状态变为 paused，保留当前 Tech 供用户点击重试，不触发重连。窄屏普通皮肤的停止按钮位于“更多”，加载/错误状态卡仍直接提供“停止加载”。
+
+### 插件作用域与监控能力
+
+```typescript
+interface PluginContext {
+  player: PlayerAPI
+  coreBus: EventBusLike
+  techs: TechRegistry
+  storage?: KeyValueStore | null
+  ui?: UISurface
+  lifecycle?: PluginScope
+}
+interface PluginScope {
+  readonly signal: AbortSignal
+  onCleanup(cleanup: () => void | Promise<void>): void
+}
+interface PluginFailure {
+  plugin: string
+  phase: 'setup' | 'destroy' | 'cleanup'
+  error: unknown
+}
+```
+
+Player 提供每个插件独立的 scope；可选字段兼容自定义宿主。destroy 开始即 abort，最终清理仍等待 Tech 加载；先逆序调用插件 destroy，再在该插件内部逆序执行注册的 cleanup。初始化失败也回收已登记资源。onPluginError 仅报告生命周期失败，不替代业务异步错误处理。
+
+- `/plugins/snapshot`：captureSnapshot、createSnapshotPlugin；返回 Blob、尺寸和复制像素时的时间，不依赖 UI。
+- `/plugins/frame-clock`：createFrameClockPlugin、mediaTimeToPts90k；提供显示帧采样和显式锚点换算，不自动同步 KLV。
+
+配置、销毁、CORS、时钟精度和示例见 [监控插件 API](monitoring-plugins.md)。
 
 ### Source Resolver Middleware
 
@@ -673,19 +723,18 @@ PTZ 的真实设备控制属于服务端 GB28181 网关或厂商/ONVIF 控制服
 | 事件 | 参数 | 说明 |
 |------|------|------|
 | `ready` | - | 播放器就绪 |
+| `sourcechange` | `{ index: number, source: Source \| undefined }` | 切源请求已进入队列，不表示成功 |
+| `seek` | `{ time: number }` | Player.seek 完成，单位秒 |
 | `play` | - | 开始播放 |
 | `pause` | - | 暂停播放 |
+| `stop` | - | 已立即取消加载/重连；最终资源清理由 stop() Promise 表示 |
 | `ended` | - | 播放结束 |
 | `error` | `Error` | 发生错误 |
 | `buffer` | `{ level: number }` | 缓冲状态变化 |
 | `stats` | `{ tech: TechName, stats: EngineStats }` | 播放统计 |
 | `network` | `PlayerNetworkEvent` | 网络状态变化 |
 | `metadata` | `MetadataEvent \| MetadataDetectedEvent` | 元数据（KLV/SEI）或 detect-only 发现事件 |
-| `levelSwitch` | `{ level: number }` | 码率切换 |
-
-Note: `levelSwitch` now uses `PlayerLevelSwitchEvent`. The old `{ level: number }`
-table entry is retained only because this legacy document contains mixed
-encoding text; consumers should use the typed event contract below.
+| `levelSwitch` | `PlayerLevelSwitchEvent` | 码率切换 |
 
 ### MetadataEvent
 
@@ -693,7 +742,8 @@ encoding text; consumers should use the typed event contract below.
 interface MetadataEvent {
   type: 'private-data' | 'sei'
   raw: Uint8Array
-  pts: number
+  pts: number      // 毫秒，兼容现有事件
+  pts90k?: bigint  // 原始 TS 33 位 90 kHz PTS，非 UTC
   pid?: number      // private-data 的 PID
   seiType?: number  // SEI payload 类型
 }
@@ -1283,9 +1333,12 @@ multi-view dashboards.
 `viewerControls` is optional and disabled by default. Enable it when the
 panorama canvas needs its own fullscreen-friendly controls for play/pause, seek
 on finite media, loop, mute/volume, reset view, and fullscreen. The default
-style is a lightweight bottom floating control cluster, not a full-width bar;
-live streams hide seek, loop, the live label, and the volume slider to reduce
-picture occlusion. The built-in play/pause buttons call FyraPlayer's
+style matches the normal skin: an edge-aligned bottom gradient, a thin progress
+slider above one row of SVG buttons, and a volume slider shown on hover/focus.
+Controls hide after three seconds of playback inactivity and return on pointer
+movement, touch or keyboard focus; paused controls remain visible. Narrow hosts
+hide loop, and live streams hide seek/loop while showing LIVE. The built-in
+play/pause buttons call FyraPlayer's
 `PlayerAPI`, so application middleware and state transitions remain the single
 playback authority.
 
@@ -1397,6 +1450,10 @@ or explicitly with `showDiagnosticsButton: true`. Screenshot uses the browser
 canvas path, downloads a PNG, and calls `onScreenshot` with the captured `Blob`,
 dimensions, filename, player, and video element. Cross-origin streams can still
 block canvas capture unless the media response and element CORS mode allow it.
+
+The encoder is shared with the optional `/plugins/snapshot` entry. Applications
+that need a Blob without the UI download can use its handle or captureSnapshot;
+decoded video frames are required. See [monitoring plugins](monitoring-plugins.md).
 
 `showRecordingButton` only exposes a UI toggle and calls `onRecordToggle`; it
 does not implement recording by itself. Products should connect that hook to
@@ -1547,6 +1604,7 @@ const player = new FyraPlayer({
     url: 'wss://server/stream',
     codec: 'h264',
     transport: 'ts',
+    pipeline: 'experimental',
     metadata: {
       privateData: { enable: true },
       sei: { enable: true }
@@ -1563,63 +1621,12 @@ player.on('metadata', (evt) => {
 
 ## 与 fyraklv 集成
 
-```typescript
-import { FyraPlayer } from '@bimccfyra/fyraplayer';
-import { KLVParser, SyncEngine } from 'fyraklv';
-
-const parser = new KLVParser();
-const syncEngine = new SyncEngine();
-
-const player = new FyraPlayer({
-  video: '#video',
-  sources: [{
-    type: 'ws-raw',
-    url: 'wss://server/stream',
-    codec: 'h264',
-    transport: 'ts',
-    metadata: { privateData: { enable: true } }
-  }]
-});
-
-player.on('metadata', (evt) => {
-  if (evt.type === 'private-data' && evt.raw[0] === 0x06 && evt.raw[1] === 0x0E) {
-    const frame = parser.parse(evt.raw, BigInt(evt.pts * 90));
-    if (frame) syncEngine.push(frame);
-  }
-});
-
-function render() {
-  const videoPts = BigInt(player.currentTime * 90000);
-  const state = syncEngine.getInterpolatedStateAtPts(videoPts);
-  if (state) updateProjection(state);
-  requestAnimationFrame(render);
-}
-```
+KLV/MISB 解析与同步属于独立 fyraklv 包。应用层可选插件示例、时间轴映射、切源/seek/销毁及 MSE 提取限制见 [KLV 接入](klv-integration.md)。
 
 ## 版本变更
 
-### v1.0.0 (当前)
-- **定位**: 首个商业基线 SDK 版本，支持范围以 `docs/supported-scenarios.md` 和 `docs/release-1.0-readiness.md` 为准。
-- **新增**: 诊断/Debug Panel、鉴权/签名/恢复、播放偏好、后端录制 API、性能监控、IIFE 发布包和长稳运行工具。
-- **增强**: WebRTC WHEP/WHIP 超时、HTTP 错误、SDP 错误、ICE gathering、ICE 断开/失败恢复诊断。
-- **增强**: HLS/DASH 质量状态与手动/自动清晰度控制。
-- **增强**: direct fMP4 HTTP/WS MSE 路径的有界队列、quota cleanup/retry 和本地 ffmpeg fixture 验证。
-- **边界**: DRM、字幕、广告/埋点、前端录制、GB28181 服务端栈、PTZ 设备执行、PSV/Cesium 具体渲染器均保持插件化、后端化或外部包边界。
+版本记录统一维护在 [CHANGELOG](../CHANGELOG.md)，1.0.0 快照已归档。
 
-### v0.2.0
-- **重构**: 拆分 `tech-hlsdash` 为独立的 `tech-hls` 和 `tech-dash`
-- **新增**: `tech-fmp4` 支持无清单的 fMP4 直播流 (HTTP/WS + MSE)
-- **新增**: 格式检测工具 `formatDetector`
-- **优化**: 移除 `flv.js`，统一使用 `mpegts.js` 处理 FLV/TS
-- **更新**: `TechName` 新增 `'hls' | 'dash' | 'fmp4'`
-- **更新**: `preferTech` 从 `'hlsdash'` 改为 `'hls'` 或 `'dash'`
-
-### v0.1.0
-- 初始版本
-- 支持 WebRTC、HLS/DASH、WS-Raw、GB28181、File 播放技术
-- 插件架构
-- 元数据提取 API
-- 本地文件播放支持（MP4/TS/FLV）
 ## Metadata Parser Plugin
 
 Core playback emits raw metadata events and does not parse KLV/MISB/SEI business semantics. Use the optional metadata plugin to connect a domain parser:
@@ -1639,7 +1646,7 @@ const player = new FyraPlayer({
   }],
   plugins: [
     createMetadataPlugin({
-      parse: (event) => externalKlvParser.parse(event.raw),
+      parse: (event) => event.type === 'private-data' ? externalKlvParser.parse(event.raw, event.pts90k ?? BigInt(Math.round(event.pts * 90))) : null,
       onData: (parsed, raw) => {
         console.log('parsed metadata', parsed, raw.pts);
       },
@@ -1652,4 +1659,6 @@ const player = new FyraPlayer({
 });
 ```
 
-This boundary is intentional: the stable `ws-raw` MSE path is a playback path, while metadata parsing is a plugin capability tied to streams and parsers that differ by deployment.
+MetadataBridge 是通用注入式解析桥接，KlvBridge/KlvBridgeOptions 保留兼容。会话 epoch 变化或插件销毁后丢弃旧异步解析的结果与错误回调；旧宿主通过 sourcechange 失效。该桥接不做时间同步；默认 ws-raw MSE 或回退 MSE 没有同等元数据提取事件。原始 pts90k 不自动处理回绕或 video.currentTime 起点；见 KLV 接入文档。
+
+WebTransport 的 MetadataEvent 增加可选 `timestampUs:number`，表示原始微秒，pts 仍为毫秒；该路径不填原始 TS 的 pts90k。`/plugins/webtransport` 导出 encodeTransportMetadata、transportTimestampToPts90k 与 onHandle/getLatestFrame，使用原始 canvas 绘制帧时钟；单一格式、记录大小、配置重置和同步限制见 [WebTransport](webtransport.md)。

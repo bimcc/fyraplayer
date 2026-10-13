@@ -7,6 +7,9 @@ testvideo/
 
 # Build / deps / logs
 /dist/
+/site-dist/
+/examples/bundle.js
+/.claude/settings.local.json
 /node_modules/
 /coverage/
 /.fyra-long-run/
@@ -15,3 +18,6 @@ testvideo/
 *.tsbuildinfo
 .DS_Store
 .env*
+
+# Locally prepared release candidates and verification evidence
+/.fyra-releases/

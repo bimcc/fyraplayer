@@ -30,6 +30,7 @@ import {
   TechName,
   QualityState
 } from './types.js';
+import type { PlaybackSession, PlaybackSessionChange, TechStreamChange } from './types.js';
 import { DEFAULT_BUFFER_POLICY, DEFAULT_METRICS_OPTIONS, DEFAULT_RECONNECT_POLICY, DEFAULT_TECH_ORDER } from './core/defaults.js';
 import { resolveVideoElement } from './utils/video.js';
 import { probeWebCodecs, WebCodecsSupport } from './utils/webcodecs.js';
@@ -57,9 +58,19 @@ export class FyraPlayer implements PlayerAPI {
   private readonly bus = new EventBus();
   private readonly middleware = new MiddlewareManager();
   private readonly techManager: TechManager;
-  private readonly pluginManager = new PluginManager();
+  private readonly pluginManager: PluginManager;
   private state: PlayerState = 'idle';
   private loadingPromise: Promise<void> | null = null;
+  private loadQueue: Promise<void> = Promise.resolve();
+  private loadGeneration = 0;
+  private loadController: AbortController | null = null;
+  private sessionEpoch = 0;
+  private session: PlaybackSession | null = null;
+  private techEventGeneration = 0;
+  private destroyed = false;
+  private destroyPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
+  private stopped = false;
   private currentSourceIndex = 0;
   private techOrder: TechName[];
   private bufferPolicy: BufferPolicy | undefined;
@@ -70,10 +81,15 @@ export class FyraPlayer implements PlayerAPI {
   private reconnectHealthSnapshot: { sourceIndex: number; techName: TechName | null; currentTime: number; readyState: number } | null = null;
   private dataChannelOpts: DataChannelOptions | undefined;
   private techEventHandlers: Map<EngineEvent, EventHandler> = new Map();
+  private eventTech: Tech | null = null;
   private readonly videoEventHandlers: Array<{ event: string; handler: EventListener }> = [];
 
   constructor(opts: PlayerOptions) {
+    if (opts.loadTimeoutMs !== undefined && (!Number.isFinite(opts.loadTimeoutMs) || opts.loadTimeoutMs < 0)) {
+      throw new RangeError('loadTimeoutMs must be finite and nonnegative');
+    }
     this.options = opts;
+    this.pluginManager = new PluginManager(opts.onPluginError);
     this.techOrder = opts.techOrder ?? DEFAULT_TECH_ORDER;
     this.bufferPolicy = opts.buffer ?? DEFAULT_BUFFER_POLICY;
     this.videoEl = resolveVideoElement(opts.video);
@@ -83,6 +99,7 @@ export class FyraPlayer implements PlayerAPI {
     
     // apply video element knobs
     if (typeof opts.autoplay === 'boolean') this.videoEl.autoplay = opts.autoplay;
+    this.videoEl.playsInline = opts.playsInline !== false;
     if (typeof opts.muted === 'boolean') this.videoEl.muted = opts.muted;
     if (opts.preload) this.videoEl.preload = opts.preload;
     this.attachVideoStateEvents();
@@ -103,7 +120,9 @@ export class FyraPlayer implements PlayerAPI {
       coreBus: this.bus,
       techs: this.createPluginTechRegistry(),
       ui: undefined,
-      storage: window?.localStorage
+      get storage() {
+        try { return globalThis.localStorage; } catch { return undefined; }
+      }
     };
     opts.plugins?.forEach((p) => this.pluginManager.register(p));
     this.pluginManager.applyAll(pluginCtx);
@@ -127,6 +146,16 @@ export class FyraPlayer implements PlayerAPI {
 
   getCurrentSource(): Source | undefined {
     return this.options.sources[this.currentSourceIndex];
+  }
+
+  getPlaybackSession(): PlaybackSession | null {
+    return this.session ? { ...this.session, source: { ...this.session.source }, requestedSource: { ...this.session.requestedSource } } : null;
+  }
+
+  private changeSession(reason: PlaybackSessionChange['reason'], session: Omit<PlaybackSession, 'epoch'> | null, reset = true): void {
+    if (reset) ++this.sessionEpoch;
+    this.session = session ? { ...session, epoch: this.sessionEpoch } : null;
+    this.bus.emit('sessionchange', { epoch: this.sessionEpoch, reason, session: this.getPlaybackSession() });
   }
 
   getVideoElement(): HTMLVideoElement {
@@ -160,6 +189,7 @@ export class FyraPlayer implements PlayerAPI {
   }
 
   async switchSource(index: number): Promise<void> {
+    this.assertAlive();
     if (index < 0 || index >= this.options.sources.length) {
       throw new Error('source index out of range');
     }
@@ -167,54 +197,129 @@ export class FyraPlayer implements PlayerAPI {
     this.reconnectAttempts = 0;
     this.clearReconnectTimer();
     this.techManager.resetFailedTechs();
+    this.stopStatsTimer();
     this.detachTechEvents();
-    await this.techManager.destroyCurrent();
-    await this.loadCurrent();
+    const source = this.getCurrentSource();
+    const loading = this.loadCurrent(true, 'switch');
+    this.bus.emit('sourcechange', { index, source });
+    await loading;
   }
 
   async play(): Promise<void> {
+    this.assertAlive();
     if (this.state === 'loading') return; // Avoid duplicate play during loading
-    if (this.state === 'idle') {
-      await this.loadCurrent();
+    let generation = this.loadGeneration;
+    if (this.state === 'idle' || this.state === 'error') {
+      generation = this.loadGeneration + 1;
+      const loading = this.loadCurrent();
+      await loading;
     }
+    const isCurrent = () => !this.destroyed && !this.stopped && generation === this.loadGeneration;
+    if (!isCurrent()) return;
     await this.middleware.run('control', { source: this.getCurrentSource()!, tech: this.techManager.getCurrentTechName() ?? this.techOrder[0], action: 'play' });
+    if (!isCurrent()) return;
     const tech = this.techManager.getCurrentTech();
     if (!tech) {
-      await this.loadCurrent();
+      generation = this.loadGeneration + 1;
+      const loading = this.loadCurrent();
+      await loading;
+      if (!isCurrent()) return;
     }
+    const activeGeneration = this.loadGeneration;
     try {
       await this.techManager.getCurrentTech()?.play();
+      if (this.destroyed || this.stopped || activeGeneration !== this.loadGeneration) return;
       if (this.videoEl.paused) {
         try {
           await this.videoEl.play();
         } catch (err) {
-          this.bus.emit('error', err);
+          if (!this.destroyed && !this.stopped && activeGeneration === this.loadGeneration) this.reportPlayError(err);
         }
       }
     } catch (e) {
-      this.bus.emit('error', e);
+      if (this.destroyed || activeGeneration !== this.loadGeneration) return;
+      if (this.reportPlayError(e)) return;
       await this.handleReconnect();
     }
   }
 
+  /** Browser gesture policy is recoverable by a tap; it must not reload the transport. */
+  private reportPlayError(error: unknown): boolean {
+    if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'NotAllowedError') {
+      this.state = 'paused';
+      this.bus.emit('network', enhanceNetworkEvent({type:'autoplay-blocked',severity:'warning',error}));
+      return true;
+    }
+    this.bus.emit('error', error);
+    return false;
+  }
+
   async pause(): Promise<void> {
+    this.assertAlive();
+    if (this.state === 'loading' || this.reconnectTimer || this.state === 'error') {
+      await this.stop();
+      return;
+    }
+    const generation = this.loadGeneration;
     await this.middleware.run('control', { source: this.getCurrentSource()!, tech: this.techManager.getCurrentTechName() ?? this.techOrder[0], action: 'pause' });
+    if (this.destroyed || generation !== this.loadGeneration) return;
     const tech = this.techManager.getCurrentTech();
     if (!tech) return;
     try {
       await tech.pause();
+      if (this.destroyed || generation !== this.loadGeneration) return;
       this.state = 'paused';
       this.bus.emit('pause');
     } catch (e) {
-      this.bus.emit('error', e);
+      if (!this.destroyed && generation === this.loadGeneration) this.bus.emit('error', e);
     }
   }
 
+  /** Stop recovery immediately, then serialize resource release with the old load. */
+  stop(): Promise<void> {
+    this.assertAlive();
+    if (this.stopPromise && this.stopped) return this.stopPromise;
+    this.stopped = true;
+    const generation = ++this.loadGeneration;
+    this.stopStatsTimer();
+    this.clearReconnectTimer();
+    this.reconnectAttempts = 0;
+    this.techManager.resetFailedTechs();
+    this.detachTechEvents();
+    this.state = 'idle';
+    const controller = this.loadController;
+    this.loadController = null;
+    this.loadingPromise = null;
+    try { this.videoEl.pause?.(); } catch { /* already detached */ }
+    const stopping = this.loadQueue.then(async () => {
+      await this.techManager.destroyCurrent();
+      if (this.destroyed || generation !== this.loadGeneration) return;
+      this.videoEl.srcObject = null;
+      this.videoEl.removeAttribute?.('src');
+      try { this.videoEl.load(); } catch { /* already detached */ }
+    });
+    this.loadQueue = stopping.catch(() => {});
+    this.stopPromise = stopping;
+    void stopping.then(() => {
+      if (this.stopPromise === stopping) this.stopPromise = null;
+    }, () => {
+      if (this.stopPromise === stopping) this.stopPromise = null;
+    });
+    controller?.abort();
+    if (!this.destroyed && generation === this.loadGeneration) this.changeSession('stop', null);
+    if (!this.destroyed && generation === this.loadGeneration) this.bus.emit('stop');
+    return stopping;
+  }
+
   async seek(time: number): Promise<void> {
+    this.assertAlive();
+    const generation = this.loadGeneration;
     await this.middleware.run('control', { source: this.getCurrentSource()!, tech: this.techManager.getCurrentTechName() ?? this.techOrder[0], action: 'seek', payload: time });
+    if (this.destroyed || generation !== this.loadGeneration) return;
     const tech = this.techManager.getCurrentTech();
     if (tech) {
       await tech.seek(time);
+      if (!this.destroyed && generation === this.loadGeneration) this.bus.emit('seek', { time });
     }
   }
 
@@ -231,6 +336,8 @@ export class FyraPlayer implements PlayerAPI {
   }
 
   async setQualityLevel(level: number | string | 'auto'): Promise<void> {
+    this.assertAlive();
+    const generation = this.loadGeneration;
     const tech = this.techManager.getCurrentTech();
     if (!tech?.setQualityLevel) {
       throw new Error('Current tech does not support quality selection');
@@ -241,7 +348,7 @@ export class FyraPlayer implements PlayerAPI {
       action: 'quality',
       payload: level
     });
-    await tech.setQualityLevel(level);
+    if (!this.destroyed && generation === this.loadGeneration) await tech.setQualityLevel(level);
   }
 
   private clearReconnectTimer(): void {
@@ -251,27 +358,41 @@ export class FyraPlayer implements PlayerAPI {
     this.reconnectHealthSnapshot = null;
   }
 
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
+    if (this.destroyPromise) return this.destroyPromise;
+    this.destroyed = true;
+    ++this.loadGeneration;
     this.stopStatsTimer();
     this.clearReconnectTimer();
     this.detachTechEvents();
     this.detachVideoStateEvents();
-    await this.techManager.destroyCurrent();
-    try {
-      await this.pluginManager.unregisterAll();
-    } catch (err) {
-      console.warn('[player] plugin cleanup error', err);
-    }
-    this.bus.removeAllListeners();
-    try {
-      this.videoEl.src = '';
-      this.videoEl.srcObject = null;
-      this.videoEl.load();
-    } catch {
-      /* ignore */
-    }
-    this.reconnectAttempts = 0;
     this.state = 'idle';
+    this.destroyPromise = (async () => {
+      // Serialize teardown with Tech.load(): an old load cannot allocate
+      // resources after final cleanup, or race a new load on the same Tech.
+      await this.loadQueue;
+      try {
+        await this.techManager.destroyCurrent();
+      } finally {
+        await this.pluginManager.unregisterAll();
+        this.bus.removeAllListeners();
+        try {
+          this.videoEl.src = '';
+          this.videoEl.srcObject = null;
+          this.videoEl.load();
+        } catch { /* already detached */ }
+        this.reconnectAttempts = 0;
+        this.state = 'idle';
+      }
+    })();
+    this.pluginManager.deactivateAll();
+    this.loadController?.abort();
+    this.changeSession('destroy', null);
+    return this.destroyPromise;
+  }
+
+  private assertAlive(): void {
+    if (this.destroyed) throw new Error('Player has been destroyed; create a new instance');
   }
 
   private attachVideoStateEvents(): void {
@@ -280,6 +401,7 @@ export class FyraPlayer implements PlayerAPI {
       this.videoEventHandlers.push({ event, handler });
     };
     const markPlaying = () => {
+      if (this.stopped || this.destroyed) return;
       if (this.state !== 'loading' && this.state !== 'error') {
         this.state = 'playing';
       }
@@ -290,6 +412,7 @@ export class FyraPlayer implements PlayerAPI {
       if (this.state === 'playing') this.state = 'paused';
     });
     add('ended', () => {
+      if (this.stopped || this.destroyed) return;
       this.state = 'ended';
     });
   }
@@ -306,10 +429,13 @@ export class FyraPlayer implements PlayerAPI {
    * Useful for GB28181 (invite/bye/ptz/query) and future techs.
    */
   async control(action: string, payload?: unknown): Promise<unknown> {
+    this.assertAlive();
+    const generation = this.loadGeneration;
     const source = this.getCurrentSource();
     if (!source) throw new Error('no source available');
     const techName = this.techManager.getCurrentTechName() ?? this.techOrder[0];
     await this.middleware.run('control', { source, tech: techName, action, payload });
+    if (this.destroyed || generation !== this.loadGeneration) return undefined;
     const tech = this.techManager.getCurrentTech();
     if (tech?.invoke) {
       return tech.invoke(action, payload);
@@ -376,77 +502,89 @@ export class FyraPlayer implements PlayerAPI {
     this.techOrder = [...this.techOrder, name];
   }
 
-  private async loadCurrent(): Promise<void> {
-    let source = this.getCurrentSource();
-    if (!source) throw new Error('no source available');
+  private async loadCurrent(replace = false, reason: 'load' | 'switch' | 'reconnect' = 'load'): Promise<void> {
+    this.assertAlive();
+    const requestedSource = this.getCurrentSource();
+    if (!requestedSource) throw new Error('no source available');
     
     // Prevent concurrent loading - wait for existing load to complete
-    if (this.loadingPromise) {
+    if (this.loadingPromise && !replace) {
       return this.loadingPromise;
     }
     
     this.state = 'loading';
+    this.stopped = false;
+    const generation = ++this.loadGeneration;
+    const previousController = this.loadController;
+    const controller = new AbortController();
+    this.loadController = controller;
+    const isCurrent = () => !this.destroyed && generation === this.loadGeneration;
+    this.stopStatsTimer();
+    this.detachTechEvents();
     
     // Create a new promise and store reference before async operations
-    const loadPromise = (async () => {
-      // Requirements 6.1, 6.2: Handle Auto Source resolution
-      if (source.type === 'auto') {
-        const resolveCtx: MiddlewareContext = {
+    const loadPromise = this.loadQueue.then(async () => {
+      if (!isCurrent()) return;
+      let source = requestedSource;
+      try {
+        // Requirements 6.1, 6.2: Handle Auto Source resolution
+        if (source.type === 'auto') {
+          const resolveCtx: MiddlewareContext = {
+            signal: controller.signal,
+            source,
+            tech: source.preferTech ?? this.techOrder[0],
+            url: source.url
+          };
+        
+          // Run resolve middleware to get resolved sources
+          const resolvedCtx = await this.middleware.run('resolve', resolveCtx, this.options.loadTimeoutMs);
+          if (!isCurrent()) return;
+        
+          // Requirements 6.4: Emit error if no adapter resolved the source
+          if (!resolvedCtx.resolvedSources) {
+            const engine = source.engine ?? 'unknown';
+            throw new Error(`No adapter registered for engine: ${engine}`);
+          }
+        
+          // Use resolved primary source with fallbacks
+          source = {
+            ...resolvedCtx.resolvedSources.primary,
+            fallbacks: resolvedCtx.resolvedSources.fallbacks
+          };
+        }
+      
+        const middlewareCtx: MiddlewareContext = {
+          signal: controller.signal,
           source,
           tech: source.preferTech ?? this.techOrder[0],
           url: source.url
         };
-        
-        // Run resolve middleware to get resolved sources
-        const resolvedCtx = await this.middleware.run('resolve', resolveCtx);
-        
-        // Requirements 6.4: Emit error if no adapter resolved the source
-        if (!resolvedCtx.resolvedSources) {
-          const engine = source.engine ?? 'unknown';
-          const err = new Error(`No adapter registered for engine: ${engine}`);
-          this.bus.emit('error', err);
-          this.state = 'error';
-          this.loadingPromise = null;
-          return;
-        }
-        
-        // Use resolved primary source with fallbacks
-        source = {
-          ...resolvedCtx.resolvedSources.primary,
-          fallbacks: resolvedCtx.resolvedSources.fallbacks
-        };
-      }
-      
-      const middlewareCtx: MiddlewareContext = {
-        source,
-        tech: source.preferTech ?? this.techOrder[0],
-        url: source.url
-      };
-      // run request middleware once before load
-      const requestCtx = await this.middleware.run('request', middlewareCtx);
-      // apply middleware modifications
-      const requestSource = requestCtx.source as Source;
-      const requestConfig = mergeSourceRequestConfig(requestSource, requestCtx.headers, requestCtx.credentials);
-      const patchedSource = {
-        ...requestSource,
-        url: requestCtx.url ?? requestCtx.source.url ?? source.url,
-        ...(requestConfig ? { request: requestConfig } : undefined)
-      } as Source;
-      // run signal middleware (best-effort) before load
-      const signalCtx = await this.middleware.run('signal', {
-        ...requestCtx,
-        source: patchedSource,
-        tech: patchedSource.preferTech ?? this.techOrder[0],
-        url: patchedSource.url
-      });
-      const signalSource = signalCtx.source as Source;
-      const signalRequestConfig = mergeSourceRequestConfig(signalSource, signalCtx.headers, signalCtx.credentials);
-      const finalSource = {
-        ...signalSource,
-        url: signalCtx.url ?? signalCtx.source.url ?? patchedSource.url,
-        ...(signalRequestConfig ? { request: signalRequestConfig } : undefined)
-      } as Source;
-      try {
+        // run request middleware once before load
+        const requestCtx = await this.middleware.run('request', middlewareCtx, this.options.loadTimeoutMs);
+        if (!isCurrent()) return;
+        // apply middleware modifications
+        const requestSource = requestCtx.source as Source;
+        const requestConfig = mergeSourceRequestConfig(requestSource, requestCtx.headers, requestCtx.credentials);
+        const patchedSource = {
+          ...requestSource,
+          url: requestCtx.url ?? requestCtx.source.url ?? source.url,
+          ...(requestConfig ? { request: requestConfig } : undefined)
+        } as Source;
+        // run signal middleware (best-effort) before load
+        const signalCtx = await this.middleware.run('signal', {
+          ...requestCtx,
+          source: patchedSource,
+          tech: patchedSource.preferTech ?? this.techOrder[0],
+          url: patchedSource.url
+        }, this.options.loadTimeoutMs);
+        if (!isCurrent()) return;
+        const signalSource = signalCtx.source as Source;
+        const signalRequestConfig = mergeSourceRequestConfig(signalSource, signalCtx.headers, signalCtx.credentials);
+        const finalSource = {
+          ...signalSource,
+          url: signalCtx.url ?? signalCtx.source.url ?? patchedSource.url,
+          ...(signalRequestConfig ? { request: signalRequestConfig } : undefined)
+        } as Source;
         const loaded = await this.techManager.selectAndLoad([finalSource], this.techOrder, {
           buffer: this.bufferPolicy,
           reconnect: this.options.reconnect ?? DEFAULT_RECONNECT_POLICY,
@@ -455,23 +593,42 @@ export class FyraPlayer implements PlayerAPI {
           webCodecs: this.options.webCodecs,
           dataChannel: this.dataChannelOpts,
           mpegtsLoader: this.options.mpegtsLoader,
-          onTechWillLoad: (techName) => {
-            this.attachTechEvents(techName);
-          }
+          shouldContinue: isCurrent,
+          signal: controller.signal,
+          loadTimeoutMs: this.options.loadTimeoutMs,
+          onTechWillLoad: (techName, _tech, actualSource, signal) => {
+            this.attachTechEvents(techName, signal);
+            this.changeSession('selected', { source: actualSource, requestedSource, tech: techName, status: 'loading' });
+          },
+          onTechLoadFailed: () => {
+            if (!isCurrent()) return;
+            this.detachTechEvents();
+            this.changeSession('failed', null);
+          },
         });
+        if (!isCurrent()) return;
         if (!loaded) {
           throw new Error('No compatible tech/source');
         }
+        if (this.session) this.changeSession('loaded', { ...this.session, status: 'loaded' }, false);
+        if (!isCurrent()) return;
         this.startStatsTimer();
       } catch (e) {
+        if (!isCurrent()) return;
         this.state = 'error';
+        this.changeSession('failed', null);
+        if (!isCurrent()) return;
         this.bus.emit('error', e);
         await this.handleReconnect();
       }
-    })();
+    });
+    this.loadQueue = loadPromise.catch(() => {});
     
     // Store promise reference and ensure cleanup on completion
     this.loadingPromise = loadPromise;
+    // Queue is installed before synchronous observers can re-enter switch/destroy.
+    previousController?.abort();
+    if (isCurrent()) this.changeSession(reason, null);
     
     try {
       await loadPromise;
@@ -483,18 +640,25 @@ export class FyraPlayer implements PlayerAPI {
     }
   }
 
-  private attachTechEvents(name: TechName): void {
+  private attachTechEvents(name: TechName, signal?: AbortSignal): void {
     const tech = this.techManager.getCurrentTech();
     if (!tech) return;
     
     // Clean up previous handlers to prevent memory leaks
     this.detachTechEvents();
+    this.eventTech = tech;
+    const generation = this.loadGeneration;
+    const eventGeneration = this.techEventGeneration;
+    const isCurrent = () => !this.destroyed && !signal?.aborted && generation === this.loadGeneration
+      && eventGeneration === this.techEventGeneration && this.eventTech === tech;
     
     const forward = (event: EngineEvent, transform?: (args: unknown[]) => unknown[]) => {
       const handler = (...args: unknown[]) => {
+        if (!isCurrent()) return;
         const payload = transform ? transform(args) : args;
         const payloadArray = Array.isArray(payload) ? payload : [payload];
         this.bus.emit(event, ...payloadArray);
+        if (!isCurrent()) return;
         if (event === 'ready') {
           this.state = 'ready';
           this.reconnectAttempts = 0;
@@ -537,10 +701,20 @@ export class FyraPlayer implements PlayerAPI {
     forward('sei');
     forward('data');
     forward('metadata');
+    const streamHandler = (value: unknown) => {
+      if (!isCurrent() || !this.session) return;
+      const event = value as TechStreamChange;
+      if (event?.reason !== 'fallback' && event?.reason !== 'discontinuity') return;
+      this.changeSession(event.reason, { ...this.session, source: event.source ?? this.session.source });
+    };
+    this.techEventHandlers.set('streamchange', streamHandler);
+    tech.on('streamchange', streamHandler);
     const networkHandler = (...args: unknown[]) => {
+      if (!isCurrent()) return;
       const evt = args?.[0] as NetworkEventPayload | undefined;
       const enhancedEvt = enhanceNetworkEvent(evt);
       this.bus.emit('network', enhancedEvt);
+      if (!isCurrent()) return;
 
       // 仅在明确 fatal/断线事件时触发重连，避免正常抖动导致重置
       // Only treat explicitly fatal or hard failures as fatal. Transient 'disconnected' should not trigger fallback.
@@ -553,7 +727,8 @@ export class FyraPlayer implements PlayerAPI {
   }
 
   private detachTechEvents(): void {
-    const tech = this.techManager.getCurrentTech();
+    ++this.techEventGeneration;
+    const tech = this.eventTech;
     if (tech?.off) {
       for (const [event, handler] of this.techEventHandlers.entries()) {
         try {
@@ -564,9 +739,11 @@ export class FyraPlayer implements PlayerAPI {
       }
     }
     this.techEventHandlers.clear();
+    this.eventTech = null;
   }
 
   private startStatsTimer(): void {
+    if (this.destroyed) return;
     if (this.statsTimer) clearInterval(this.statsTimer);
     const interval = (this.options.metrics?.statsIntervalMs ?? DEFAULT_METRICS_OPTIONS.statsIntervalMs) || 1000;
     this.statsTimer = setInterval(() => {
@@ -585,6 +762,8 @@ export class FyraPlayer implements PlayerAPI {
   }
 
   private async handleReconnect(): Promise<void> {
+    if (this.destroyed || this.stopped) return;
+    const generation = this.loadGeneration;
     const reconnect = this.options.reconnect ?? DEFAULT_RECONNECT_POLICY;
     if (!reconnect.enabled) return;
     if (this.reconnectTimer) return;
@@ -596,7 +775,12 @@ export class FyraPlayer implements PlayerAPI {
         maxRetries,
         fatal: true
       }));
+      if (this.destroyed || generation !== this.loadGeneration) return;
       this.state = 'error';
+      this.detachTechEvents();
+      this.stopStatsTimer();
+      this.changeSession('failed', null);
+      if (this.destroyed || generation !== this.loadGeneration) return;
       try {
         await this.techManager.destroyCurrent();
       } catch {
@@ -612,6 +796,7 @@ export class FyraPlayer implements PlayerAPI {
       attempt: this.reconnectAttempts,
       maxRetries
     }));
+    if (this.destroyed || generation !== this.loadGeneration) return;
     this.reconnectHealthSnapshot = {
       sourceIndex: this.currentSourceIndex,
       techName: this.techManager.getCurrentTechName(),
@@ -624,6 +809,7 @@ export class FyraPlayer implements PlayerAPI {
       (1 + (reconnect.jitter ?? 0));
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
+      if (this.destroyed || this.stopped || generation !== this.loadGeneration) return;
       try {
         if (this.isPlaybackHealthySinceReconnectScheduled()) {
           this.reconnectHealthSnapshot = null;
@@ -634,7 +820,7 @@ export class FyraPlayer implements PlayerAPI {
         }
         this.reconnectHealthSnapshot = null;
         this.techManager.resetFailedTechs();
-        await this.loadCurrent();
+        await this.loadCurrent(false, 'reconnect');
       } catch (e) {
         this.bus.emit('error', e);
       }

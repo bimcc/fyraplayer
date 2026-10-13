@@ -39,7 +39,7 @@ describe('TechManager', () => {
     expect(manager.getCurrentTechName()).toBe('hls');
   });
 
-  test('marks failed tech and falls back to next tech', async () => {
+  test('falls back to the next tech without disabling a tech for other URLs', async () => {
     const manager = new TechManager(new EventBus());
     const webrtc = createMockTech({
       canPlay: () => true,
@@ -57,7 +57,7 @@ describe('TechManager', () => {
     });
 
     expect(result?.tech).toBe('hls');
-    expect(manager.getFailedTechs().has('webrtc')).toBe(true);
+    expect(manager.getFailedTechs().has('webrtc')).toBe(false);
   });
 
   test('rejects duplicate tech registration unless replaced explicitly', () => {
@@ -134,5 +134,25 @@ describe('TechManager', () => {
 
     manager.resetFailedTechs();
     expect(manager.getFailedTechs().size).toBe(0);
+  });
+
+  test('tries a same-protocol backup after the primary URL fails', async () => {
+    const manager = new TechManager();
+    const attempts: string[] = [];
+    manager.register('hls', createMockTech({ canPlay:s=>s.type==='hls', loadImpl:async s=>{
+      attempts.push(s.url); if(s.url==='primary') throw Error('unavailable');
+    }}));
+    const backup: Source = {type:'hls',url:'backup'};
+    const loaded = await manager.selectAndLoad([{type:'hls',url:'primary',fallbacks:[backup]}], ['hls'], {video:{} as HTMLVideoElement});
+    expect(attempts).toEqual(['primary','backup']);
+    expect(loaded).toEqual({source:backup,tech:'hls'});
+    expect(manager.getFailedTechs().size).toBe(0);
+  });
+
+  test('explicitly disabled techs stay disabled even when preferred by a source', async () => {
+    const manager = new TechManager(); const loadImpl = jest.fn();
+    manager.register('hls',createMockTech({loadImpl})); manager.markTechFailed('hls');
+    expect(await manager.selectAndLoad([{type:'hls',url:'a',preferTech:'hls'}], ['hls'], {video:{} as HTMLVideoElement})).toBeNull();
+    expect(loadImpl).not.toHaveBeenCalled();
   });
 });

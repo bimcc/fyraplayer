@@ -20,7 +20,7 @@ export interface DemuxedFrame {
  * @param data - Raw bytes of the private data
  * @param pts - Presentation timestamp in milliseconds
  */
-export type OnPrivateDataCallback = (pid: number, data: Uint8Array, pts: number) => void;
+export type OnPrivateDataCallback = (pid: number, data: Uint8Array, pts: number, pts90k?: bigint) => void;
 
 /**
  * Callback for SEI NAL unit extraction
@@ -79,7 +79,7 @@ export interface TsState {
   videoPes: { pts: number; data: Uint8Array[] } | null;
   audioPes: { pts: number; data: Uint8Array[] } | null;
   privateDataPids: Set<number>;
-  privateDataPes: Map<number, { pts: number; data: Uint8Array[] }>;
+  privateDataPes: Map<number, { pts: number; pts90k?: bigint; data: Uint8Array[]; expectedLength: number; size: number }>;
   /** Stream types for detected private data PIDs */
   privateDataStreamTypes: Map<number, number>;
 }

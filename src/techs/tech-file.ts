@@ -1,5 +1,6 @@
 ﻿import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, FileSource, MetadataEvent, MetricsOptions, MpegtsLoader, ReconnectPolicy, Source, WebCodecsConfig } from '../types.js';
+import { FileSource, MetadataEvent, MpegtsLoader, Source, WebCodecsConfig, TechLoadOptions } from '../types.js';
+import { throwIfAborted, waitWithSignal } from '../core/abort.js';
 import { WebCodecsDecoder } from './wsRaw/webcodecsDecoder.js';
 import { Renderer } from './wsRaw/renderer.js';
 import { Demuxer, type DemuxerCallbacks } from './wsRaw/demuxer.js';
@@ -59,7 +60,7 @@ type MpegtsPlayerLike = {
 type MpegtsModuleLike = {
   isSupported(): boolean;
   createPlayer(
-    mediaDataSource: { type: 'mpegts'; url: string; isLive: boolean },
+    mediaDataSource: { type: 'mpegts' | 'flv'; url: string; isLive: boolean },
     config?: Record<string, unknown>
   ): MpegtsPlayerLike;
   default?: MpegtsModuleLike;
@@ -107,15 +108,9 @@ export class FileTech extends AbstractTech {
 
   async load(
     source: Source,
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: WebCodecsConfig;
-      mpegtsLoader?: MpegtsLoader;
-    }
+    opts: TechLoadOptions
   ): Promise<void> {
+    throwIfAborted(opts.signal);
     this.source = source;
     this.buffer = opts.buffer;
     this.reconnect = opts.reconnect;
@@ -127,7 +122,8 @@ export class FileTech extends AbstractTech {
     
     // Use container hint for blob URLs, otherwise detect from extension
     const container = fileSource.container;
-    const isTs = container === 'ts' || (!isBlobUrl && (lower.endsWith('.ts') || lower.includes('.ts?')));
+    const isTs = container === 'ts' || (!isBlobUrl && /\.(ts|mts)(?:[?#]|$)/.test(lower));
+    const isFlv = container === 'flv' || (!isBlobUrl && /\.flv(?:[?#]|$)/.test(lower));
     const isMp4 = container === 'mp4' || (!isBlobUrl && (lower.endsWith('.mp4') || lower.includes('.mp4?')));
     
     this.cleanup();
@@ -143,9 +139,11 @@ export class FileTech extends AbstractTech {
     if (useWebCodecsForTs) {
       try {
         await this.loadTsWithWebCodecs(source.url, opts.video, opts.webCodecs);
+        throwIfAborted(opts.signal);
         this.bus.emit('ready');
         return;
       } catch (err) {
+        throwIfAborted(opts.signal);
         console.warn('[file] WebCodecs TS failed, fallback to mpegts.js', err);
         this.cleanupWebCodecs();
       }
@@ -154,13 +152,15 @@ export class FileTech extends AbstractTech {
     // MP4 + WebCodecs (opt-in via preferMp4)
     const preferMp4Wc = !!opts.webCodecs?.enable && opts.webCodecs?.preferMp4 === true;
     if (isMp4 && preferMp4Wc) {
-      const support = await probeWebCodecs();
+      const support = await waitWithSignal(probeWebCodecs(), opts.signal);
       if (support.h264 || (opts.webCodecs?.allowH265 && support.h265)) {
         try {
           await this.loadMp4WithWebCodecs(source.url, opts.video, support.h264 ? 'avc1.42E01E' : 'hvc1.1.6.L93.B0', opts.webCodecs);
+          throwIfAborted(opts.signal);
           this.bus.emit('ready');
           return;
         } catch (err) {
+          throwIfAborted(opts.signal);
           console.warn('[file] mp4 WebCodecs failed, fallback to native/MSE', err);
           this.cleanupMp4WebCodecs();
         }
@@ -168,14 +168,15 @@ export class FileTech extends AbstractTech {
     }
 
     // TS fallback via mpegts.js
-    if (isTs) {
-      const mpegts = await this.loadMpegts(opts.mpegtsLoader);
+    if (isTs || isFlv) {
+      const mpegts = await waitWithSignal(this.loadMpegts(opts.mpegtsLoader), opts.signal);
+      throwIfAborted(opts.signal);
       if (!mpegts.isSupported()) {
         throw new Error('FLV/TS MSE not supported in this browser');
       }
-      console.log('[file] Using mpegts.js for TS playback, url:', source.url);
+      console.log('[file] Using mpegts.js for TS/FLV playback, url:', source.url);
       this.tsPlayer = mpegts.createPlayer({
-        type: 'mpegts',
+        type: isFlv ? 'flv' : 'mpegts',
         url: source.url,
         isLive: false
       }, this.mpegtsConfig);
@@ -188,6 +189,7 @@ export class FileTech extends AbstractTech {
       // Native video/MSE
       this.video.src = source.url;
       await this.video.load();
+      throwIfAborted(opts.signal);
       this.bus.emit('ready');
     }
   }
@@ -274,11 +276,12 @@ export class FileTech extends AbstractTech {
     
     // Create demuxer callbacks for metadata extraction
     const callbacks: DemuxerCallbacks | undefined = this.metadataEnabled ? {
-      onPrivateData: (pid: number, data: Uint8Array, pts: number) => {
+      onPrivateData: (pid: number, data: Uint8Array, pts: number, pts90k?: bigint) => {
         const event: MetadataEvent = {
           type: 'private-data',
           raw: data,
           pts,
+          pts90k,
           pid
         };
         this.bus.emit('metadata', event);

@@ -33,11 +33,12 @@ export function buildDemuxerOptionsWithMetadata(
     hasCallbacks = true;
 
     if (onMetadata) {
-      callbacks.onPrivateData = (pid: number, data: Uint8Array, pts: number) => {
+      callbacks.onPrivateData = (pid: number, data: Uint8Array, pts: number, pts90k?: bigint) => {
         metadataBuffer.push({
           type: 'private-data',
           raw: data,
           pts,
+          ...(pts90k === undefined ? {} : { pts90k }),
           pid
         });
       };

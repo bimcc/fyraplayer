@@ -3,7 +3,7 @@ import type { MpegtsLoader } from '../../types.js';
 type MpegtsPlayerLike = {
   attachMediaElement(video: HTMLVideoElement): void;
   load(): void;
-  play(): void;
+  play(): void | Promise<void>;
   pause(): void;
   unload(): void;
   detachMediaElement(): void;
@@ -30,8 +30,7 @@ type MpegtsModuleLike = {
  */
 export class MseFallback {
   private player: MpegtsPlayerLike | null = null;
-  private onReady?: () => void;
-  private onError?: (err: unknown) => void;
+  private generation = 0;
 
   async start(
     url: string,
@@ -40,15 +39,14 @@ export class MseFallback {
     format: 'flv' | 'mpegts' = 'flv',
     loader?: MpegtsLoader
   ): Promise<void> {
-    this.onReady = handlers?.onReady;
-    this.onError = handlers?.onError;
-    const mpegts = await loadMpegts(loader);
-    if (!mpegts.isSupported()) {
-      this.onError?.(new Error('FLV/TS MSE not supported in this browser'));
-      return;
-    }
     this.stop();
-    this.player = mpegts.createPlayer(
+    const generation = this.generation;
+    const mpegts = await loadMpegts(loader);
+    if (generation !== this.generation) return;
+    if (!mpegts.isSupported()) {
+      throw new Error('FLV/TS MSE not supported in this browser');
+    }
+    const player = mpegts.createPlayer(
       {
         type: format,
         isLive: true,
@@ -62,24 +60,27 @@ export class MseFallback {
         lazyLoad: false
       }
     );
-    this.player.attachMediaElement(video);
-    this.player.load();
-    this.player.play();
-    this.player.on(mpegts.Events.ERROR, (err: unknown) => this.onError?.(err));
-    this.player.on(mpegts.Events.LOADING_COMPLETE, () => this.onReady?.());
+    this.player = player;
+    const isCurrent = () => generation === this.generation && this.player === player;
+    const onError = (err: unknown) => { if (isCurrent()) handlers?.onError?.(err); };
+    player.attachMediaElement(video);
+    player.on(mpegts.Events.ERROR, onError);
+    player.on(mpegts.Events.LOADING_COMPLETE, () => { if (isCurrent()) handlers?.onReady?.(); });
+    player.load();
+    // A live stream can wait indefinitely for its first frame. Do not make
+    // Tech.load (and therefore source switching/teardown) wait for play().
+    const playback = player.play();
+    if (playback) void playback.catch(onError);
   }
 
   stop(): void {
-    if (this.player) {
-      try {
-        this.player.pause();
-        this.player.unload();
-        this.player.detachMediaElement();
-        this.player.destroy();
-      } catch {
-        /* ignore */
+    ++this.generation;
+    const player = this.player;
+    this.player = null;
+    if (player) {
+      for (const cleanup of ['pause', 'unload', 'detachMediaElement', 'destroy'] as const) {
+        try { player[cleanup](); } catch { /* Continue releasing remaining resources. */ }
       }
-      this.player = null;
     }
   }
 }

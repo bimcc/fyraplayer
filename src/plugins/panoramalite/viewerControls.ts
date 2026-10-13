@@ -1,4 +1,6 @@
 import type { PanoramaLiteMediaType, PanoramaLiteViewerControlsOptions } from './types.js';
+import { controlIconSvg, type ControlIcon } from '../../utils/controlIcons.js';
+import { FULLSCREEN_CHANGE_EVENT, getFullscreenElement, releaseFullscreen, toggleContainerFullscreen } from '../../utils/fullscreen.js';
 
 export interface PanoramaLiteViewerControls {
   bindVideo(video: HTMLVideoElement, media: PanoramaLiteMediaType): void;
@@ -49,11 +51,11 @@ export function createPanoramaLiteViewerControls(config: PanoramaLiteViewerContr
   root.setAttribute('role', 'group');
   root.setAttribute('aria-label', 'Panorama controls');
 
-  const playButton = createButton('>', 'Play or pause');
-  const resetButton = createButton('↺', 'Reset view');
-  const loopButton = createButton('↻', 'Loop playback');
-  const muteButton = createButton('♪', 'Mute audio');
-  const fullscreenButton = createButton('[ ]', 'Toggle fullscreen');
+  const playButton = createButton('play', 'Play or pause');
+  const resetButton = createButton('reset', 'Reset view');
+  const loopButton = createButton('repeat', 'Loop playback');
+  const muteButton = createButton('volume', 'Mute audio');
+  const fullscreenButton = createButton('fullscreen', 'Toggle fullscreen');
   const timeLabel = document.createElement('span');
   timeLabel.className = 'fyra-panoramalite-time';
   const seek = document.createElement('input');
@@ -73,15 +75,45 @@ export function createPanoramaLiteViewerControls(config: PanoramaLiteViewerContr
   volume.value = '100';
   volume.setAttribute('aria-label', 'Volume');
 
-  root.appendChild(playButton);
-  root.appendChild(timeLabel);
   root.appendChild(seek);
-  root.appendChild(loopButton);
-  root.appendChild(muteButton);
-  root.appendChild(volume);
-  root.appendChild(resetButton);
-  root.appendChild(fullscreenButton);
+  const bar = document.createElement('div');
+  bar.className = 'fyra-panoramalite-bar';
+  const spacer = document.createElement('div');
+  spacer.className = 'fyra-panoramalite-spacer';
+  const volumeWrap = document.createElement('div');
+  volumeWrap.className = 'fyra-panoramalite-volume-wrap';
+  const volumePop = document.createElement('div');
+  volumePop.className = 'fyra-panoramalite-volume-pop';
+  volumePop.appendChild(volume);
+  volumeWrap.appendChild(muteButton);
+  volumeWrap.appendChild(volumePop);
+  bar.appendChild(playButton);
+  bar.appendChild(timeLabel);
+  bar.appendChild(spacer);
+  bar.appendChild(loopButton);
+  bar.appendChild(resetButton);
+  bar.appendChild(volumeWrap);
+  bar.appendChild(fullscreenButton);
+  root.appendChild(bar);
   config.host.appendChild(root);
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+  let hovering = false;
+  let focused = false;
+
+  function clearHideTimer(): void {
+    if (hideTimer !== null) clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+
+  function showControls(): void {
+    root.classList.remove('fyra-panoramalite-auto-hidden');
+    clearHideTimer();
+    if (media === 'image' || video.paused) return;
+    hideTimer = setTimeout(() => {
+      hideTimer = null;
+      if (!video.paused && !hovering && !focused && !root.querySelector(':focus-visible')) root.classList.add('fyra-panoramalite-auto-hidden');
+    }, 3000);
+  }
 
   const listen = (target: EventTarget, event: string, handler: EventListener) => {
     target.addEventListener(event, handler);
@@ -92,7 +124,8 @@ export function createPanoramaLiteViewerControls(config: PanoramaLiteViewerContr
     videoDisposers.push(() => video.removeEventListener(event, handler));
   };
   const bindVideoEvents = () => {
-    for (const event of ['play', 'pause', 'ended', 'timeupdate', 'durationchange', 'loadedmetadata', 'volumechange']) {
+    for (const event of ['play', 'pause', 'ended']) listenVideo(event, () => { update(); showControls(); });
+    for (const event of ['timeupdate', 'durationchange', 'loadedmetadata', 'volumechange']) {
       listenVideo(event, update);
     }
   };
@@ -101,7 +134,14 @@ export function createPanoramaLiteViewerControls(config: PanoramaLiteViewerContr
   };
 
   listen(root, 'pointerdown', (event) => event.stopPropagation());
-  listen(root, 'touchstart', (event) => event.stopPropagation());
+  listen(root, 'touchstart', (event) => { showControls(); event.stopPropagation(); });
+  listen(config.host, 'pointermove', showControls);
+  listen(config.host, 'pointerdown', showControls);
+  listen(root, 'pointerenter', event => { if ((event as PointerEvent).pointerType === 'touch') return; hovering = true; showControls(); });
+  listen(root, 'pointerleave', event => { if ((event as PointerEvent).pointerType === 'touch') return; hovering = false; showControls(); });
+  listen(root, 'focusin', () => { focused = !globalThis.matchMedia?.('(pointer: coarse)').matches; showControls(); });
+  listen(root, 'focusout', () => { focused = false; showControls(); });
+  disposers.push(clearHideTimer);
   listen(playButton, 'click', () => {
     if (media === 'image') return;
     if (video.paused) {
@@ -152,40 +192,42 @@ export function createPanoramaLiteViewerControls(config: PanoramaLiteViewerContr
     config.resize();
     update();
   });
+  listen(document, FULLSCREEN_CHANGE_EVENT, () => { config.resize(); update(); showControls(); });
 
   const timer = window.setInterval(update, 500);
   disposers.push(() => window.clearInterval(timer));
   bindVideoEvents();
   update();
+  showControls();
 
   function update(): void {
     const image = media === 'image';
     const finiteDuration = !image && hasFiniteDuration(video);
-    const live = !image && !finiteDuration;
     toggleElement(playButton, options.playback && !image);
-    toggleElement(timeLabel, finiteDuration);
+    root.classList.toggle('fyra-panoramalite-compact', config.host.clientWidth < 520);
+    toggleElement(timeLabel, !image);
     toggleElement(seek, options.seek && finiteDuration);
     toggleElement(loopButton, options.loop && finiteDuration);
-    toggleElement(muteButton, options.volume && !image);
-    toggleElement(volume, options.volume && finiteDuration);
+    toggleElement(volumeWrap, options.volume && !image);
     toggleElement(resetButton, options.resetView);
     toggleElement(fullscreenButton, options.fullscreen);
 
-    playButton.textContent = video.paused ? '>' : 'II';
+    setButtonIcon(playButton, video.paused ? 'play' : 'pause');
     playButton.title = video.paused ? 'Play' : 'Pause';
     playButton.setAttribute('aria-label', playButton.title);
-    loopButton.textContent = '↻';
     loopButton.title = video.loop ? 'Disable loop' : 'Loop playback';
     loopButton.setAttribute('aria-label', loopButton.title);
     loopButton.setAttribute('aria-pressed', String(video.loop));
-    muteButton.textContent = video.muted || video.volume === 0 ? '×' : '♪';
+    setButtonIcon(muteButton, video.muted || video.volume === 0 ? 'muted' : 'volume');
     muteButton.title = video.muted || video.volume === 0 ? 'Unmute audio' : 'Mute audio';
     muteButton.setAttribute('aria-label', muteButton.title);
     muteButton.setAttribute('aria-pressed', String(video.muted || video.volume === 0));
-    fullscreenButton.textContent = isFullscreen(config.host) ? '□' : '[ ]';
+    setButtonIcon(fullscreenButton, isFullscreen(config.host) ? 'exitFullscreen' : 'fullscreen');
     fullscreenButton.title = isFullscreen(config.host) ? 'Exit fullscreen' : 'Enter fullscreen';
     fullscreenButton.setAttribute('aria-label', fullscreenButton.title);
     volume.value = String(Math.round((video.muted ? 0 : video.volume) * 100));
+    const played = finiteDuration ? clampNumber(video.currentTime / video.duration, 0, 1) * 100 : 0;
+    seek.style.background = `linear-gradient(to right, #fff ${played}%, rgba(255,255,255,0.3) ${played}%)`;
 
     if (image) {
       timeLabel.textContent = '';
@@ -207,19 +249,24 @@ export function createPanoramaLiteViewerControls(config: PanoramaLiteViewerContr
       media = nextMedia;
       bindVideoEvents();
       update();
+      showControls();
     },
     setMedia(nextMedia) {
       media = nextMedia;
       update();
+      showControls();
     },
     setVisible(visible) {
       toggleElement(root, visible);
+      if (visible) showControls();
+      else clearHideTimer();
     },
     update,
     destroy() {
       clearVideoEvents();
       while (disposers.length) disposers.pop()?.();
       root.remove();
+      void releaseFullscreen(config.host).catch(() => {});
     },
   };
 }
@@ -240,13 +287,19 @@ function normalizeOptions(options: boolean | PanoramaLiteViewerControlsOptions |
   };
 }
 
-function createButton(text: string, title: string): HTMLButtonElement {
+function createButton(icon: ControlIcon, title: string): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  button.textContent = text;
+  setButtonIcon(button, icon);
   button.title = title;
   button.setAttribute('aria-label', title);
   return button;
+}
+
+function setButtonIcon(button: HTMLButtonElement, icon: ControlIcon): void {
+  if (button.dataset.icon === icon) return;
+  button.dataset.icon = icon;
+  button.innerHTML = controlIconSvg(icon);
 }
 
 function toggleElement(element: HTMLElement, visible: boolean): void {
@@ -271,31 +324,11 @@ function clampNumber(value: number, min: number, max: number): number {
 }
 
 async function toggleFullscreen(host: HTMLElement): Promise<void> {
-  if (isFullscreen(host)) {
-    await exitFullscreen();
-    return;
-  }
-  const candidate = host as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
-  if (candidate.requestFullscreen) {
-    await candidate.requestFullscreen();
-    return;
-  }
-  await candidate.webkitRequestFullscreen?.();
-}
-
-async function exitFullscreen(): Promise<void> {
-  const doc = document as Document & { webkitExitFullscreen?: () => Promise<void> | void };
-  if (document.exitFullscreen) {
-    await document.exitFullscreen();
-    return;
-  }
-  await doc.webkitExitFullscreen?.();
+  await toggleContainerFullscreen(host);
 }
 
 function isFullscreen(host: HTMLElement): boolean {
-  const doc = document as Document & { webkitFullscreenElement?: Element | null };
-  const element = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
-  return element === host;
+  return getFullscreenElement() === host;
 }
 
 function injectViewerControlsStyles(): void {
@@ -305,100 +338,164 @@ function injectViewerControlsStyles(): void {
   style.textContent = `
 .fyra-panoramalite-viewer-controls {
   position: absolute;
-  left: 50%;
-  right: auto;
-  bottom: 12px;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 6;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 5px;
-  max-width: calc(100% - 24px);
-  padding: 0;
-  color: #f8fafc;
-  background: transparent;
-  border: 0;
+  flex-direction: column;
+  padding-top: 8px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
+  color: #fff;
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.7) 100%);
   pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.3s ease;
 }
+.fyra-panoramalite-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px 10px;
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.fyra-panoramalite-spacer { flex: 1; min-width: 0; }
 .fyra-panoramalite-viewer-controls button {
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
   padding: 0;
-  border: 1px solid rgba(226, 232, 240, 0.28);
-  border-radius: 999px;
-  background: rgba(7, 15, 27, 0.62);
-  color: #f8fafc;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #fff;
   font: 600 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   pointer-events: auto;
 }
 .fyra-panoramalite-viewer-controls button:hover {
-  background: rgba(15, 23, 42, 0.78);
+  background: rgba(255, 255, 255, 0.12);
+}
+.fyra-panoramalite-viewer-controls button[aria-pressed="true"] {
+  color: #93c5fd;
+  background: rgba(96, 165, 250, 0.15);
+}
+.fyra-panoramalite-viewer-controls :focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
+}
+.fyra-panoramalite-viewer-controls svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3));
 }
 .fyra-panoramalite-viewer-controls input[type="range"] {
-  accent-color: #22c55e;
-  height: 30px;
-  border-radius: 999px;
-  background: rgba(7, 15, 27, 0.52);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  appearance: none;
+  -webkit-appearance: none;
+  accent-color: #fff;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
   pointer-events: auto;
 }
 .fyra-panoramalite-seek {
-  flex: 0 1 220px;
-  width: min(220px, 30vw);
-  min-width: 88px;
+  width: 100%;
+  height: 4px;
+  min-width: 0;
+  border-radius: 0;
+  background: linear-gradient(to right, #fff var(--fyra-played, 0%), rgba(255,255,255,0.3) var(--fyra-played, 0%));
+}
+.fyra-panoramalite-viewer-controls input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+.fyra-panoramalite-viewer-controls input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+}
+.fyra-panoramalite-volume-wrap { position: relative; display: flex; }
+.fyra-panoramalite-volume-pop {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(28,28,28,0.95);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.fyra-panoramalite-volume-wrap:hover .fyra-panoramalite-volume-pop,
+.fyra-panoramalite-volume-wrap:focus-within .fyra-panoramalite-volume-pop {
+  visibility: visible;
+  opacity: 1;
 }
 .fyra-panoramalite-volume {
-  flex: 0 0 56px;
-  min-width: 52px;
+  width: 6px;
+  height: 80px;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  background: rgba(255,255,255,0.3);
+  border-radius: 3px;
+  min-width: 0;
 }
 .fyra-panoramalite-time {
   min-width: 38px;
-  padding: 0 8px;
+  flex: 0 0 auto;
   height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
-  background: rgba(7, 15, 27, 0.52);
-  color: #cbd5e1;
-  font: 600 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #fff;
+  margin-left: 4px;
+  font: 500 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
   pointer-events: auto;
 }
 .fyra-panoramalite-hidden {
   display: none !important;
 }
-:fullscreen .fyra-panoramalite-viewer-controls {
-  position: fixed;
-  bottom: 16px;
+.fyra-panoramalite-auto-hidden { opacity: 0; }
+.fyra-panoramalite-auto-hidden:not(:focus-within) * { pointer-events: none; }
+.fyra-panoramalite-auto-hidden:focus-within { opacity: 1; }
+.fyra-panoramalite-compact .fyra-panoramalite-bar { padding: 4px max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px)); gap: 2px; }
+.fyra-panoramalite-compact button[data-icon="repeat"] {
+  display: none;
 }
-@media (max-width: 560px) {
-  .fyra-panoramalite-viewer-controls {
-    left: 50%;
-    right: auto;
-    bottom: 8px;
-    max-width: calc(100% - 16px);
+@media (pointer: coarse) {
+  .fyra-panoramalite-auto-hidden:focus-within { opacity: 0; }
+  .fyra-panoramalite-auto-hidden * { pointer-events: none; }
+  .fyra-panoramalite-viewer-controls button { flex-basis: 44px; width: 44px; min-width: 44px; height: 44px; }
+  .fyra-panoramalite-viewer-controls .fyra-panoramalite-volume-pop { display: none; }
+  .fyra-panoramalite-viewer-controls .fyra-panoramalite-seek {
+    height: 24px;
+    background: linear-gradient(to bottom, transparent 10px, rgba(255,255,255,0.3) 10px, rgba(255,255,255,0.3) 14px, transparent 14px) !important;
+    touch-action: none;
   }
-  .fyra-panoramalite-viewer-controls button {
-    width: 28px;
-    height: 28px;
-    min-width: 28px;
-  }
-  .fyra-panoramalite-time {
-    display: none;
-  }
-  .fyra-panoramalite-seek {
-    width: min(170px, 42vw);
-  }
-  .fyra-panoramalite-volume {
-    flex-basis: 52px;
-  }
+  .fyra-panoramalite-viewer-controls .fyra-panoramalite-seek::-webkit-slider-thumb { width: 18px; height: 18px; }
 }
 `;
   document.head?.appendChild(style);

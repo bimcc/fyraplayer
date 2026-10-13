@@ -1,4 +1,4 @@
-import { BufferPolicy, EngineStats, MetricsOptions, ReconnectPolicy, Source, Tech } from '../types.js';
+import { BufferPolicy, EngineStats, MetricsOptions, ReconnectPolicy, Source, Tech, TechLoadOptions } from '../types.js';
 import { EventBus } from '../core/eventBus.js';
 
 export abstract class AbstractTech implements Tech {
@@ -15,14 +15,7 @@ export abstract class AbstractTech implements Tech {
 
   abstract load(
     source: Source,
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: import('../types.js').WebCodecsConfig;
-      dataChannel?: import('../types.js').DataChannelOptions;
-    }
+    opts: TechLoadOptions
   ): Promise<void>;
 
   on(event: string, handler: (...args: unknown[]) => void): void {

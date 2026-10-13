@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>FyraPlayer PanoramaLite Demo</title>
     <style>
       * { box-sizing: border-box; }
@@ -155,7 +155,10 @@
         font-weight: 650;
       }
       @media (max-width: 720px) {
-        body { padding: 12px; }
+        body { padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left)); }
+        .controls input, .controls select, .controls button, .toggle { min-height: 44px; font-size: 16px; }
+        .toggle input { min-height: 0; }
+        .plugin-row { grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; }
         .controls {
           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         }

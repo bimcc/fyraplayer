@@ -9,13 +9,17 @@ import defaultSources from "./sources.js";
 import { createUiComponentsPlugin } from "../src/ui/index.js";
 import { createPanoramaLitePlugin, type PanoramaLiteHandle } from "../src/plugins/panoramalite.js";
 import { createDashTechPlugin } from "../src/plugins/dash.js";
+import {createWebTransportTechPlugin} from '../src/plugins/webtransport.js';
+import {createPlaybackHealthPlugin, type PlaybackHealthHandle, type PlaybackHealthSnapshot} from '../src/plugins/playback-health.js';
+import dashJsScriptUrl from "../node_modules/dashjs/dist/modern/umd/dash.all.min.js?url";
 
-type SourceType = "auto" | "hls" | "dash" | "fmp4" | "ws-raw" | "file" | "webrtc" | "webrtc-oven" | "gb28181";
+type SourceType = "auto" | "hls" | "dash" | "fmp4" | "ws-raw" | "file" | "webrtc" | "webrtc-oven" | "gb28181" | "webtransport";
 type SimpleSource = {
   label: string;
   type: SourceType;
   url: string;
   lowLatency?: boolean;
+  allowH265?: boolean;
   fmp4?: {
     transport?: "http" | "ws";
     codec?: "h264" | "h265" | "av1";
@@ -57,9 +61,26 @@ const typeSelect = document.getElementById("type-select") as HTMLSelectElement;
 const statsEl = document.getElementById("stats") as HTMLDivElement;
 const playBtn = document.getElementById("btn-play") as HTMLButtonElement;
 const pauseBtn = document.getElementById("btn-pause") as HTMLButtonElement;
+const stopBtn = document.getElementById("btn-stop") as HTMLButtonElement;
 const loadBtn = document.getElementById("btn-load") as HTMLButtonElement;
 const tsNote = document.getElementById("ts-note") as HTMLDivElement;
 const wcSupport = document.getElementById("wc-support") as HTMLDivElement;
+const playbackPath = document.getElementById('playback-path') as HTMLDivElement;
+const healthStatus = document.getElementById('playback-health') as HTMLDivElement;
+function renderHealth(snapshot:PlaybackHealthSnapshot) {
+  const labels={idle:'未加载',loading:'加载中',ready:'已就绪',playing:'播放中',paused:'已暂停',seeking:'定位中',suspended:'观测已暂停',stalled:'画面暂无进展',error:'播放失败',ended:'已结束',stopped:'已停止',destroyed:'未加载'};
+  const first=snapshot.firstFrameMs===undefined ? '' : ` · 首帧 ${Math.round(snapshot.firstFrameMs)}ms`;
+  healthStatus.textContent=`播放观测：${labels[snapshot.status]}${first} · 卡顿 ${snapshot.stallCount} 次`;
+  healthStatus.title=snapshot.precision==='media-event' ? '使用媒体事件估算；首帧是加载到首次观察到视频进展的耗时，包含等待用户播放的时间。'
+    : '首帧是加载到首次观察到帧的耗时，包含等待用户播放的时间；卡顿表示帧无进展，不代表已经确定故障原因。';
+}
+function syncGatewayPanel() {
+  const panel=document.getElementById('gb-section');
+  if(panel) panel.hidden=typeSelect.value!=='gb28181';
+  const hevc=document.getElementById('wt-hevc-option');
+  if(hevc) hevc.hidden=typeSelect.value!=='webtransport';
+}
+typeSelect.addEventListener('change',syncGatewayPanel);
 const logEl = document.getElementById("log") as HTMLDivElement;
 const skinToggle = document.getElementById("toggle-skin") as HTMLInputElement;
 const nativeToggle = document.getElementById("toggle-native") as HTMLInputElement;
@@ -87,6 +108,7 @@ const openFileBtn = document.getElementById("btn-open-file") as HTMLButtonElemen
 let player: FyraPlayer | null = null;
 let busy: string | false = false;
 let operationQueue: Promise<void> = Promise.resolve();
+let commandEpoch = 0;
 let uiStatus: "idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "error" | "buffering" = "idle";
 let currentSrc: SimpleSource | null = null;
 let panoramaHandle: PanoramaLiteHandle | null = null;
@@ -236,10 +258,13 @@ function populateSelect() {
 function syncUiWithSource(src: SimpleSource) {
   urlInput.value = src.url;
   typeSelect.value = src.type;
+  syncGatewayPanel();
+  const hevcToggle=document.querySelector<HTMLInputElement>('#wt-hevc');
+  if (hevcToggle) hevcToggle.checked=!!src.allowH265;
   if (src.type === "file" && src.url.toLowerCase().endsWith(".ts")) {
     tsNote.textContent = "提示：本地 TS 需通过 http 服务访问，如 http://localhost:3000/DJI_20250611085647_0001_V.TS";
   } else {
-    tsNote.textContent = "";
+    tsNote.textContent = src.type==='webtransport' ? '需要提供 fyra-media 格式的 HTTP/3 播放地址；纯视频可直接播放，遥测解析由应用按需接入。' : "";
   }
   if (src.type === "gb28181" && src.gb) {
     if (gbInviteInput) gbInviteInput.value = src.gb.invite || "";
@@ -277,6 +302,7 @@ function setBusy(flag: string | false, message?: string) {
   const disabled = !!flag;
   playBtn.disabled = disabled;
   pauseBtn.disabled = false;
+  stopBtn.disabled = !player;
   loadBtn.disabled = disabled;
   select.disabled = disabled;
   typeSelect.disabled = disabled;
@@ -477,6 +503,64 @@ function setPanoramaMode(
   options: { updateCurrentSource?: boolean; reloadIfTextureChanged?: boolean } = {}
 ): void {
   const next = !!enabled;
+  const needsCorsReload = next && !!player && !!video.currentSrc && !video.srcObject && video.crossOrigin === null
+    && /^https?:/.test(video.currentSrc) && new URL(video.currentSrc).origin !== location.origin;
+  if (options.reloadIfTextureChanged && needsCorsReload && currentSrc) {
+    const source = currentSrc;
+    const epoch = commandEpoch;
+    if (panoramaToggle) panoramaToggle.checked = false;
+    void safeRun('panorama', async () => {
+      const controller = new AbortController();
+      panoramaProbe?.abort();
+      panoramaProbe = controller;
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        // A small CORS GET verifies texture access before changing the working player.
+        // Cancel the body even if the server ignores Range; never download a second video.
+        const response = await fetch(video.currentSrc, { headers: { Range: 'bytes=0-0' }, signal: controller.signal });
+        await response.body?.cancel();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (epoch !== commandEpoch || source !== currentSrc) return;
+        const time = video.currentTime, playing = !video.paused, loop = video.loop;
+        panoramaMode = true;
+        if (panoramaToggle) panoramaToggle.checked = true;
+        const nextSource = updateCurrentPanoramaSource(true) as SimpleSource;
+        await createPlayer(nextSource);
+        if (epoch !== commandEpoch) return;
+        if (video.readyState < 1) await new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            video.removeEventListener('loadedmetadata', ready);
+            video.removeEventListener('error', failed);
+            controller.signal.removeEventListener('abort', failed);
+          };
+          const ready = () => { cleanup(); resolve(); };
+          const failed = () => { cleanup(); reject(new Error('Panorama video reload failed or cancelled')); };
+          video.addEventListener('loadedmetadata', ready, { once: true });
+          video.addEventListener('error', failed, { once: true });
+          controller.signal.addEventListener('abort', failed, { once: true });
+          if (controller.signal.aborted) failed();
+        });
+        if (epoch !== commandEpoch) return;
+        video.loop = loop;
+        if (Number.isFinite(video.duration) && time < video.duration) video.currentTime = time;
+        if (playing) await player?.play();
+        showPanoramaFeedback('');
+      } catch (error) {
+        if (epoch !== commandEpoch) return;
+        setPanoramaMode(false);
+        if (player?.getVideoElement().crossOrigin !== null) {
+          await createPlayer(updateCurrentPanoramaSource(false) as SimpleSource);
+        }
+        showPanoramaFeedback('此视频未通过跨域读取检查，暂时无法用于全景渲染。请检查视频服务的 CORS 配置或网络连接；普通播放仍可使用。');
+        appendLog(`panorama CORS check: ${String(error)}`);
+      } finally {
+        clearTimeout(timeout);
+        if (panoramaProbe === controller) panoramaProbe = undefined;
+      }
+    });
+    return;
+  }
+  showPanoramaFeedback('');
   const texture = getPanoramaTextureSettings();
   panoramaMode = next;
   if (panoramaToggle) panoramaToggle.checked = next;
@@ -494,6 +578,12 @@ function setPanoramaMode(
   }
   panoramaHandle?.setEnabled(next);
   syncPanoramaModeUi();
+}
+
+let panoramaProbe: AbortController | undefined;
+function showPanoramaFeedback(message: string): void {
+  const feedback = document.getElementById('panorama-feedback');
+  if (feedback) { feedback.textContent = message; feedback.hidden = !message; }
 }
 
 function parseGbInviteUrl(inviteUrl: string): {
@@ -546,6 +636,7 @@ function syncGbFieldsFromInvite(): { deviceId?: string; channelId?: string } {
 function toPlayerSource(src: SimpleSource): import('../src/types.js').Source {
   const pick = src.type === "auto" ? detectType(src.url) : src.type;
   const base = sourceBaseFields(src);
+  if (pick === 'webtransport') return {type:'webtransport',url:src.url,allowH265:src.allowH265,...base};
   if (pick === "hls") return { type: "hls" as const, url: src.url, lowLatency: src.lowLatency, ...base, preferTech: "hls" as const };
   if (pick === "dash") return { type: "dash" as const, url: src.url, ...base, preferTech: "dash" as const };
   if (pick === "fmp4") {
@@ -641,15 +732,30 @@ function detectType(url: string): Exclude<SourceType, "auto"> {
 }
 
 function bindPlayerEvents(p: FyraPlayer) {
-  p.on("ready", () => setStatus("ready"));
-  p.on("play", () => setStatus("playing"));
-  p.on("pause", () => setStatus("paused"));
-  p.on("ended", () => setStatus("ended"));
-  p.on("error", (e: any) => setStatus("error", `error: ${e?.message || e}`));
-  p.on("network", (evt: any) => {
+  let codecPath = '';
+  const updatePath = () => {
+    const session=p.getPlaybackSession();
+    playbackPath.textContent=session ? `播放路径：${session.tech}${codecPath ? ` / ${codecPath}` : session.source.type==='ws-raw' ? ` / ${session.source.pipeline ?? 'mse'}` : ''}` : '播放路径：未加载';
+  };
+  const on = (event: string, handler: (...args: any[]) => void) => {
+    p.on(event, (...args) => { if (player === p) handler(...args); });
+  };
+  on("ready", () => setStatus("ready"));
+  on('sessionchange', event => {
+    if (!event.session) codecPath='';
+    updatePath();
+  });
+  on("play", () => setStatus("playing"));
+  on("pause", () => setStatus("paused"));
+  on("stop", () => setStatus("idle"));
+  on("ended", () => setStatus("ended"));
+  on("error", (e: any) => setStatus("error", `error: ${e?.message || e}`));
+  on("network", (evt: any) => {
     latestNetworkEvent = evt;
     const msg = `network: ${JSON.stringify(evt)}`;
     appendLog(msg);
+    if(evt?.type==='webcodecs-config') {codecPath=`WebCodecs / ${evt.codec}`;updatePath();}
+    if(evt?.type==='fmp4-codec-selected') {codecPath=`MSE / ${evt.mimeType}`;updatePath();}
     if (evt?.type === "reconnect") {
       setStatus("loading", `reconnecting (${evt.attempt || 0}/${evt.maxRetries || 0})...`);
       return;
@@ -663,15 +769,15 @@ function bindPlayerEvents(p: FyraPlayer) {
       setStatus("error", `fatal: ${reason}`);
     }
   });
-  p.on("qos", (evt: any) => {
+  on("qos", (evt: any) => {
     latestQosEvent = evt;
     if (evt?.code || evt?.type) {
       const code = evt?.code || evt?.type || "qos";
       appendLog(`qos[${code}]: ${JSON.stringify(evt)}`);
     }
   });
-  p.on("buffer", () => setStatus("loading", "buffering..."));
-  p.on("stats", ({ stats }) => {
+  on("buffer", () => setStatus("loading", "buffering..."));
+  on("stats", ({ stats }) => {
     latestStatsEvent = stats;
     if (!stats) return;
     statsEl.textContent = `bitrate: ${stats.bitrateKbps || "-"} kbps | fps: ${stats.fps || "-"} | res: ${stats.width || "-"}x${stats.height || "-"}`;
@@ -679,6 +785,7 @@ function bindPlayerEvents(p: FyraPlayer) {
 }
 
 async function createPlayer(source: SimpleSource) {
+  const epoch = commandEpoch;
   if (player) {
     const previous = player;
     player = null;
@@ -687,6 +794,10 @@ async function createPlayer(source: SimpleSource) {
     panoramaHandle = null;
     await previous.destroy().catch(() => {});
   }
+  if (epoch !== commandEpoch) return;
+  // Native cross-origin playback is allowed without CORS; texture reads require it.
+  // Clear a previous panorama source's attribute before ordinary playback.
+  video.removeAttribute('crossorigin');
   const effectiveSource = applyLowLatencyToggle(source);
   const sourcePanoramaMode = isPanoramaSource(effectiveSource as any) || !!panoramaToggle?.checked;
   panoramaMode = sourcePanoramaMode;
@@ -743,11 +854,22 @@ async function createPlayer(source: SimpleSource) {
       },
       onError: (error) => {
         appendLog(`panoramalite error: ${error instanceof Error ? error.message : String(error)}`);
-        syncPanoramaModeUi();
+        setPanoramaMode(false);
+        showPanoramaFeedback('无法启用全景渲染，已恢复普通画面。请检查视频跨域权限、WebGL 支持和视频尺寸。');
       }
     })
   ];
-  plugins.push(createDashTechPlugin());
+  let health:PlaybackHealthHandle | undefined;
+  plugins.push(createDashTechPlugin({ scriptUrl: dashJsScriptUrl }));
+  if(effectiveSource.type==='webtransport') plugins.push(createWebTransportTechPlugin({onFrame:(_frame,info)=>{
+    health?.reportFrame({mediaTime:info.mediaTime,sessionEpoch:player?.getPlaybackSession()?.epoch});
+  }}));
+  plugins.push(createPlaybackHealthPlugin({
+    frameSource:effectiveSource.type==='webtransport'?'external':'video',
+    onHandle:handle=>{health=handle;(window as any).fyraHealth=handle;},
+    onSnapshot:snapshot=>{if((window as any).fyraHealth===health)renderHealth(snapshot);},
+    onEvent:event=>{if((window as any).fyraHealth===health && ['stall','stall-end','recovery','observation-gap'].includes(event.type))appendLog(`playback observation: ${JSON.stringify(event)}`);}
+  }));
   syncPanoramaModeUi();
   player = new FyraPlayer({
     video,
@@ -755,56 +877,61 @@ async function createPlayer(source: SimpleSource) {
     techOrder: ["gb28181", "webrtc", "ws-raw", "hls", "dash", "fmp4", "file"],
     webCodecs: wcEnable ? { ...(effectiveSource.webCodecs || {}), enable: true } : undefined,
     mpegtsLoader: loadMpegts,
+    loadTimeoutMs: 15000,
     plugins
   });
   (window as any).fyraPlayer = player;
+  stopBtn.disabled = false;
+  const created = player;
   bindPlayerEvents(player);
   return player
     .init()
     .catch((e) => {
-      setStatus("error", `load failed: ${e?.message || e}`);
+      if (player === created) setStatus("error", `load failed: ${e?.message || e}`);
       throw e;
     });
 }
 
-async function runExclusive(label: string, fn: () => Promise<void> | void) {
-  if (busy) {
-    appendLog(`busy: ${busy}, skip ${label}`);
-    return;
-  }
+async function runExclusive(label: string, fn: () => Promise<void> | void, epoch: number) {
+  if (epoch !== commandEpoch) return;
   setBusy(label);
   try {
     await fn();
   } catch (e: any) {
-    setStatus("error", `${label} failed: ${e?.message || e}`);
+    if (epoch === commandEpoch) setStatus("error", `${label} failed: ${e?.message || e}`);
   } finally {
-    setBusy(false);
+    if (epoch === commandEpoch && uiStatus !== 'loading' && uiStatus !== 'buffering') setBusy(false);
   }
 }
 
 function safeRun(label: string, fn: () => Promise<void> | void) {
+  const epoch = commandEpoch;
   operationQueue = operationQueue
     .catch(() => {
       /* keep the demo command queue alive after a failed operation */
     })
-    .then(() => runExclusive(label, fn));
+    .then(() => runExclusive(label, fn, epoch));
   return operationQueue;
 }
 
 async function stopPlayback(reason?: string) {
-  if (player) {
-    try {
-      await player.destroy();
-    } catch {
-      /* ignore */
-    }
-    player = null;
-    (window as any).fyraPlayer = null;
-    (window as any).fyraPanoramaHandle = null;
-    panoramaHandle = null;
-  }
+  ++commandEpoch;
+  panoramaProbe?.abort();
+  const previous = player;
+  player = null;
+  (window as any).fyraPlayer = null;
+  (window as any).fyraPanoramaHandle = null;
+  (window as any).fyraHealth = null;
+  healthStatus.textContent='播放观测：未加载';
+  panoramaHandle = null;
+  // destroy() aborts synchronously. Never enqueue cancellation behind a hanging load.
+  const teardown = previous?.destroy().catch(() => {}) ?? Promise.resolve();
+  operationQueue = Promise.all([operationQueue.catch(() => {}), teardown]).then(() => {});
   setPanoramaMode(false, { updateCurrentSource: false });
   setStatus("idle", reason ? `stopped: ${reason}` : "stopped");
+  playbackPath.textContent='播放路径：未加载';
+  setBusy(false);
+  await teardown;
 }
 
 populateSelect();
@@ -831,6 +958,7 @@ loadBtn.onclick = () => {
       label: `Custom ${type}`,
       type,
       url,
+      allowH265: type === 'webtransport' && !!document.querySelector<HTMLInputElement>('#wt-hevc')?.checked,
       panorama: !!panoramaToggle?.checked,
       presentation: {
         mode: panoramaToggle?.checked ? "panorama" : "normal",
@@ -872,11 +1000,15 @@ loadBtn.onclick = () => {
   });
 };
 
-playBtn.onclick = () => safeRun("play", () => player?.play());
+playBtn.onclick = () => safeRun("play", async () => {
+  if (!player && currentSrc) await createPlayer(currentSrc);
+  await player?.play();
+});
+stopBtn.onclick = () => { void stopPlayback("manual stop"); };
 pauseBtn.onclick = () => {
   const isWebrtc = currentSrc?.type === "webrtc" || currentSrc?.type === "webrtc-oven";
   if (busy || uiStatus === "loading" || uiStatus === "buffering" || isWebrtc) {
-    void safeRun("stop", () => stopPlayback("manual stop"));
+    void stopPlayback("manual stop");
     return;
   }
   safeRun("pause", () => player?.pause());
@@ -931,6 +1063,7 @@ fileInput.onchange = () => {
     select.value = CUSTOM_VALUE;
     urlInput.value = `[本地文件] ${file.name}`;
     typeSelect.value = "file";
+    syncGatewayPanel();
     setPanoramaMode(!!src.panorama, { updateCurrentSource: false });
     appendLog(`已选择本地文件: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB), 格式: ${ext.toUpperCase()}`);
     return createPlayer(src);
@@ -1010,8 +1143,12 @@ syncPanoramaModeUi();
 
 FyraPlayer.probeWebCodecs()
   .then((support) => {
-    wcSupport.textContent = `WebCodecs: h264=${support.h264 ? "✔" : "✖"} | h265=${support.h265 ? "✔" : "✖"} | av1=${support.av1 ? "✔" : "✖"} | vp9=${support.vp9 ? "✔" : "✖"}`;
+    wcSupport.textContent = `WebCodecs 配置探测：H.264 ${support.h264 ? "✔" : "✖"} · H.265 ${support.h265 ? "✔" : "✖"} · AV1 ${support.av1 ? "✔" : "✖"} · VP9 ${support.vp9 ? "✔" : "✖"}`;
   })
   .catch(() => {
     wcSupport.textContent = "WebCodecs: 未检测到或浏览器不支持";
   });
+const managed=FyraPlayer.probeBrowserManagedCodecs();
+document.getElementById('mse-support')!.textContent=`MSE 配置探测：H.264 ${managed.mediaSource.h264?'✔':'✖'} · H.265 ${managed.mediaSource.h265?'✔':'✖'}`;
+document.getElementById('native-support')!.textContent=`原生 MP4 探测：H.264 ${managed.nativeVideo.mp4H264?'✔':'✖'} · H.265 ${managed.nativeVideo.mp4H265?'✔':'✖'}`;
+syncGatewayPanel();

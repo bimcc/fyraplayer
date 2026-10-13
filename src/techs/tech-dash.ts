@@ -1,5 +1,6 @@
 import { AbstractTech } from './abstractTech.js';
-import { BufferPolicy, MetricsOptions, ReconnectPolicy, Source, WebCodecsConfig, DASHSource, QualityState } from '../types.js';
+import { Source, WebCodecsConfig, DASHSource, QualityState, TechLoadOptions } from '../types.js';
+import { throwIfAborted, waitWithSignal } from '../core/abort.js';
 import { probeWebCodecs } from '../utils/webcodecs.js';
 
 type DashEventHandler = (event: unknown) => void;
@@ -121,14 +122,9 @@ export class DASHTech extends AbstractTech {
 
   async load(
     source: Source,
-    opts: {
-      buffer?: BufferPolicy;
-      reconnect?: ReconnectPolicy;
-      metrics?: MetricsOptions;
-      video: HTMLVideoElement;
-      webCodecs?: WebCodecsConfig;
-    }
+    opts: TechLoadOptions
   ): Promise<void> {
+    throwIfAborted(opts.signal);
     this.source = source;
     this.buffer = opts.buffer;
     this.reconnect = opts.reconnect;
@@ -139,13 +135,14 @@ export class DASHTech extends AbstractTech {
       throw new Error('DASHTech only supports dash source type');
     }
     
-    await this.setupDash(source, opts.video, opts.webCodecs);
+    await this.setupDash(source, opts.video, opts.webCodecs, opts.signal);
   }
 
-  private async setupDash(source: DASHSource, video: HTMLVideoElement, wc?: WebCodecsConfig): Promise<void> {
+  private async setupDash(source: DASHSource, video: HTMLVideoElement, wc?: WebCodecsConfig, signal?: AbortSignal): Promise<void> {
     this.cleanup();
     
-    this.dashjs = await this.loadDashJs();
+    this.dashjs = await waitWithSignal(this.loadDashJs(), signal);
+    throwIfAborted(signal);
     this.dash = this.dashjs.MediaPlayer().create();
     
     // Configure ABR settings

@@ -12,124 +12,90 @@ export interface PanoramaLiteControls {
   destroy(): void;
 }
 
+/** Pointer gestures (including pinch), with Touch fallback for older browsers. */
 export function createPanoramaLiteControls(options: PanoramaLiteControlsOptions): PanoramaLiteControls {
   let enabled = options.enabled !== false;
-  let dragging = false;
-  let lastX = 0;
-  let lastY = 0;
-  const activeTouches = new Map<number, { x: number; y: number }>();
-  let lastPinchDistance: number | null = null;
-
-  const onPointerDown = (event: PointerEvent) => {
-    if (!enabled) return;
-    dragging = true;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    try {
-      options.element.setPointerCapture?.(event.pointerId);
-    } catch {
-      /* synthetic pointer events may not have an active pointer capture target */
-    }
+  const points = new Map<number, { x: number; y: number }>();
+  const usesPointer = typeof globalThis.PointerEvent !== 'undefined';
+  const disposers: Array<() => void> = [];
+  const originalTouchAction = options.element.style.touchAction;
+  options.element.style.touchAction = enabled ? 'none' : originalTouchAction;
+  const distance = () => {
+    const [a, b] = [...points.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : null;
   };
-  const onPointerMove = (event: PointerEvent) => {
-    if (!enabled || !dragging) return;
-    const dx = event.clientX - lastX;
-    const dy = event.clientY - lastY;
-    lastX = event.clientX;
-    lastY = event.clientY;
+  const move = (id: number, x: number, y: number) => {
+    const previous = points.get(id);
+    if (!enabled || !previous) return;
+    const before = distance();
+    const dx = x - previous.x, dy = y - previous.y;
+    points.set(id, { x, y });
+    const after = distance();
     const view = options.getView();
-    options.setView({
-      yaw: view.yaw - dx * 0.18,
-      pitch: view.pitch + dy * 0.18,
-    });
-  };
-  const onPointerUp = (event: PointerEvent) => {
-    dragging = false;
-    try {
-      options.element.releasePointerCapture?.(event.pointerId);
-    } catch {
-      /* ignore */
+    if (before !== null && after !== null) {
+      options.setView({ fov: view.fov - (after - before) * 0.08 });
+    } else {
+      options.setView({ yaw: view.yaw - dx * 0.18, pitch: view.pitch + dy * 0.18 });
     }
   };
-  const onWheel = (event: WheelEvent) => {
-    if (!enabled) return;
-    event.preventDefault();
-    const view = options.getView();
-    options.setView({ fov: view.fov + event.deltaY * 0.04 });
-  };
-  const onTouchStart = (event: TouchEvent) => {
-    if (!enabled) return;
-    for (const touch of Array.from(event.changedTouches)) {
-      activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+  const reset = () => {
+    for (const id of points.keys()) {
+      try { options.element.releasePointerCapture?.(id); } catch { /* no active capture */ }
     }
-    lastPinchDistance = getPinchDistance();
+    points.clear();
   };
-  const onTouchMove = (event: TouchEvent) => {
-    if (!enabled) return;
-    event.preventDefault();
-    if (activeTouches.size >= 2) {
-      for (const touch of Array.from(event.changedTouches)) {
-        activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+  const listen = (type: string, handler: EventListener, opts?: AddEventListenerOptions) => {
+    options.element.addEventListener(type, handler, opts);
+    disposers.push(() => options.element.removeEventListener(type, handler, opts));
+  };
+  if (usesPointer) {
+    listen('pointerdown', ((event: PointerEvent) => {
+      if (!enabled || (event.pointerType === 'mouse' && event.button !== 0)) return;
+      points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      try { options.element.setPointerCapture?.(event.pointerId); } catch { /* synthetic pointer */ }
+    }) as EventListener);
+    listen('pointermove', ((event: PointerEvent) => move(event.pointerId, event.clientX, event.clientY)) as EventListener);
+    const end = ((event: PointerEvent) => {
+      points.delete(event.pointerId);
+      try { options.element.releasePointerCapture?.(event.pointerId); } catch { /* no active capture */ }
+    }) as EventListener;
+    for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) listen(event, end);
+  } else {
+    listen('touchstart', ((event: TouchEvent) => {
+      if (!enabled) return;
+      for (const touch of Array.from(event.changedTouches)) points.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }) as EventListener, { passive: true });
+    listen('touchmove', ((event: TouchEvent) => {
+      if (!enabled) return;
+      event.preventDefault();
+      // Update both fingers together to avoid applying a pinch as two separate pans.
+      const before = distance();
+      if (points.size >= 2) {
+        for (const touch of Array.from(event.changedTouches)) points.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+        const after = distance();
+        if (before !== null && after !== null) options.setView({ fov: options.getView().fov - (after - before) * 0.08 });
+      } else {
+        for (const touch of Array.from(event.changedTouches)) move(touch.identifier, touch.clientX, touch.clientY);
       }
-      const nextDistance = getPinchDistance();
-      if (nextDistance !== null && lastPinchDistance !== null) {
-        const view = options.getView();
-        options.setView({ fov: view.fov - (nextDistance - lastPinchDistance) * 0.08 });
-      }
-      lastPinchDistance = nextDistance;
-      return;
-    }
-    const touch = event.changedTouches[0];
-    const previous = activeTouches.get(touch.identifier);
-    if (!previous) return;
-    const dx = touch.clientX - previous.x;
-    const dy = touch.clientY - previous.y;
-    activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-    const view = options.getView();
-    options.setView({
-      yaw: view.yaw - dx * 0.18,
-      pitch: view.pitch + dy * 0.18,
-    });
-  };
-  const onTouchEnd = (event: TouchEvent) => {
-    for (const touch of Array.from(event.changedTouches)) {
-      activeTouches.delete(touch.identifier);
-    }
-    lastPinchDistance = getPinchDistance();
-  };
-
-  function getPinchDistance(): number | null {
-    const touches = Array.from(activeTouches.values());
-    if (touches.length < 2) return null;
-    const [a, b] = touches;
-    return Math.hypot(a.x - b.x, a.y - b.y);
+    }) as EventListener, { passive: false });
+    const end = ((event: TouchEvent) => {
+      for (const touch of Array.from(event.changedTouches)) points.delete(touch.identifier);
+    }) as EventListener;
+    listen('touchend', end); listen('touchcancel', end);
   }
-
-  options.element.addEventListener('pointerdown', onPointerDown);
-  options.element.addEventListener('pointermove', onPointerMove);
-  options.element.addEventListener('pointerup', onPointerUp);
-  options.element.addEventListener('pointercancel', onPointerUp);
-  options.element.addEventListener('wheel', onWheel, { passive: false });
-  options.element.addEventListener('touchstart', onTouchStart, { passive: false });
-  options.element.addEventListener('touchmove', onTouchMove, { passive: false });
-  options.element.addEventListener('touchend', onTouchEnd);
-  options.element.addEventListener('touchcancel', onTouchEnd);
-
+  listen('wheel', ((event: WheelEvent) => {
+    if (!enabled) return;
+    event.preventDefault();
+    options.setView({ fov: options.getView().fov + event.deltaY * 0.04 });
+  }) as EventListener, { passive: false });
   return {
-    setEnabled(value: boolean) {
-      enabled = value;
+    setEnabled(value) {
+      enabled = value; reset();
+      options.element.style.touchAction = value ? 'none' : originalTouchAction;
     },
     destroy() {
-      options.element.removeEventListener('pointerdown', onPointerDown);
-      options.element.removeEventListener('pointermove', onPointerMove);
-      options.element.removeEventListener('pointerup', onPointerUp);
-      options.element.removeEventListener('pointercancel', onPointerUp);
-      options.element.removeEventListener('wheel', onWheel);
-      options.element.removeEventListener('touchstart', onTouchStart);
-      options.element.removeEventListener('touchmove', onTouchMove);
-      options.element.removeEventListener('touchend', onTouchEnd);
-      options.element.removeEventListener('touchcancel', onTouchEnd);
-      activeTouches.clear();
+      reset(); disposers.forEach(dispose => dispose());
+      options.element.style.touchAction = originalTouchAction;
     },
   };
 }

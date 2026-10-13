@@ -11,3 +11,8 @@ export * from './plugins/panoramalite.js';
 export * from './plugins/dash.js';
 export * from './plugins/engines/index.js';
 export * from './plugins/metadata/index.js';
+export * from './plugins/snapshot.js';
+export * from './plugins/frame-clock.js';
+export * from './plugins/playback-health.js';
+export * from './plugins/gb-gateway.js';
+export * from './plugins/webtransport.js';
