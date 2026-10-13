@@ -4,7 +4,8 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
-const read=name=>readFileSync(resolve(root,name),'utf8');
+// Git checkouts may use CRLF on Windows; metadata does not depend on line endings.
+const read=name=>readFileSync(resolve(root,name),'utf8').replace(/\r\n/g,'\n');
 const pkg=JSON.parse(read('package.json'));
 assert.match(pkg.version,/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/,'Expected an explicit release version');
 assert(read('CHANGELOG.md').includes('## '+pkg.version),'Changelog must describe this version');
