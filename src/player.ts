@@ -832,6 +832,9 @@ export class FyraPlayer implements PlayerAPI {
     if (!snapshot) return false;
     if (snapshot.sourceIndex !== this.currentSourceIndex) return false;
     if (snapshot.techName !== this.techManager.getCurrentTechName()) return false;
+    // WebRTC already waits for ICE recovery before requesting a reload. A disconnected
+    // MediaStream can keep its clock running and readyState high without new frames.
+    if (snapshot.techName === 'webrtc') return false;
     if (this.videoEl.readyState < MEDIA_HAVE_CURRENT_DATA) return false;
     if (this.videoEl.error) return false;
     const advanced = this.currentTime > snapshot.currentTime + 0.25;

@@ -1,6 +1,6 @@
 # 监控插件：截图、帧时钟、播放观测与资源生命周期
 
-本页描述 1.1.0-rc.1 候选的可选插件 API；是否已发布以 npm registry 为准。监控/无人机能力的优先级与验收条件见 [推进路线](monitoring-roadmap.md)。
+本页描述 1.1.0的可选插件 API；是否已发布以 npm registry 为准。监控/无人机能力的优先级与验收条件见 [推进路线](monitoring-roadmap.md)。
 
 ## 不依赖 UI 的截图
 

@@ -1,6 +1,6 @@
 # WebTransport + WebCodecs 视频插件
 
-2026-10-14，1.1.0-rc.1 候选中的实验能力。公开入口 `/plugins/webtransport`，显式注册独立 Tech；Player 默认不安装它。浏览器必须提供安全上下文、WebTransport、VideoDecoder、EncodedVideoChunk 和 Canvas2D/captureStream。服务端必须提供 HTTP/3 WebTransport 会话及下述帧契约，普通 HTTPS 视频 URL 不能直接使用。
+2026-10-14，1.1.0中的实验能力。公开入口 `/plugins/webtransport`，显式注册独立 Tech；Player 默认不安装它。浏览器必须提供安全上下文、WebTransport、VideoDecoder、EncodedVideoChunk 和 Canvas2D/captureStream。服务端必须提供 HTTP/3 WebTransport 会话及下述帧契约，普通 HTTPS 视频 URL 不能直接使用。
 
 ```ts
 import { FyraPlayer } from '@bimccfyra/fyraplayer';

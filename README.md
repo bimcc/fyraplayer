@@ -1,15 +1,15 @@
 # FyraPlayer
 
-通用低延迟 Web 播放 SDK，支持 WebRTC、HLS/LL-HLS、DASH、HTTP/WS fMP4、FLV/TS 和本地文件。当前拟发布版本 **1.1.0-rc.1**，发布范围和升级步骤见 [候选说明](RELEASE_NOTES.md)，变化见 [CHANGELOG](CHANGELOG.md)。
+通用低延迟 Web 播放 SDK，支持 WebRTC、HLS/LL-HLS、DASH、HTTP/WS fMP4、FLV/TS 和本地文件。当前拟发布版本 **1.1.0**，发布范围和升级步骤见 [发布说明](RELEASE_NOTES.md)，变化见 [CHANGELOG](CHANGELOG.md)。
 
 从 [文档导航](docs/README.md) 开始；架构以 [当前架构](docs/architecture.md) 为准，支持承诺以 [支持范围](docs/supported-scenarios.md) 和带日期的 [验证矩阵](docs/playback-verification-matrix.md) 为准。1.0.0 商业基线记录已经归档，不等于全浏览器、全协议支持。
 
 ## 安装与基础播放
 
-本候选先从生成的本地 tarball 安装；npm latest 仍以 registry 为准，普通无版本安装不包含尚未发布的候选能力。
+本版先从生成的本地 tarball 安装；npm latest 仍以 registry 为准，普通无版本安装不包含尚未发布的候选能力。
 
 ```sh
-npm install /absolute/path/bimccfyra-fyraplayer-1.1.0-rc.1.tgz
+npm install /absolute/path/bimccfyra-fyraplayer-1.1.0.tgz
 ```
 
 ```ts
@@ -29,9 +29,9 @@ await player.destroy();
 
 并发 init 合并加载，快速切源以最新请求为准；destroy 可重复调用，但销毁后需创建新实例。Tech 和中间件需要完成自身加载 Promise，详情见 [生命周期](docs/architecture.md)。
 
-本候选新增 getPlaybackSession/sessionchange，区分请求源与实际选中源，并用 epoch 使旧同步状态失效；新增 loadTimeoutMs 和加载 signal。取消覆盖尚未包含全部协议，详见 [播放会话与取消](docs/playback-sessions.md)。
+本版新增 getPlaybackSession/sessionchange，区分请求源与实际选中源，并用 epoch 使旧同步状态失效；新增 loadTimeoutMs 和加载 signal。取消覆盖尚未包含全部协议，详见 [播放会话与取消](docs/playback-sessions.md)。
 
-本候选提供 `await player.stop()`，立即取消加载与重连并等待播放资源释放，保留插件和源，可继续 play/init/switchSource。加载或重连中调用 pause 也会停止；正常播放仍为暂停。示例页提供独立停止按钮，错误地址停止后可以直接重新加载。
+本版提供 `await player.stop()`，立即取消加载与重连并等待播放资源释放，保留插件和源，可继续 play/init/switchSource。加载或重连中调用 pause 也会停止；正常播放仍为暂停。示例页提供独立停止按钮，错误地址停止后可以直接重新加载。
 
 ## 功能与插件
 
@@ -46,7 +46,7 @@ await player.destroy();
 | 本地 MP4/WebM | 浏览器原生文件播放；TS/MTS/FLV 走可选 mpegts.js |
 | DASH | 显式安装 createDashTechPlugin |
 | UI、诊断、鉴权、存储、录制 API、性能指标 | 可选插件，入口见 [插件职责](docs/pluginization-map.md) |
-| 无 UI 截图、显示帧时钟 | 新增可选 [snapshot / frame-clock](docs/monitoring-plugins.md)，纳入本候选 |
+| 无 UI 截图、显示帧时钟 | 新增可选 [snapshot / frame-clock](docs/monitoring-plugins.md)，纳入本版 |
 | 轻量全景 | 可选 [PanoramaLite](docs/panoramalite.md)，图片/视频等距柱状投影 |
 | KLV/MISB | 播放器提取 raw metadata；独立 fyraklv 解析与同步 |
 | PSV/Cesium 等外部渲染器 | 应用或渲染器包持有 [桥接](docs/render-bridges.md) |
@@ -58,7 +58,7 @@ import { createUiComponentsPlugin } from '@bimccfyra/fyraplayer/plugins/ui-compo
 createUiComponentsPlugin({ target: '.player-shell' });
 ```
 
-本候选包含移动端适配：默认行内播放、44px 触摸按钮、窄屏“更多”菜单、全景单指拖动/双指缩放，以及容器全屏不可用时的页面内全屏。接入和手机预览见 [移动端播放](docs/mobile-playback.md)。已验证 Chromium 移动模拟，真机 iOS/Android 仍待复核。
+本版包含移动端适配：默认行内播放、44px 触摸按钮、窄屏“更多”菜单、全景单指拖动/双指缩放，以及容器全屏不可用时的页面内全屏。接入和手机预览见 [移动端播放](docs/mobile-playback.md)。已验证 Chromium 移动模拟，真机 iOS/Android 仍待复核。
 
 H.265 可走 native、MSE 或 WebCodecs，取决于浏览器、系统、容器和真实码流；配置探测不代表已实际解码或硬解。示例页分开显示三类探测与当前播放路径，详细说明见 [解码能力](docs/decoder-capabilities.md)。高级类型提供 WebTransport 实验入口，GB 网关表单只在选择兼容接入时显示。
 

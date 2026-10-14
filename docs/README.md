@@ -1,6 +1,6 @@
 # FyraPlayer 文档
 
-当前拟发布版本为 **1.1.0-rc.1**；冻结范围、迁移与延期项见 [候选说明](../RELEASE_NOTES.md)，变化见 [CHANGELOG](../CHANGELOG.md)。文档描述当前源码，历史浏览器结果保留原测试日期，不代表本轮重新验证。
+当前拟发布版本为 **1.1.0**；冻结范围、迁移与延期项见 [发布说明](../RELEASE_NOTES.md)，变化见 [CHANGELOG](../CHANGELOG.md)。文档描述当前源码，历史浏览器结果保留原测试日期，不代表本轮重新验证。
 
 | 目的 | 文档 |
 | --- | --- |
@@ -16,7 +16,7 @@
 | 外部渲染器 | [通用桥接](render-bridges.md)、[PSV](integration-psv.md)、[Cesium](integration-cesium.md) |
 | 流媒体服务器与网关 | [适配器](adapters.md)、[GB28181](gb28181.md) |
 | HTTP/3 + WebCodecs + 同流 KLV | [WebTransport 视频/原始元数据与时间契约](webtransport.md)、[应用接入](klv-integration.md) |
-| 开发、打包、发布 | [SDK 集成与发布](sdk-release-integration.md)、[本地 fixture](development/fixtures.md) |
+| 开发、打包、发布 | [SDK 集成与发布](sdk-release-integration.md)、[1.1.0 正式版准备](release-1.1-readiness.md)、[本地 fixture](development/fixtures.md) |
 | 质量和后续工作 | [本轮复盘与清理](review-2026-10.md)、[验证矩阵](playback-verification-matrix.md)、[性能基线](performance-baseline.md)、[待办](commercial-readiness-roadmap.md) |
 | 查询旧设计和执行记录 | [历史归档](archive/2026-10-cleanup/README.md) |
 

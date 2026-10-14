@@ -30,6 +30,34 @@ SRS 的历史部署步骤整理在 [srs.md](srs.md)，其中服务地址和机�
 
 examples/testvideo 仍被浏览器验证使用，保留；ref 是被忽略的参考仓库，不参与构建；.fyra-long-run 包含运行报告、日志和历史证据，不应整目录删除。
 
+## 正式版直播与断流验收
+
+新增 [本机直播 fixture](../../checks/fixtures/live-media.mjs) 和 [浏览器验收](../../checks/browser-live-acceptance.mjs)。需要本机 MediaMTX、ffmpeg、Edge 及样本 `examples/testvideo/Rec 0017.mp4`；不使用其他项目正在运行的服务。每次生成独立证据目录，记录实际服务/编码器版本，所有服务只绑定 loopback。参考验收环境使用 MediaMTX 1.18.2；无需修改机器原有 mediamtx.yml。
+
+```powershell
+$env:FYRA_MEDIAMTX='G:/MTX/mediamtx.exe'
+$env:FYRA_FFMPEG='D:/ffmpeg/bin/ffmpeg.exe'
+node checks/fixtures/live-media.mjs
+```
+
+fixture 将本地样本转为 H.264 1280×800/25fps 后循环发布，HLS 带 AAC，WebRTC 带 Opus。默认 RTSP/HLS/WebRTC/ICE/API 端口为 28564/28898/28899/28199/29997，启动前检查端口占用；测试专用进程和日志只属于当前目录。不要将循环样本视作独立摄像机输入。
+
+在另一个终端使用刚生成的 ready.json：
+
+```powershell
+$env:FYRA_SMOKE_PACKAGE='G:/path/to/bimccfyra-fyraplayer-1.1.0.tgz'
+node checks/browser-live-acceptance.mjs soak .fyra-long-run/live-media-随机后缀/ready.json
+node checks/browser-live-acceptance.mjs recovery
+```
+
+`soak` 默认运行 30 分钟，两路 HLS + 两路 WebRTC。每 10 秒保存逐路真实呈现回调、媒体状态、显式视频帧计数、健康/诊断、JS heap 和浏览器主线程 TaskDuration；要求持续出帧、无未注入 fatal/error、四个 video 不增长、WebRTC 音频 RTP 增长、丢帧率≤20%、JS heap 增长<128MiB。可用 FYRA_LIVE_DURATION_SEC 缩短调试时间，但短测不能标为 30 分钟通过。这些是本地功能阈值，不是业务 SLA、进程总 CPU/GPU 或扬声器听感证明。
+
+`recovery` 自建另一套服务（28664/28998/28999/28299/29897），测试 HLS HTTP 503 中断、WebRTC 供流停止/恢复、MediaMTX 进程重启、挂起 URL 的 stop，以及八轮交替切源/停止。只操作自己启动的进程，结束后清理。报告区分故障注入与正常播放，不要求注入阶段零错误。FYRA_SMOKE_CDP_PORT 可更换浏览器调试端口；默认 soak=9603、recovery=9604。未指定 FYRA_SMOKE_PACKAGE 时验证构建目录的 IIFE，其报告摘要是 IIFE 摘要而非 tarball 摘要。
+
+单路 30 分钟使用现有 long-run:browser，然后显式运行 long-run:assert 的零错误/零 fatal 门禁；`--fail-on-error` 单独使用仅判断最终可用状态，不能代表全程零错误。真机移动端、TURN、实际业务应用升级、跨设备时钟与生产码流仍须独立验收。
+
+`node checks/browser-upgrade-smoke.mjs <1.0.2.tgz> <1.1.0.tgz>` 在独立页面中运行同一套公共 API 接入代码，对照真实文件播放、暂停/恢复、切源、UI 与自定义插件清理、销毁后新建实例。两份 SDK 都从实际 tarball 提取，报告记录版本和 SHA-256。它补充入口名称检查，但不等于用户实际业务系统已完成升级。
+
 ## 多路示例的可选 HLS 验证
 
 在新的证据目录中生成短 H.264 VOD，再设置 FYRA_MULTIVIEW_HLS_DIR；已有目录请使用新的名字，保留历史证据。下面从仓库根目录运行，要求 ffmpeg 在 PATH。

@@ -602,6 +602,32 @@ describe('FyraPlayer P0/P1 regressions', () => {
     await player.destroy();
   });
 
+  test('WebRTC reconnect is not cancelled by a running media clock after frames stop', async () => {
+    jest.useFakeTimers();
+    const video = createVideoStub();
+    video.currentTime = 10;
+    Object.defineProperty(video, 'readyState', { value: 4, writable: true });
+    Object.defineProperty(video, 'paused', { value: false, writable: true });
+    const player = new FyraPlayer({
+      video, sources: [{ type: 'webrtc', url: 'https://origin/live/whep' }],
+      techOrder: ['webrtc'],
+      reconnect: { enabled: true, maxRetries: 2, baseDelayMs: 500, maxDelayMs: 500, jitter: 0 }
+    });
+    try {
+      await player.init();
+      const tech = mockTechInstances.webrtc[0];
+      tech.emit('network', { type: 'ice-reconnect-required', fatal: true, state: 'disconnected' });
+      // A MediaStream clock can advance even after its remote producer disconnects.
+      video.currentTime = 10.6;
+      await jest.advanceTimersByTimeAsync(500);
+      expect(tech.loadCalls).toBe(2);
+      expect(tech.destroyCalls).toBe(1);
+    } finally {
+      await player.destroy();
+      jest.useRealTimers();
+    }
+  });
+
   test('switchSource cancels a pending reconnect from the previous source', async () => {
     jest.useFakeTimers();
     const player = new FyraPlayer({

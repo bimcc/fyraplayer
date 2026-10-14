@@ -1,6 +1,6 @@
 # SDK 集成与发布检查
 
-npm SDK 产物位于 dist；Vite 示例站点产物位于 site-dist。它们都是生成物，不提交到 Git。发布文件白名单包含 dist、README、CHANGELOG、LICENSE、RELEASE_NOTES 和 THIRD_PARTY_NOTICES；dist 带随构建复制的第三方授权文件。当前拟发布版本为 1.1.0-rc.1，范围见 [候选说明](../RELEASE_NOTES.md)。
+npm SDK 产物位于 dist；Vite 示例站点产物位于 site-dist。它们都是生成物，不提交到 Git。发布文件白名单包含 dist、README、CHANGELOG、LICENSE、RELEASE_NOTES 和 THIRD_PARTY_NOTICES；dist 带随构建复制的第三方授权文件。当前拟发布版本为 1.1.0，范围见 [发布说明](../RELEASE_NOTES.md)。
 
 ## 公开入口
 
@@ -45,7 +45,7 @@ pnpm preview:examples
 pnpm check:release
 ```
 
-门禁顺序：版本/候选说明/发布标签 → 完整 Jest coverage → noUnused 类型检查 → 源码公共类型契约 → 示例源清单 → 当前文档链接 → 轻量插件依赖 → 发布构建 → 导出文件 → tarball 消费 → 示例构建。CI 配置在 Linux 和 Windows 使用 Node 24，保留 coverage artifact；需以实际远程运行结果判定通过。
+门禁顺序：版本/发布说明/发布标签 → 完整 Jest coverage → noUnused 类型检查 → 源码公共类型契约 → 示例源清单 → 当前文档链接 → 轻量插件依赖 → 发布构建 → 导出文件 → tarball 消费 → 示例构建。CI 配置在 Linux 和 Windows 使用 Node 24，保留 coverage artifact；需以实际远程运行结果判定通过。
 
 `pnpm check:plugins` 对 snapshot、frame-clock、playback-health、gb-gateway、metadata 子路径构建并检查依赖图，不允许引入 UI/Player/Tech 或第三方运行时依赖；输出未压缩字节数用于观察，不代表整个播放器体积。`node checks/browser-package-smoke.mjs` 另行验证 Edge 的 IIFE 视频播放、UI 清理、逐帧时钟、无 UI JPEG 解码尺寸及销毁后 handle 失效，需要本机媒体 fixture。
 
@@ -60,14 +60,14 @@ pnpm install --frozen-lockfile
 pnpm release:candidate
 ```
 
-命令每次在 `.fyra-releases/1.1.0-rc.1-随机后缀/` 创建新目录，依次运行完整门禁、打包、最终 tarball 消费检查。失败目录保留日志且 manifest.status=failed。通过时为 package-verified；这只是包验证，浏览器/设备验收状态独立记录。命令不提交、不打 tag、不推送、不发布。
+命令每次在 `.fyra-releases/1.1.0-随机后缀/` 创建新目录，依次运行完整门禁、打包、最终 tarball 消费检查。失败目录保留日志且 manifest.status=failed。通过时为 package-verified；这只是包验证，浏览器/设备验收状态独立记录。命令不提交、不打 tag、不推送、不发布。
 
 产物包含 npm tgz、SHA256SUMS、npm pack 文件清单/完整性、源码 inventory（包含当前未提交及非忽略新文件）、git HEAD/dirty、锁文件摘要、工具版本和检查日志。构建期间源码变化会使候选失败；后续修改源码应重新生成候选，不覆盖旧文件。工作区指纹标识具体文件内容，不应把 dirty 候选误认为已在远程提交的版本。
 
 ## 对最终包做浏览器验收
 
 ```powershell
-$env:FYRA_SMOKE_PACKAGE='G:/path/to/bimccfyra-fyraplayer-1.1.0-rc.1.tgz'
+$env:FYRA_SMOKE_PACKAGE='G:/path/to/bimccfyra-fyraplayer-1.1.0.tgz'
 $env:FYRA_SMOKE_OUTPUT='G:/path/to/candidate/browser-package.json'
 node checks/browser-package-smoke.mjs
 ```
@@ -76,9 +76,9 @@ node checks/browser-package-smoke.mjs
 
 ## 维护者发布步骤
 
-1. 审阅代码、候选说明和 manifest，核对最终 tarball 的 SHA256SUMS；CI 状态与目标设备验收由维护者确认。当前本地准备不表示 npm 已发布。
-2. RC 发布使用验收过的 tgz 和 `--tag next --access public`；package.json 也默认 next。不要把预发布包推到 latest。
-3. 正式 1.1.0 需更新 package.json、CHANGELOG、RELEASE_NOTES、文档版本及 publishConfig.tag=latest，然后重新运行候选生成和验收。
+1. 审阅代码、发布说明和 manifest，核对最终 tarball 的 SHA256SUMS；CI 状态与目标设备验收由维护者确认。当前本地准备不表示 npm 已发布。
+2. RC 发布使用验收过的 tgz 和 `--tag next --access public`，正式版本使用 `--tag latest --access public`。不要把预发布包推到 latest。
+3. 当前已准备正式 1.1.0，package.json、CHANGELOG、RELEASE_NOTES、文档版本及 publishConfig.tag=latest 保持一致；发布前重新运行候选生成和验收。
 4. 工作区发布设置 prepublishOnly 门禁；直接发布 tgz 不会重跑源码脚本，因此必须使用已验收、未变化的产物。提交/tag/registry 发布由维护者在最终验收后执行。
 
 新 sessionchange/getPlaybackSession 与 loadTimeoutMs/TechLoadOptions.signal 已纳入公开消费检查；尚未响应信号的 Tech 仍可能延迟最终清理，详见 [会话与取消](playback-sessions.md)。

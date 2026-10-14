@@ -1,6 +1,6 @@
 # 移动端播放与触摸控制
 
-1.1.0-rc.1 候选包含普通皮肤和 PanoramaLite 的移动布局与触摸操作。自动验证采用 Edge/Chromium 的移动视口和触摸事件模拟；iOS Safari、Android Chrome、应用 WebView 的真机播放、音频输出和后台恢复仍需逐设备验证。
+1.1.0包含普通皮肤和 PanoramaLite 的移动布局与触摸操作。自动验证采用 Edge/Chromium 的移动视口和触摸事件模拟；iOS Safari、Android Chrome、应用 WebView 的真机播放、音频输出和后台恢复仍需逐设备验证。
 
 ## 页面接入
 

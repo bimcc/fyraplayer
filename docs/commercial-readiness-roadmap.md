@@ -1,6 +1,6 @@
 # 当前质量待办
 
-更新：2026-10-14，1.1.0-rc.1 收口。这是当前待办；逐次执行日志已放入 [历史归档](archive/2026-10-cleanup/docs/commercial-readiness-roadmap.md)。1.0.0 发布快照不能替代当前验证。
+更新：2026-10-14，1.1.0 正式版准备。这是当前待办；逐次执行日志已放入 [历史归档](archive/2026-10-cleanup/docs/commercial-readiness-roadmap.md)。1.0.0 发布快照不能替代当前验证。
 
 产品主线已明确为监控/无人机：多路、低延迟、KLV 同步。分层设计、插件建议与每项验收条件见 [专项推进路线](monitoring-roadmap.md)。
 

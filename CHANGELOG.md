@@ -2,9 +2,9 @@
 
 All notable changes to FyraPlayer will be recorded here.
 
-## 1.1.0-rc.1 - 2026-10-14
+## 1.1.0 - Prepared 2026-10-14
 
-Release candidate for controlled integration; this entry does not assert registry publication.
+Prepared release; this entry does not assert registry publication.
 See [release scope, migration and limits](RELEASE_NOTES.md).
 
 ### Playback and lifecycle
@@ -13,6 +13,8 @@ See [release scope, migration and limits](RELEASE_NOTES.md).
   and expose actual playback sessions and timeline epochs.
 - Add reusable stop(), cooperative loading cancellation and per-attempt deadlines across
   middleware, loaders, WebRTC signaling, direct fMP4 and legacy GB startup.
+- Honor WebRTC fatal reconnect requests even when a disconnected MediaStream clock
+  continues advancing; do not mistake that clock for recovered video frames.
 - Add optional plugin lifecycle scopes, setup rollback, reverse cleanup and onPluginError;
   invalidate asynchronous metadata, frame clocks and snapshots when sessions change.
 - Correct MTS/FLV routing, MSE startup failures, private PES reassembly and original TS PTS;

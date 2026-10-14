@@ -53,7 +53,7 @@ const state = handle?.getState();
 console.log(state);
 ```
 
-frame-clock 已纳入 1.1.0-rc.1 候选，见 [插件 API](monitoring-plugins.md)。上例展示严格的同步查询：没有显示帧或时间锚点就返回 null。实验 WS 管线若只输出 canvas，没有驱动 video，不能由该插件获得可靠帧时钟；应将 getMediaTime 换成渲染器确认的显示时间，或直接使用 getStateAtPts。默认 MSE 虽可能有 video 帧回调，却没有同等 metadata 数据出口，两项能力必须分别验证。
+frame-clock 已纳入 1.1.0，见 [插件 API](monitoring-plugins.md)。上例展示严格的同步查询：没有显示帧或时间锚点就返回 null。实验 WS 管线若只输出 canvas，没有驱动 video，不能由该插件获得可靠帧时钟；应将 getMediaTime 换成渲染器确认的显示时间，或直接使用 getStateAtPts。默认 MSE 虽可能有 video 帧回调，却没有同等 metadata 数据出口，两项能力必须分别验证。
 
 ## 时间轴契约
 

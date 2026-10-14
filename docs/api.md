@@ -2,7 +2,7 @@
 
 通用低延迟 Web 播放器，支持 WebRTC、HLS/DASH、fMP4、WebSocket+WebCodecs、本地文件等多种播放技术。
 
-当前拟发布版本 1.1.0-rc.1；改动见 [CHANGELOG](../CHANGELOG.md)，交付边界见 [候选说明](../RELEASE_NOTES.md)。架构与边界见 [architecture.md](architecture.md)。
+当前拟发布版本 1.1.0；改动见 [CHANGELOG](../CHANGELOG.md)，交付边界见 [发布说明](../RELEASE_NOTES.md)。架构与边界见 [architecture.md](architecture.md)。
 
 ## 核心类
 
@@ -56,7 +56,7 @@ class FyraPlayer implements PlayerAPI {
 
 init 并发调用共享加载。switchSource 使旧加载代次失效并按顺序清理 Tech；只执行队列中仍有效的源。destroy 幂等，调用后实例不可复用。加载中间件和 Tech 接收可选 signal；已适配路径响应取消，未适配的 Tech.load 仍需自行结束。getCurrentSource 保留请求源语义，新 getPlaybackSession/sessionchange 提供所选源与 epoch，见 [会话与取消契约](playback-sessions.md)。
 
-本候选新增 `stop()`：调用时立即取消加载和重连、使状态变为 idle 并清空会话，返回 Promise 等待 Tech 资源释放。插件和已配置源保留，可继续调用 play/init/switchSource；释放过程中的重复 stop 合并。pause 在正常播放时仍暂停，加载、错误或等待重连时转为 stop。普通 UI 提供停止按钮和恢复状态中的“停止加载”；示例页的停止直接销毁当前实例并恢复输入，下一次播放创建新实例。未适配 signal 的自定义 Tech 仍可能延迟最终清理。
+本版新增 `stop()`：调用时立即取消加载和重连、使状态变为 idle 并清空会话，返回 Promise 等待 Tech 资源释放。插件和已配置源保留，可继续调用 play/init/switchSource；释放过程中的重复 stop 合并。pause 在正常播放时仍暂停，加载、错误或等待重连时转为 stop。普通 UI 提供停止按钮和恢复状态中的“停止加载”；示例页的停止直接销毁当前实例并恢复输入，下一次播放创建新实例。未适配 signal 的自定义 Tech 仍可能延迟最终清理。
 
 ## 类型定义
 
