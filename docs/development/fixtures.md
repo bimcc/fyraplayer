@@ -50,7 +50,7 @@ node checks/browser-live-acceptance.mjs soak .fyra-long-run/live-media-随机后
 node checks/browser-live-acceptance.mjs recovery
 ```
 
-`soak` 默认运行 30 分钟，两路 HLS + 两路 WebRTC。每 10 秒保存逐路真实呈现回调、媒体状态、显式视频帧计数、健康/诊断、JS heap 和浏览器主线程 TaskDuration；要求持续出帧、无未注入 fatal/error、四个 video 不增长、WebRTC 音频 RTP 增长、丢帧率≤20%、JS heap 增长<128MiB。可用 FYRA_LIVE_DURATION_SEC 缩短调试时间，但短测不能标为 30 分钟通过。这些是本地功能阈值，不是业务 SLA、进程总 CPU/GPU 或扬声器听感证明。
+`soak` 默认运行 30 分钟，两路 HLS + 两路 WebRTC，视口 1280×800 显示四路。每 10 秒保存逐路真实呈现回调、媒体状态、显式视频帧计数、健康/诊断、JS heap 和浏览器主线程 TaskDuration；要求持续出帧、无未注入 fatal/error、四个 video 不增长、WebRTC 音频 RTP 增长、丢帧率≤20%、JS heap 增长<128MiB。持续出帧以回调增长和最近帧间隔<5秒判定，瞬时 readyState 下降单独记录；最终不以采样时恰好 readyState<2 直接判为无帧。可用 FYRA_LIVE_DURATION_SEC 缩短调试时间，但短测不能标为 30 分钟通过。这些是本地功能阈值，不是业务 SLA、进程总 CPU/GPU 或扬声器听感证明。
 
 `recovery` 自建另一套服务（28664/28998/28999/28299/29897），测试 HLS HTTP 503 中断、WebRTC 供流停止/恢复、MediaMTX 进程重启、挂起 URL 的 stop，以及八轮交替切源/停止。只操作自己启动的进程，结束后清理。报告区分故障注入与正常播放，不要求注入阶段零错误。FYRA_SMOKE_CDP_PORT 可更换浏览器调试端口；默认 soak=9603、recovery=9604。未指定 FYRA_SMOKE_PACKAGE 时验证构建目录的 IIFE，其报告摘要是 IIFE 摘要而非 tarball 摘要。
 

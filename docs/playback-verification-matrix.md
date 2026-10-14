@@ -1,5 +1,18 @@
 # Playback Verification Matrix
 
+## 2026-10-14：1.1.0 直播与恢复验收
+
+| 范围 | 实际结果 | 限制 |
+| --- | --- | --- |
+| HLS 30分钟 | 182采样、零 fatal/error、约0.188%视频丢帧、JS heap +0.876MiB，严格长跑门禁通过 | MediaMTX 1.18.2 / Edge155 / 本机1280×800循环样本；非 fatal playlist 超时仍有 |
+| WebRTC 30分钟 | 182采样、零 fatal/error、约1.623%视频丢帧、JS heap +0.383MiB，89595个Opus RTP包，门禁通过 | host/prflx UDP；无 TURN 或扬声器听感证据 |
+| 供流/服务重启 | 核心修正 MediaStream 时间误判后，HLS恢复约1.34秒、WebRTC供流重启约5.03秒、服务重启约9.83秒；挂起停止34ms、八轮切源/停止通过 | 单次本地样本；恢复含等待至少21个呈现回调，不是首帧p95 |
+| 两路HLS＋两路WebRTC 30分钟 | 零 fatal/error、JS heap +0.821MiB，四路均持续出帧及清理通过；每路1–2次卡顿 | 首轮视频质量计数需用补充记录；联合负载额外复测有失败，不承诺容量稳定性 |
+| 联合负载补充失败 | 瞬时缓冲及一条WebRTC长无帧/信令超时，服务端同时报告reader too slow | 失败报告保留，隔离复测结果另记候选验收；不以单次通过覆盖失败 |
+| 实际包升级对照 | 同一公共API接入在1.0.2/1.1.0完成播放、暂停、切源、插件清理和销毁后重建 | 不是实际业务系统升级验收 |
+
+详细来源与数据解释见 [本轮复盘](review-2026-10.md) 和 [正式版准备](release-1.1-readiness.md)。
+
 > Created: 2026-05-17  
 > Purpose: make real playback verification repeatable across protocols, browsers, and stream backends.
 

@@ -93,7 +93,9 @@ try{
     const end=Date.now()+duration,started=Date.now();let previous=await frameCounts();
     while(Date.now()<end){
       await sleep(Math.min(10000,end-Date.now()));const s=await sample();s.elapsedSec=(Date.now()-started)/1000;report.samples.push(s);save();
-      assert(s.tiles.every((t,i)=>t.frames>previous[i]&&!t.paused&&t.ready>=2&&t.lastFrameAgeMs<5000),'A live tile stopped presenting frames');
+      // readyState may briefly fall during an HLS buffer refill even while frames advance.
+      // Record that state; continuity is measured by presented frames and the last-frame gap.
+      assert(s.tiles.every((t,i)=>t.frames>previous[i]&&!t.paused&&t.lastFrameAgeMs<5000),'A live tile stopped presenting frames');
       assert.equal(s.domVideos,4,'Video elements leaked');previous=s.tiles.map(t=>t.frames);
     }
     const last=report.samples.at(-1),first=report.initial;
